@@ -16,7 +16,7 @@
   ./scripts/build-agent.ps1 -Server https://magnemite.example.com -Token <enrollment token>
 #>
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = "0.1.1",
     [string]$Server = "",
     [string]$Token = "",
     [switch]$SkipModule

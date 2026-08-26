@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"magnemite/agent/internal/certfix"
 	"magnemite/agent/internal/config"
 	"magnemite/agent/internal/installer"
 	"magnemite/agent/internal/proto"
@@ -100,6 +102,10 @@ func (a *Agent) session(ctx context.Context) error {
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 20 * time.Second,
 		Proxy:            http.ProxyFromEnvironment,
+		// The dialer builds its own TLS config, so it misses the roots
+		// certfix put on http.DefaultTransport. A nil pool means "platform
+		// roots", which is what we want everywhere but Android.
+		TLSClientConfig: &tls.Config{RootCAs: certfix.Pool()},
 	}
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+a.Cfg.DeviceToken)

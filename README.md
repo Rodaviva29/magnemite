@@ -251,7 +251,7 @@ so flashing is the only step per box:
 # Caddy setup:  https://magnemite.example.com
 # Coolify:      https://agents.magnemite.example.com
 make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
-# → dist/magnemite-agent-0.1.0.zip
+# → dist/magnemite-agent-0.1.1.zip
 ```
 
 On Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`
@@ -259,8 +259,8 @@ On Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`
 Install it through the Magisk app, or in bulk over the LAN:
 
 ```sh
-./scripts/enroll.sh dist/magnemite-agent-0.1.0.zip 192.168.1.10 192.168.1.11
-./scripts/enroll.sh dist/magnemite-agent-0.1.0.zip -f hosts.txt
+./scripts/enroll.sh dist/magnemite-agent-0.1.1.zip 192.168.1.10 192.168.1.11
+./scripts/enroll.sh dist/magnemite-agent-0.1.1.zip -f hosts.txt
 ```
 
 That is the only time a box needs hands-on work. After it reboots, every later

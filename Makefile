@@ -1,7 +1,7 @@
 # Linux/macOS counterpart of scripts/build-agent.ps1. Everything Go-related
 # runs inside the golang image, so no toolchain is needed on the host.
 
-VERSION     ?= 0.1.0
+VERSION     ?= 0.1.1
 GO_IMAGE    ?= golang:1.23-alpine
 ROOT        := $(shell pwd)
 LDFLAGS     := -s -w -X main.version=$(VERSION)

@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"magnemite/agent/internal/agent"
+	"magnemite/agent/internal/certfix"
 	"magnemite/agent/internal/config"
 	"magnemite/agent/internal/netfix"
 	"magnemite/agent/internal/sys"
@@ -96,6 +97,11 @@ func main() {
 		if servers := netfix.Install(); len(servers) > 0 {
 			// Android has no /etc/resolv.conf; without this every lookup fails.
 			log.Printf("using dns servers from system properties: %v", servers)
+		}
+		if n := certfix.Install(); n > 0 {
+			// Android has no /etc/ssl/certs either; without this every TLS
+			// handshake fails with "certificate signed by unknown authority".
+			log.Printf("loaded %d ca certificates from the android trust store", n)
 		}
 		if cfg.WorkDir == "" {
 			cfg.WorkDir = config.DefaultWorkDir

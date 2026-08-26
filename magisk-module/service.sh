@@ -16,6 +16,12 @@ until [ "$(getprop sys.boot_completed)" = "1" ]; do
 done
 sleep 15
 
+# Android keeps its CA certificates where Go does not look, so a TLS
+# handshake fails with "certificate signed by unknown authority". The agent
+# handles this itself; exporting it here also fixes an older binary still on
+# the box after a partial update. Go splits this list on ":".
+export SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts
+
 # Respawn loop: the agent exits on a self-update (it re-execs) and on fatal
 # config errors. A box in someone's living room has to come back on its own.
 while true; do
