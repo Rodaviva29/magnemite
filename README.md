@@ -155,21 +155,28 @@ It uses two domains rather than path routing:
 | `SERVICE_FQDN_WEB_3000`  | the dashboard you log into                                           |
 | `SERVICE_FQDN_EDGE_8080` | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
 
-Deploy it as **New Resource → Docker Compose**, set both domains, set
-`ADMIN_EMAIL` and `ADMIN_PASSWORD`, then run the seed once:
+Deploy it as **New Resource → Docker Compose**, set both domains, then run the
+seed once:
 
 ```sh
 docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
 ```
 
-Coolify generates the Postgres password, the internal secret and `AUTH_SECRET`
-itself and shows them in the Environment tab.
+Coolify generates the Postgres password, the internal secret, `AUTH_SECRET` and
+the **admin password** itself, and shows them in the Environment tab. Read
+`SERVICE_PASSWORD_ADMIN` from there to sign in the first time; change it from
+Settings → Accounts afterwards if you prefer one you can remember.
 
-> [!IMPORTANT]
-> `ADMIN_PASSWORD` has no default here on purpose — the deploy fails rather
-> than seeding a well-known password onto a public domain. There is no `.env`
-> file inside the container, so the seed reads these from the hub service's
-> environment.
+The login defaults to `admin@magnemite.com`. Nothing is ever sent to it — the
+address is an identifier, not a mailbox — so it only needs changing if you want
+your own. Set `ADMIN_EMAIL` before the first seed if you do; changing it later
+seeds a *second* admin rather than renaming the first, since the seed upserts on
+the address.
+
+> [!NOTE]
+> There is no `.env` file inside the container, so the seed reads both values
+> from the hub service's environment — which is why they are set on `hub` and
+> not only on `web`.
 
 **Upgrading from an earlier version of this file.** The boxes' domain moved
 from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE_8080`. Keep the same domain
