@@ -107,8 +107,33 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
     send,
   });
 
+  // The listener goes on before any of the setup below, because the agent
+  // sends `hello` the instant the socket opens — well inside the few
+  // milliseconds the queries here take. A listener attached afterwards misses
+  // that frame entirely, and with it the agent version, the device details and
+  // the package inventory it carries.
+  //
+  // Frames must also be applied in the order they arrived: handling them
+  // concurrently lets a job_progress that started earlier land after the
+  // job_result and drag a finished job back to DOWNLOADING. So everything
+  // queues, behind the setup itself.
+  let releaseSetup: () => void = () => {};
+  let queue: Promise<void> = new Promise<void>((resolve) => {
+    releaseSetup = resolve;
+  });
+
+  ws.on("message", (raw) => {
+    const text = raw.toString();
+    queue = queue.then(() =>
+      handleMessage(ws, deviceId, ip, text).catch((err) =>
+        log.error({ err, deviceId }, "message handler failed"),
+      ),
+    );
+  });
+
   const device = await prisma.device.findUnique({ where: { id: deviceId } });
   if (!device) {
+    releaseSetup();
     ws.close(4004, "device deleted");
     return;
   }
@@ -129,22 +154,12 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
   bus.publish({ kind: "device", deviceId });
   log.info({ deviceId, serial, ip }, "device connected");
 
+  // Setup is done: anything that arrived meanwhile now runs, in order.
+  releaseSetup();
+
   ws.on("pong", () => {
     const s = state.get(ws);
     if (s) s.alive = true;
-  });
-
-  // Frames must be applied in the order they arrived. Handling them
-  // concurrently lets a job_progress that started earlier land after the
-  // job_result and drag a finished job back to DOWNLOADING.
-  let queue: Promise<void> = Promise.resolve();
-  ws.on("message", (raw) => {
-    const text = raw.toString();
-    queue = queue.then(() =>
-      handleMessage(ws, deviceId, ip, text).catch((err) =>
-        log.error({ err, deviceId }, "message handler failed"),
-      ),
-    );
   });
 
   ws.on("close", (code, reason) => {

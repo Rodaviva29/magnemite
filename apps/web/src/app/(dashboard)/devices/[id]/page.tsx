@@ -5,16 +5,11 @@ import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { JobStateBadge, OnlineDot } from "@/components/status";
+import { Progress } from "@/components/ui/progress";
+import { OnlineDot } from "@/components/status";
 import { DeviceControls } from "@/components/device-controls";
+import { DeviceHistory, type DeviceJobRow } from "@/components/device-history";
+import { DevicePackages, type DevicePackageRow } from "@/components/device-packages";
 import { formatBytes, formatDuration, formatRelative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +18,7 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
   const user = await requireUser();
   const { id } = await params;
 
-  const [device, groups] = await Promise.all([
+  const [device, groups, targets] = await Promise.all([
     prisma.device.findUnique({
       where: { id },
       include: {
@@ -31,17 +26,54 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
         packages: { orderBy: { packageName: "asc" } },
         jobs: {
           orderBy: { queuedAt: "desc" },
-          take: 20,
+          // The table pages client-side, so this is a cap on how far back the
+          // history goes rather than on what fits on screen.
+          take: 200,
           include: { rollout: { select: { id: true, appVersion: { select: { version: true } } } } },
         },
       },
     }),
     prisma.deviceGroup.findMany({ orderBy: { name: "asc" } }),
+    // Which of the installed packages Magnemite can actually update.
+    prisma.appTarget.findMany({ where: { enabled: true }, select: { packageName: true } }),
   ]);
 
   if (!device) notFound();
 
   const online = device.status === "ONLINE";
+
+  const memTotal = device.memTotalBytes === null ? null : Number(device.memTotalBytes);
+  const memAvailable = device.memAvailableBytes === null ? null : Number(device.memAvailableBytes);
+  const memUsed = memTotal === null || memAvailable === null ? null : memTotal - memAvailable;
+
+  const diskTotal = device.totalBytes === null ? null : Number(device.totalBytes);
+  const diskFree = device.freeBytes === null ? null : Number(device.freeBytes);
+  const diskUsed = diskTotal === null || diskFree === null ? null : diskTotal - diskFree;
+
+  const jobRows: DeviceJobRow[] = device.jobs.map((job) => ({
+    id: job.id,
+    rolloutId: job.rolloutId,
+    state: job.state,
+    fromVersion: job.fromVersion,
+    toVersion: job.toVersion,
+    installMode: job.installMode,
+    dataWiped: job.dataWiped,
+    queuedAt: job.queuedAt.toISOString(),
+    startedAt: job.startedAt?.toISOString() ?? null,
+    finishedAt: job.finishedAt?.toISOString() ?? null,
+    durationMs:
+      job.startedAt && job.finishedAt ? job.finishedAt.getTime() - job.startedAt.getTime() : null,
+  }));
+
+  const tracked = new Set(targets.map((t) => t.packageName));
+  const packageRows: DevicePackageRow[] = device.packages.map((pkg) => ({
+    id: pkg.id,
+    packageName: pkg.packageName,
+    versionName: pkg.versionName,
+    versionCode: pkg.versionCode === null ? null : pkg.versionCode.toString(),
+    installed: pkg.installed,
+    tracked: tracked.has(pkg.packageName),
+  }));
 
   return (
     <div className="flex flex-col gap-5">
@@ -76,7 +108,7 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
         ) : null}
       </header>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Hardware</CardTitle>
@@ -99,12 +131,6 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           <CardContent className="flex flex-col gap-1 text-sm">
             <Field label="Group" value={device.group?.name ?? "—"} />
             <Field
-              label="Storage free"
-              value={`${formatBytes(device.freeBytes === null ? null : Number(device.freeBytes))}${
-                device.totalBytes ? ` of ${formatBytes(Number(device.totalBytes))}` : ""
-              }`}
-            />
-            <Field
               label="Uptime"
               value={
                 device.uptimeSeconds
@@ -113,6 +139,56 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
               }
             />
             <Field label="Last seen" value={online ? "now" : formatRelative(device.lastSeenAt)} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Load</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            <Meter
+              label="CPU"
+              // Load average against core count is the honest reading a box
+              // can give for free: 1.0 per core means "fully busy", above that
+              // means work is queueing.
+              detail={
+                device.loadAvg1 === null
+                  ? "not reported"
+                  : `${device.loadAvg1.toFixed(2)}${
+                      device.cpuCount ? ` of ${device.cpuCount} cores` : ""
+                    }`
+              }
+              percent={
+                device.loadAvg1 === null || !device.cpuCount
+                  ? null
+                  : (device.loadAvg1 / device.cpuCount) * 100
+              }
+            />
+            <Meter
+              label="Memory"
+              detail={
+                memUsed === null || memTotal === null
+                  ? "not reported"
+                  : `${formatBytes(memUsed)} of ${formatBytes(memTotal)}`
+              }
+              percent={memUsed === null || !memTotal ? null : (memUsed / memTotal) * 100}
+            />
+            <Meter
+              label="Storage"
+              detail={
+                diskUsed === null || diskTotal === null
+                  ? formatBytes(device.freeBytes === null ? null : Number(device.freeBytes))
+                  : `${formatBytes(diskUsed)} of ${formatBytes(diskTotal)}`
+              }
+              percent={diskUsed === null || !diskTotal ? null : (diskUsed / diskTotal) * 100}
+            />
+            {device.loadAvg5 !== null || device.loadAvg15 !== null ? (
+              <p className="text-xs text-muted-foreground">
+                5 min {device.loadAvg5?.toFixed(2) ?? "—"} · 15 min{" "}
+                {device.loadAvg15?.toFixed(2) ?? "—"}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -139,94 +215,51 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Installed packages</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {device.packages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nothing reported yet — the agent sends this on its next heartbeat.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1 text-sm">
-              {device.packages.map((pkg) => (
-                <li key={pkg.id} className="flex items-center justify-between gap-4">
-                  <span className="font-mono text-xs">{pkg.packageName}</span>
-                  <span>
-                    {pkg.installed ? (
-                      <Badge variant="secondary">
-                        {pkg.versionName ?? "unknown"}
-                        {pkg.versionCode ? ` (${pkg.versionCode})` : ""}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">not installed</Badge>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <DevicePackages
+        packages={packageRows}
+        syncedAt={device.packagesSyncedAt?.toISOString() ?? null}
+      />
 
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Update history</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {device.jobs.length === 0 ? (
-            <p className="p-5 pt-0 text-sm text-muted-foreground">
-              No updates run on this box yet.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead>When</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {device.jobs.map((job) => (
-                  <TableRow key={job.id}>
-                    <TableCell className="font-mono text-xs">
-                      {job.fromVersion ?? "none"} → {job.toVersion}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <JobStateBadge state={job.state} />
-                        {job.dataWiped ? <Badge variant="warning">data wiped</Badge> : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {job.installMode?.toLowerCase().replace("_", " ") ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatRelative(job.queuedAt)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatDuration(job.startedAt, job.finishedAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Link
-                        href={`/rollouts/${job.rolloutId}`}
-                        className="text-xs text-muted-foreground hover:underline"
-                      >
-                        rollout
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <DeviceHistory jobs={jobRows} />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * A labelled bar. `percent` is null when the box has not reported the reading —
+ * an agent old enough to predate these metrics — and that reads as "not
+ * reported" rather than as a bar sitting at zero.
+ */
+function Meter({
+  label,
+  detail,
+  percent,
+}: {
+  label: string;
+  detail: string;
+  percent: number | null;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="text-right text-xs">{detail}</span>
+      </div>
+      {percent === null ? (
+        <Progress value={0} tone="muted" />
+      ) : (
+        <Progress
+          value={percent}
+          tone={percent >= 90 ? "danger" : percent >= 70 ? "primary" : "success"}
+        />
+      )}
     </div>
   );
 }

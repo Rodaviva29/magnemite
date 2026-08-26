@@ -44,6 +44,9 @@ export type CreateRolloutInput = {
   appVersionId: string;
   deviceIds?: string[];
   forceClean?: boolean;
+  /** Override the device group's hooks for this rollout only. */
+  preInstallHook?: string | null;
+  postInstallHook?: string | null;
   canaryCount?: number;
   soakMinutes?: number;
   maxConcurrency?: number | null;
@@ -51,6 +54,26 @@ export type CreateRolloutInput = {
   skipUpToDate?: boolean;
   createdById?: string | null;
   note?: string | null;
+};
+
+/** Mirrors the shape built by the hub's services/health.ts. */
+export type IntegrationState = "OK" | "DEGRADED" | "DOWN" | "OFF";
+
+export type IntegrationCheck = {
+  key: string;
+  label: string;
+  summary: string;
+  state: IntegrationState;
+  latencyMs: number | null;
+  facts: { label: string; value: string }[];
+  detail: string | null;
+  link: string | null;
+};
+
+export type HubHealth = {
+  checkedAt: string;
+  overall: IntegrationState;
+  checks: IntegrationCheck[];
 };
 
 export const hub = {
@@ -74,6 +97,8 @@ export const hub = {
   pruneVersions: (keepLatest?: number) =>
     call<{ removed: number }>("/internal/versions/prune", { keepLatest }),
   pollSources: () => call("/internal/sources/poll"),
+  /** Integration probes for the Status page. `force` skips the hub's cache. */
+  health: (force = false) => call<HubHealth>("/internal/health", { force }),
 };
 
 export const HUB_BASE_URL = HUB_URL;

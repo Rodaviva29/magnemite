@@ -39,7 +39,10 @@ export async function startRollout(_prev: ActionState, formData: FormData): Prom
       appVersionId,
       deviceIds: deviceIds.length > 0 ? deviceIds : undefined,
       forceClean: formData.get("forceClean") === "on",
-      skipUpToDate: formData.get("skipUpToDate") !== "off",
+      // An unticked checkbox sends nothing at all, so absence is what "off"
+      // looks like here — the old `!== "off"` test read a missing field as
+      // on, which made unticking this do nothing.
+      skipUpToDate: formData.get("skipUpToDate") === "on",
       canaryCount: number("canaryCount", 0),
       soakMinutes: number("soakMinutes", 0),
       maxAttempts: number("maxAttempts", 3),

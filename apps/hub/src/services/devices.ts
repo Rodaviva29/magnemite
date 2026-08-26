@@ -45,6 +45,11 @@ export async function markOffline(deviceId: string) {
 }
 
 export async function applyMetrics(deviceId: string, metrics: DeviceMetrics) {
+  // Only the agent knows whether it sent the whole inventory or just the
+  // tracked apps, and it says so. Counting packages would be wrong the moment
+  // a second app is tracked.
+  const isInventory = metrics.packagesComplete === true;
+
   await prisma.device.update({
     where: { id: deviceId },
     data: {
@@ -53,13 +58,47 @@ export async function applyMetrics(deviceId: string, metrics: DeviceMetrics) {
       freeBytes: toBigInt(metrics.freeBytes),
       totalBytes: toBigInt(metrics.totalBytes),
       uptimeSeconds: metrics.uptimeSeconds ?? null,
+      // Undefined rather than null when absent: an older agent that does not
+      // send these must not wipe what a newer one already reported.
+      loadAvg1: metrics.loadAvg1 ?? undefined,
+      loadAvg5: metrics.loadAvg5 ?? undefined,
+      loadAvg15: metrics.loadAvg15 ?? undefined,
+      cpuCount: metrics.cpuCount ?? undefined,
+      memTotalBytes: toBigInt(metrics.memTotalBytes) ?? undefined,
+      memAvailableBytes: toBigInt(metrics.memAvailableBytes) ?? undefined,
+      ...(isInventory ? { packagesSyncedAt: new Date() } : {}),
     },
   });
 
+  // Every box in the fleet beats every 20 seconds, so this runs constantly:
+  // read the rows once and write only the ones that actually changed, rather
+  // than firing an upsert per package per beat.
+  const existing = await prisma.devicePackage.findMany({
+    where: { deviceId },
+    select: { packageName: true, versionName: true, versionCode: true, installed: true },
+  });
+  const current = new Map(existing.map((row) => [row.packageName, row]));
+
   for (const pkg of metrics.packages) {
+    const versionCode = toBigInt(pkg.versionCode);
+    const was = current.get(pkg.packageName);
+
+    // The inventory has no versionName — only `pm list` ran, not dumpsys — so
+    // a missing one keeps whatever the tracked read last established.
+    const versionName = pkg.versionName ?? was?.versionName ?? null;
+
+    if (
+      was &&
+      was.versionName === versionName &&
+      was.versionCode === (versionCode ?? was.versionCode) &&
+      was.installed === pkg.installed
+    ) {
+      continue;
+    }
+
     const data = {
-      versionName: pkg.versionName ?? null,
-      versionCode: toBigInt(pkg.versionCode),
+      versionName,
+      versionCode: versionCode ?? was?.versionCode ?? null,
       installed: pkg.installed,
     };
     await prisma.devicePackage.upsert({
@@ -67,6 +106,22 @@ export async function applyMetrics(deviceId: string, metrics: DeviceMetrics) {
       update: data,
       create: { deviceId, packageName: pkg.packageName, ...data },
     });
+  }
+
+  // Something the box no longer has is worth showing as gone, but only an
+  // inventory is evidence of that.
+  if (isInventory) {
+    const reported = new Set(metrics.packages.map((p) => p.packageName));
+    const vanished = existing
+      .filter((row) => row.installed && !reported.has(row.packageName))
+      .map((row) => row.packageName);
+
+    if (vanished.length > 0) {
+      await prisma.devicePackage.updateMany({
+        where: { deviceId, packageName: { in: vanished } },
+        data: { installed: false },
+      });
+    }
   }
 
   bus.publish({ kind: "device", deviceId });

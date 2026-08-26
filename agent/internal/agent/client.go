@@ -29,6 +29,9 @@ const (
 	minBackoff       = 2 * time.Second
 	maxBackoff       = 60 * time.Second
 	defaultHeartbeat = 20 * time.Second
+	// One full package inventory every 15 heartbeats — five minutes at the
+	// default rate.
+	inventoryEveryBeats = 15
 )
 
 type Agent struct {
@@ -202,8 +205,11 @@ func (a *Agent) sendHello() error {
 		ProtocolVersion: proto.Version,
 		AgentVersion:    a.Version,
 		Device:          a.Sys.DeviceInfo(ctx),
-		Metrics:         sys.Metrics(ctx, a.Sys, a.trackedPackages()),
-		CurrentJobID:    a.currentJob(),
+		// A reconnect is the cheapest moment to take a full inventory: the
+		// hub has just lost sight of this box and one `pm list` is nothing
+		// next to the reconnect itself.
+		Metrics:      sys.Metrics(ctx, a.Sys, a.trackedPackages(), true),
+		CurrentJobID: a.currentJob(),
 	})
 }
 
@@ -211,13 +217,22 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(defaultHeartbeat)
 	defer ticker.Stop()
 
+	beats := 0
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			beats++
+			// Apps are installed and removed by hand on these boxes, so the
+			// inventory does go stale — but not by the second. Every
+			// inventoryEveryBeats heartbeats keeps it current at a cost of one
+			// `pm list packages` every few minutes.
+			withInventory := beats%inventoryEveryBeats == 0
+
 			mctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			metrics := sys.Metrics(mctx, a.Sys, a.trackedPackages())
+			metrics := sys.Metrics(mctx, a.Sys, a.trackedPackages(), withInventory)
 			cancel()
 
 			if err := a.send(proto.Heartbeat{

@@ -1,7 +1,13 @@
 # Linux/macOS counterpart of scripts/build-agent.ps1. Everything Go-related
 # runs inside the golang image, so no toolchain is needed on the host.
 
-VERSION     ?= 0.1.1
+# Single source of truth for the agent version: the VERSION file at the repo
+# root. scripts/build-agent.ps1 reads the same file, and both stamp it into
+# module.prop at package time, so nothing is edited in two places.
+VERSION     ?= $(shell cat VERSION)
+# Magisk compares versionCode, not the string. Derived so it always moves with
+# the version: 0.1.2 -> 102.
+VERSIONCODE := $(shell awk -F. '{ print $$1 * 10000 + $$2 * 100 + $$3 }' VERSION)
 GO_IMAGE    ?= golang:1.23-alpine
 ROOT        := $(shell pwd)
 LDFLAGS     := -s -w -X main.version=$(VERSION)
@@ -36,7 +42,7 @@ module: agent ## Package the Magisk module zip into dist/
 	@cp magisk-module/* dist/module/
 	@cp agent/bin/magnemite-agent-linux-arm64 dist/module/bin/
 	@cp agent/bin/magnemite-agent-linux-arm dist/module/bin/
-	@sed -i.bak 's/^version=.*/version=v$(VERSION)/' dist/module/module.prop && rm -f dist/module/module.prop.bak
+	@sed -i.bak -e 's/^version=.*/version=v$(VERSION)/' -e 's/^versionCode=.*/versionCode=$(VERSIONCODE)/' dist/module/module.prop && rm -f dist/module/module.prop.bak
 	@if [ -n "$(SERVER)" ] && [ -n "$(TOKEN)" ]; then \
 		printf '{\n  "serverUrl": "%s",\n  "enrollmentToken": "%s"\n}\n' "$(SERVER)" "$(TOKEN)" > dist/module/config.json; \
 		echo "  baked enrollment config for $(SERVER)"; \

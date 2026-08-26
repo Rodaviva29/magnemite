@@ -10,6 +10,9 @@ export type CreateRolloutInput = {
   deviceIds?: string[];
   mode?: RolloutMode;
   forceClean?: boolean;
+  /** Overrides the device group's hooks for this rollout only. */
+  preInstallHook?: string | null;
+  postInstallHook?: string | null;
   canaryCount?: number;
   soakMinutes?: number;
   maxConcurrency?: number | null;
@@ -68,6 +71,8 @@ export async function createRollout(input: CreateRolloutInput) {
       // free to dispatch immediately.
       status: canaryIds.size > 0 ? "CANARY" : "RUNNING",
       forceClean: input.forceClean ?? false,
+      preInstallHook: input.preInstallHook?.trim() || null,
+      postInstallHook: input.postInstallHook?.trim() || null,
       canaryCount: canaryIds.size,
       soakMinutes: input.soakMinutes ?? 0,
       maxConcurrency: input.maxConcurrency ?? null,

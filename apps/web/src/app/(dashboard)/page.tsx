@@ -17,7 +17,7 @@ const ACTIVE_OR_QUEUED = [
 export default async function FleetPage() {
   const user = await requireUser();
 
-  const target = await prisma.appTarget.findFirst({ where: { enabled: true } });
+  const target = await prisma.appTarget.findFirst({ where: { enabled: true, manual: false } });
   const packageName = target?.packageName ?? "com.nianticlabs.pokemongo";
 
   const [devices, groups, versions] = await Promise.all([

@@ -55,6 +55,20 @@ type DeviceMetrics struct {
 	TotalBytes    uint64        `json:"totalBytes"`
 	UptimeSeconds int64         `json:"uptimeSeconds"`
 	Packages      []PackageInfo `json:"packages"`
+	// True when Packages is the box's whole third-party inventory rather than
+	// just the apps the hub asked about. The hub needs to know the difference:
+	// only a complete list is evidence that something was uninstalled.
+	PackagesComplete bool `json:"packagesComplete,omitempty"`
+
+	// Cheap health signals, read straight out of /proc on every heartbeat.
+	// Omitted by agents older than this field, which is why the hub treats
+	// every one of them as optional.
+	LoadAvg1          float64 `json:"loadAvg1,omitempty"`
+	LoadAvg5          float64 `json:"loadAvg5,omitempty"`
+	LoadAvg15         float64 `json:"loadAvg15,omitempty"`
+	CPUCount          int     `json:"cpuCount,omitempty"`
+	MemTotalBytes     uint64  `json:"memTotalBytes,omitempty"`
+	MemAvailableBytes uint64  `json:"memAvailableBytes,omitempty"`
 }
 
 // --- agent -> hub ----------------------------------------------------------

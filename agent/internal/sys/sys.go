@@ -10,8 +10,10 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +31,15 @@ type System interface {
 	// Disk reports free and total bytes on the filesystem holding path.
 	Disk(path string) (free uint64, total uint64, err error)
 	UptimeSeconds() int64
+	// LoadAvg is the 1/5/15-minute run queue average out of /proc/loadavg.
+	LoadAvg() (one float64, five float64, fifteen float64)
+	// Memory reports total and available bytes out of /proc/meminfo.
+	Memory() (total uint64, available uint64)
+	CPUCount() int
 	PackageInfo(ctx context.Context, pkg string) (proto.PackageInfo, error)
+	// ThirdPartyPackages lists everything installed that did not ship with the
+	// ROM. One `pm` call, no dumpsys per package — see Metrics for why.
+	ThirdPartyPackages(ctx context.Context) ([]proto.PackageInfo, error)
 	DeviceInfo(ctx context.Context) proto.DeviceInfo
 }
 
@@ -75,6 +85,105 @@ func (a *Android) UptimeSeconds() int64 {
 		return 0
 	}
 	return int64(secs)
+}
+
+// procField pulls one whitespace-separated field out of a /proc file. These
+// are the cheapest readings on the box: no fork, no dumpsys, a few hundred
+// bytes each.
+func readProc(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (a *Android) LoadAvg() (float64, float64, float64) {
+	fields := strings.Fields(readProc("/proc/loadavg"))
+	if len(fields) < 3 {
+		return 0, 0, 0
+	}
+	one, _ := strconv.ParseFloat(fields[0], 64)
+	five, _ := strconv.ParseFloat(fields[1], 64)
+	fifteen, _ := strconv.ParseFloat(fields[2], 64)
+	return one, five, fifteen
+}
+
+func (a *Android) Memory() (uint64, uint64) {
+	var total, available uint64
+	scanner := bufio.NewScanner(strings.NewReader(readProc("/proc/meminfo")))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		// Values are in kB; the third field is the unit when present.
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch fields[0] {
+		case "MemTotal:":
+			total = value * 1024
+		case "MemAvailable:":
+			available = value * 1024
+		}
+		if total > 0 && available > 0 {
+			break
+		}
+	}
+	return total, available
+}
+
+func (a *Android) CPUCount() int {
+	return runtime.NumCPU()
+}
+
+// `pm list packages -3 --show-versioncode` prints one line per third-party
+// package: "package:com.example.app versionCode:1234". That is the whole
+// inventory in a single call — the alternative, a dumpsys per package, is
+// what makes this expensive enough to be worth doing rarely.
+func (a *Android) ThirdPartyPackages(ctx context.Context) ([]proto.PackageInfo, error) {
+	out, err := a.Exec(ctx, "pm", "list", "packages", "-3", "--show-versioncode")
+	if err != nil {
+		// Older builds of pm do not know --show-versioncode; the names alone
+		// are still worth having.
+		out, err = a.Exec(ctx, "pm", "list", "packages", "-3")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var packages []proto.PackageInfo
+	scanner := bufio.NewScanner(strings.NewReader(out))
+	for scanner.Scan() {
+		info, ok := parsePackageLine(scanner.Text())
+		if ok {
+			packages = append(packages, info)
+		}
+	}
+	return packages, scanner.Err()
+}
+
+// ParsePackageLine is split out so the parsing is testable without a device.
+func parsePackageLine(line string) (proto.PackageInfo, bool) {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "package:") {
+		return proto.PackageInfo{}, false
+	}
+
+	name := strings.TrimPrefix(fields[0], "package:")
+	if name == "" {
+		return proto.PackageInfo{}, false
+	}
+
+	info := proto.PackageInfo{PackageName: name, Installed: true}
+	for _, field := range fields[1:] {
+		if code, ok := strings.CutPrefix(field, "versionCode:"); ok {
+			info.VersionCode = code
+		}
+	}
+	return info, true
 }
 
 var (
@@ -147,20 +256,55 @@ func fallbackSerial(ctx context.Context, a *Android) string {
 }
 
 // Metrics gathers everything the hub wants on a heartbeat.
-func Metrics(ctx context.Context, s System, packages []string) proto.DeviceMetrics {
+//
+// Cost matters here: this runs every 20 seconds on a box whose day job is
+// scanning. Load, memory and cpu count are three small /proc reads and are
+// always included. The package versions are not: `dumpsys package` prints a
+// wall of text per package, so only the packages the hub asked to track get
+// one, and the full third-party inventory — a single `pm list packages` — is
+// gathered on request rather than on every beat.
+func Metrics(ctx context.Context, s System, packages []string, withInventory bool) proto.DeviceMetrics {
 	free, total, _ := s.Disk("/data")
+	one, five, fifteen := s.LoadAvg()
+	memTotal, memAvailable := s.Memory()
+
 	m := proto.DeviceMetrics{
-		FreeBytes:     free,
-		TotalBytes:    total,
-		UptimeSeconds: s.UptimeSeconds(),
+		FreeBytes:         free,
+		TotalBytes:        total,
+		UptimeSeconds:     s.UptimeSeconds(),
+		LoadAvg1:          one,
+		LoadAvg5:          five,
+		LoadAvg15:         fifteen,
+		CPUCount:          s.CPUCount(),
+		MemTotalBytes:     memTotal,
+		MemAvailableBytes: memAvailable,
 	}
+
+	seen := map[string]bool{}
 	for _, pkg := range packages {
 		info, err := s.PackageInfo(ctx, pkg)
 		if err != nil {
 			continue
 		}
+		seen[info.PackageName] = true
 		m.Packages = append(m.Packages, info)
 	}
+
+	if withInventory {
+		installed, err := s.ThirdPartyPackages(ctx)
+		if err == nil {
+			m.PackagesComplete = true
+			for _, info := range installed {
+				// The tracked entry already carries a versionName, which the
+				// inventory does not: never overwrite it with the thinner one.
+				if seen[info.PackageName] {
+					continue
+				}
+				m.Packages = append(m.Packages, info)
+			}
+		}
+	}
+
 	return m
 }
 

@@ -159,8 +159,11 @@ async function dispatchQueued() {
       sizeBytes: Number(version.sizeBytes),
       version: version.version,
       forceClean: rollout.forceClean,
-      preInstallHook: job.device.group?.preInstallHook ?? null,
-      postInstallHook: job.device.group?.postInstallHook ?? null,
+      // A rollout may carry its own hooks — a manual install of some other
+      // app has to stop and start *that* app, not whatever the group stops
+      // for the watched one. Falls back to the group when it does not.
+      preInstallHook: rollout.preInstallHook ?? job.device.group?.preInstallHook ?? null,
+      postInstallHook: rollout.postInstallHook ?? job.device.group?.postInstallHook ?? null,
       extraSplits: [],
       timeoutSeconds: 3600,
     };

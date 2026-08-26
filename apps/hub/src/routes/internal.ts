@@ -5,16 +5,20 @@ import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
 import { cacheVersion, pruneArtifacts } from "../services/artifacts.js";
+import { collectHealth } from "../services/health.js";
 import { cancelJob, retryFailedJobs, retryJob } from "../services/jobs.js";
 import { cancelRollout, createRollout, resumeRollout } from "../services/rollouts.js";
 import { type RotomAction, deviceAction, rotomEnabled, syncDevices } from "../services/rotom.js";
 import { nudge } from "../services/scheduler.js";
+import { storeUpload } from "../services/uploads.js";
 import { pollAllSources } from "../services/sources/poller.js";
 
 const createRolloutBody = z.object({
   appVersionId: z.string(),
   deviceIds: z.array(z.string()).optional(),
   forceClean: z.boolean().optional(),
+  preInstallHook: z.string().nullable().optional(),
+  postInstallHook: z.string().nullable().optional(),
   canaryCount: z.number().int().min(0).optional(),
   soakMinutes: z.number().int().min(0).optional(),
   maxConcurrency: z.number().int().positive().nullable().optional(),
@@ -30,6 +34,15 @@ const createRolloutBody = z.object({
  * from the Next server instead of through here.
  */
 export async function internalRoutes(app: FastifyInstance) {
+  // An upload is a few hundred MB of binary. The app-wide parser buffers a
+  // whole body before the handler runs, which is right for the small JSON
+  // bodies everything else sends and catastrophic here, so octet-stream is
+  // handed to the route as the raw stream instead. Registered inside this
+  // plugin, so it applies to /internal/* only.
+  app.addContentTypeParser("application/octet-stream", (_request, payload, done) => {
+    done(null, payload);
+  });
+
   app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/internal/")) return;
     // Caddy never routes /internal/authz here from the outside; it is called
@@ -48,6 +61,50 @@ export async function internalRoutes(app: FastifyInstance) {
     onlineDeviceIds: onlineDeviceIds(),
     maxConcurrentJobs: env.MAX_CONCURRENT_JOBS,
   }));
+
+  /**
+   * Live probe of every integration, for the dashboard's Status page. Results
+   * are cached hub-side; `force` is the operator pressing "Check again".
+   */
+  app.post("/internal/health", async (request) => {
+    const body = (request.body ?? {}) as { force?: boolean };
+    return collectHealth(body.force === true);
+  });
+
+  /**
+   * Manual install: the dashboard streams an APK (or a multi-APK bundle)
+   * straight through to here, and gets back an ordinary cached version it can
+   * roll out. Metadata rides in the query string because the body is the file.
+   */
+  app.post<{
+    Querystring: {
+      packageName?: string;
+      version?: string;
+      filename?: string;
+      displayName?: string;
+      arch?: string;
+    };
+  }>("/internal/uploads", async (request, reply) => {
+    const { packageName, version, filename, displayName, arch } = request.query;
+    if (!packageName || !version) {
+      return reply.status(400).send({ error: "packageName and version are required" });
+    }
+
+    try {
+      const result = await storeUpload({
+        stream: request.raw,
+        filename: filename ?? "upload.apk",
+        packageName,
+        version,
+        displayName: displayName ?? null,
+        arch: arch ?? null,
+      });
+      return reply.send(result);
+    } catch (err) {
+      log.warn({ err, packageName, version }, "manual upload failed");
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
 
   app.post("/internal/nudge", async () => {
     nudge();

@@ -16,7 +16,9 @@
   ./scripts/build-agent.ps1 -Server https://magnemite.example.com -Token <enrollment token>
 #>
 param(
-    [string]$Version = "0.1.1",
+    # Defaults to the VERSION file at the repo root, which is the one place
+    # this number is written.
+    [string]$Version = "",
     [string]$Server = "",
     [string]$Token = "",
     [switch]$SkipModule
@@ -25,6 +27,10 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+if (-not $Version) {
+    $Version = (Get-Content (Join-Path $root "VERSION") -Raw).Trim()
+}
 
 $goImage = "golang:1.23-alpine"
 
@@ -36,14 +42,19 @@ build() {
   os=$1; arch=$2; extra=$3; out=$4
   echo "  $out"
   env CGO_ENABLED=0 GOOS=$os GOARCH=$arch $extra \
-    go build -trimpath -ldflags "-s -w -X main.version=VERSION" -o "bin/$out" ./cmd/magnemite-agent
+    go build -trimpath -ldflags "-s -w -X main.version=__VERSION__" -o "bin/$out" ./cmd/magnemite-agent
 }
 build linux   arm64 ""       magnemite-agent-linux-arm64
 build linux   arm   GOARM=7  magnemite-agent-linux-arm
 build linux   amd64 ""       magnemite-agent-linux-amd64
 build windows amd64 ""       magnemite-agent-windows-amd64.exe
 ls -la bin
-'@ -replace "VERSION", $Version
+'@ -creplace "__VERSION__", $Version
+
+# -creplace, and a placeholder that cannot collide: PowerShell's -replace is
+# case-insensitive, so the plain "VERSION" this used to substitute also ate the
+# "version" in `-X main.version=`. The ldflag came out as `-X main.0.1.2=0.1.2`,
+# which Go ignores — every agent built on Windows reported its version as "dev".
 
 docker run --rm -v "${root}/agent:/src" -w /src $goImage sh -c $buildScript
 if ($LASTEXITCODE -ne 0) { throw "agent build failed" }
@@ -59,9 +70,14 @@ Copy-Item "$root/magisk-module/*" $staging -Recurse
 Copy-Item "$root/agent/bin/magnemite-agent-linux-arm64" "$staging/bin/"
 Copy-Item "$root/agent/bin/magnemite-agent-linux-arm" "$staging/bin/"
 
-# Keep module.prop's version in step with the binary it ships.
+# Keep module.prop in step with the binary it ships. Magisk compares
+# versionCode rather than the string, so that is derived from the same number:
+# 0.1.2 -> 102.
+$parts = $Version.Split(".")
+$versionCode = [int]$parts[0] * 10000 + [int]$parts[1] * 100 + [int]$parts[2]
 $prop = Get-Content "$staging/module.prop" -Raw
-$prop = $prop -replace "version=.*", "version=v$Version"
+$prop = $prop -replace "(?m)^version=.*", "version=v$Version"
+$prop = $prop -replace "(?m)^versionCode=.*", "versionCode=$versionCode"
 Set-Content -Path "$staging/module.prop" -Value $prop -NoNewline
 
 if ($Server -and $Token) {

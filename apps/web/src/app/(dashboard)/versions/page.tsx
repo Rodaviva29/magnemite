@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function VersionsPage() {
   const user = await requireUser();
 
-  const target = await prisma.appTarget.findFirst({ where: { enabled: true } });
+  const target = await prisma.appTarget.findFirst({ where: { enabled: true, manual: false } });
   if (!target) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -40,6 +40,7 @@ export default async function VersionsPage() {
       version: v.version,
       buildCode: v.buildCode,
       source: v.source,
+      remoteUrl: v.remoteUrl,
       arch: v.arch,
       status: v.status,
       cacheProgress: v.cacheProgress,

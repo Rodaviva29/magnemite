@@ -85,7 +85,7 @@ export function EnrollmentSection({
         </div>
 
         {tokens.length > 0 ? (
-          <Table>
+          <Table containerClassName="max-h-[24rem]">
             <TableHeader>
               <TableRow>
                 <TableHead>Label</TableHead>

@@ -18,8 +18,10 @@ import {
   TableRow,
   TableSortHead,
 } from "@/components/ui/table";
+import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { RolloutStatusBadge } from "@/components/status";
 import { formatDuration, formatRelative } from "@/lib/format";
+import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 
 export type RolloutRow = {
@@ -46,7 +48,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
 
-  const { headProps, sortRows } = useTableSort<SortKey, RolloutRow>(
+  const { headProps, sort, sortRows } = useTableSort<SortKey, RolloutRow>(
     {
       version: (r) => r.version,
       status: (r) => r.status,
@@ -58,7 +60,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
     { key: "startedAt", direction: "desc" },
   );
 
-  const visible = useMemo(() => {
+  const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = rows.filter((row) => {
       if (status === "open" && !OPEN_STATUSES.includes(row.status)) return false;
@@ -73,6 +75,11 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
     });
     return sortRows(filtered);
   }, [rows, query, status, sortRows]);
+
+  const pagination = useTablePagination(matching, {
+    resetKey: `${query}|${status}|${sort.key}|${sort.direction}`,
+  });
+  const visible = pagination.rows;
 
   if (rows.length === 0) {
     return (
@@ -111,7 +118,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <Table>
+        <Table containerClassName="max-h-[62vh]">
           <TableHeader>
             <TableRow>
               <TableSortHead {...headProps("version")}>Version</TableSortHead>
@@ -135,9 +142,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
             ) : (
               visible.map((rollout) => {
                 const pct =
-                  rollout.total === 0
-                    ? 0
-                    : ((rollout.done + rollout.failed) / rollout.total) * 100;
+                  rollout.total === 0 ? 0 : ((rollout.done + rollout.failed) / rollout.total) * 100;
 
                 return (
                   <TableRow key={rollout.id}>
@@ -193,6 +198,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
             )}
           </TableBody>
         </Table>
+        <TablePaginationBar pagination={pagination} unit="rollouts" />
       </div>
     </div>
   );

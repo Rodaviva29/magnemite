@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Magnet, Menu, Package, PanelLeft, Rocket, Settings, X } from "lucide-react";
+import {
+  Activity,
+  LayoutGrid,
+  Menu,
+  Package,
+  PanelLeft,
+  Rocket,
+  Settings,
+  Upload,
+  X,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
@@ -22,11 +32,15 @@ const SECTIONS: { label?: string; links: NavLink[] }[] = [
     links: [
       { href: "/rollouts", label: "Rollouts", icon: Rocket },
       { href: "/versions", label: "Versions", icon: Package },
+      { href: "/manual", label: "Manual install", icon: Upload },
     ],
   },
   {
     label: "System",
-    links: [{ href: "/settings", label: "Settings", icon: Settings }],
+    links: [
+      { href: "/status", label: "Status", icon: Activity },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
   },
 ];
 
@@ -85,9 +99,7 @@ export function Nav({
         >
           <Menu />
         </Button>
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Magnet className="h-3.5 w-3.5" />
-        </span>
+        <img src="/magnemite.png" alt="" className="h-6 w-6 shrink-0 rounded-md" />
         <span className="font-display text-sm font-semibold tracking-tight">Magnemite</span>
       </header>
 
@@ -114,16 +126,16 @@ export function Nav({
             collapsed ? "gap-2.5 lg:justify-center lg:px-0" : "gap-2.5",
           )}
         >
-          <span
+          <img
+            src="/magnemite.png"
+            alt=""
             className={cn(
-              "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity",
+              "h-7 w-7 shrink-0 rounded-lg transition-opacity",
               // Collapsed, the mark steps aside on hover so the toggle can use
               // the one row the rail has.
               collapsed && "lg:group-hover/brand:opacity-0",
             )}
-          >
-            <Magnet className="h-4 w-4" />
-          </span>
+          />
 
           <span
             className={cn(
@@ -192,7 +204,11 @@ export function Nav({
                       className={cn(
                         "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium leading-5",
                         "transition-colors",
-                        collapsed && "lg:justify-center lg:px-0",
+                        // Collapsed, the row becomes a 36px square — the same
+                        // footprint as the icon button above it, so the active
+                        // highlight reads as one shape with the rail rather
+                        // than a wider slab.
+                        collapsed && "lg:mx-auto lg:h-9 lg:w-9 lg:justify-center lg:p-0",
                         active
                           ? "bg-primary/15 text-foreground"
                           : "text-muted-foreground hover:bg-emphasis/60 hover:text-foreground",

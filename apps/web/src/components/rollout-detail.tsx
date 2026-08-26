@@ -22,8 +22,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { ACTIVE_JOB_STATES, JobStateBadge, OnlineDot } from "@/components/status";
 import { formatDuration } from "@/lib/format";
+import { useTablePagination } from "@/lib/table-pagination";
 import { cn } from "@/lib/utils";
 
 export type JobRow = {
@@ -115,10 +117,11 @@ export function RolloutJobs({
   canOperate: boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const pagination = useTablePagination(jobs, { resetKey: rolloutId });
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <Table>
+      <Table containerClassName="max-h-[60vh]">
         <TableHeader>
           <TableRow>
             <TableHead className="w-8" />
@@ -131,7 +134,7 @@ export function RolloutJobs({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {jobs.map((job) => (
+          {pagination.rows.map((job) => (
             <JobRowView
               key={job.id}
               job={job}
@@ -143,6 +146,7 @@ export function RolloutJobs({
           ))}
         </TableBody>
       </Table>
+      <TablePaginationBar pagination={pagination} unit="devices" />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -239,6 +240,47 @@ func (f *Fake) PackageInfo(_ context.Context, pkg string) (proto.PackageInfo, er
 	}
 	return proto.PackageInfo{PackageName: pkg, Installed: false}, nil
 }
+
+// The fake fleet is what the 200-device load test runs against, so these
+// wobble a little rather than returning a constant: a dashboard that only
+// ever shows 0.00 load hides the bugs this is meant to catch.
+func (f *Fake) LoadAvg() (float64, float64, float64) {
+	base := float64(time.Since(f.started).Seconds())
+	one := 0.4 + math.Abs(math.Sin(base/60))*1.2
+	return round2(one), round2(one * 0.9), round2(one * 0.8)
+}
+
+func (f *Fake) Memory() (uint64, uint64) {
+	const total = 2 * 1024 * 1024 * 1024
+	free := uint64(float64(total) * (0.25 + math.Abs(math.Cos(float64(time.Since(f.started).Seconds())/90))*0.2))
+	return total, free
+}
+
+func (f *Fake) CPUCount() int { return 4 }
+
+func (f *Fake) ThirdPartyPackages(_ context.Context) ([]proto.PackageInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	packages := make([]proto.PackageInfo, 0, len(f.packages)+2)
+	for _, info := range f.packages {
+		if info.Installed {
+			packages = append(packages, proto.PackageInfo{
+				PackageName: info.PackageName,
+				VersionCode: info.VersionCode,
+				Installed:   true,
+			})
+		}
+	}
+	// A couple of extras so the inventory is visibly more than the tracked app.
+	packages = append(packages,
+		proto.PackageInfo{PackageName: "com.unownhash.dragonite", VersionCode: "42", Installed: true},
+		proto.PackageInfo{PackageName: "com.android.tv.launcher", VersionCode: "7", Installed: true},
+	)
+	return packages, nil
+}
+
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 func (f *Fake) DeviceInfo(ctx context.Context) proto.DeviceInfo {
 	return proto.DeviceInfo{

@@ -46,8 +46,10 @@ import {
   TableRow,
   TableSortHead,
 } from "@/components/ui/table";
+import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { ACTIVE_JOB_STATES, JobStateBadge, OnlineDot } from "@/components/status";
 import { formatBytes, formatRelative } from "@/lib/format";
+import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 import { cn } from "@/lib/utils";
 
@@ -86,14 +88,7 @@ export type VersionOption = {
 type Filter = "all" | "online" | "offline" | "outdated" | "pending";
 
 type FleetSortKey =
-  | "device"
-  | "group"
-  | "version"
-  | "scanner"
-  | "status"
-  | "free"
-  | "agent"
-  | "lastSeen";
+  "device" | "group" | "version" | "scanner" | "status" | "free" | "agent" | "lastSeen";
 
 export function FleetTable({
   rows,
@@ -117,7 +112,7 @@ export function FleetTable({
   const [group, setGroup] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const { headProps, sortRows } = useTableSort<FleetSortKey, DeviceRow>(
+  const { headProps, sort, sortRows } = useTableSort<FleetSortKey, DeviceRow>(
     {
       device: (r) => r.name,
       group: (r) => r.groupName,
@@ -142,7 +137,7 @@ export function FleetTable({
     return { online, upToDate, pending, working };
   }, [rows, latestVersion]);
 
-  const visible = useMemo(() => {
+  const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = rows.filter((row) => {
       if (group && row.groupName !== group) return false;
@@ -163,6 +158,14 @@ export function FleetTable({
     return sortRows(filtered);
   }, [rows, query, filter, group, latestVersion, sortRows]);
 
+  const pagination = useTablePagination(matching, {
+    resetKey: `${query}|${filter}|${group}|${sort.key}|${sort.direction}`,
+  });
+  const visible = pagination.rows;
+
+  // Selection follows the page you are looking at: the header checkbox ticks
+  // what is in front of you, and anything already picked on another page stays
+  // picked — the button label keeps the running count honest.
   const selectableIds = visible.filter((r) => r.approved).map((r) => r.id);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
   const someSelected = selectableIds.some((id) => selected.has(id));
@@ -259,14 +262,14 @@ export function FleetTable({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <Table>
+        <Table containerClassName="max-h-[64vh]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
                 <Checkbox
                   checked={allSelected ? true : someSelected ? "indeterminate" : false}
                   onCheckedChange={toggleAll}
-                  aria-label="Select all"
+                  aria-label="Select all on this page"
                   disabled={!canOperate || selectableIds.length === 0}
                 />
               </TableHead>
@@ -275,9 +278,7 @@ export function FleetTable({
               <TableSortHead {...headProps("version")}>
                 {packageName.split(".").pop()}
               </TableSortHead>
-              {showRotom ? (
-                <TableSortHead {...headProps("scanner")}>Scanner</TableSortHead>
-              ) : null}
+              {showRotom ? <TableSortHead {...headProps("scanner")}>Scanner</TableSortHead> : null}
               <TableSortHead {...headProps("status")}>Status</TableSortHead>
               <TableSortHead {...headProps("free")} align="right">
                 Free
@@ -314,6 +315,7 @@ export function FleetTable({
             )}
           </TableBody>
         </Table>
+        <TablePaginationBar pagination={pagination} unit="devices" />
       </div>
     </div>
   );
@@ -496,6 +498,7 @@ function RolloutDialog({
   const [open, setOpen] = useState(false);
   const [state, formAction] = useActionState<ActionState, FormData>(startRollout, {});
   const [forceClean, setForceClean] = useState(false);
+  const [skipUpToDate, setSkipUpToDate] = useState(true);
 
   const targetLabel =
     deviceIds.length > 0 ? `${deviceIds.length} selected device(s)` : "every approved device";
@@ -570,13 +573,12 @@ function RolloutDialog({
               The canary devices update first. The rest wait for them to succeed, plus the soak.
             </p>
 
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
+            <label className="flex items-start gap-2.5 text-sm">
+              <Checkbox
                 name="forceClean"
                 className="mt-0.5"
                 checked={forceClean}
-                onChange={(e) => setForceClean(e.target.checked)}
+                onCheckedChange={(value) => setForceClean(value === true)}
               />
               <span>
                 Force a clean install
@@ -591,13 +593,18 @@ function RolloutDialog({
               <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                 <span>
-                  This wipes the app data on every targeted device — logins and settings included.
+                  WARNING: This wipes the app data on every targeted device: logins and settings included.
                 </span>
               </div>
             ) : null}
 
-            <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" name="skipUpToDate" defaultChecked className="mt-0.5" />
+            <label className="flex items-start gap-2.5 text-sm">
+              <Checkbox
+                name="skipUpToDate"
+                className="mt-0.5"
+                checked={skipUpToDate}
+                onCheckedChange={(value) => setSkipUpToDate(value === true)}
+              />
               <span>
                 Skip devices already on this version
                 <span className="block text-xs text-muted-foreground">

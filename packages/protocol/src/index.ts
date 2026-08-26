@@ -56,6 +56,24 @@ export const deviceMetricsSchema = z.object({
   totalBytes: z.number().nonnegative().nullish(),
   uptimeSeconds: z.number().int().nonnegative().nullish(),
   packages: z.array(packageInfoSchema).default([]),
+  /**
+   * Set when `packages` is the whole third-party inventory rather than just
+   * the tracked apps. Only a complete list is evidence that an app was
+   * uninstalled, so the hub will not mark anything gone without it.
+   */
+  packagesComplete: z.boolean().default(false),
+
+  /**
+   * Health signals read out of /proc on every heartbeat. All optional: a box
+   * running an agent from before these existed simply never sends them, and
+   * the dashboard shows the fields as unknown rather than as zero.
+   */
+  loadAvg1: z.number().nonnegative().nullish(),
+  loadAvg5: z.number().nonnegative().nullish(),
+  loadAvg15: z.number().nonnegative().nullish(),
+  cpuCount: z.number().int().positive().nullish(),
+  memTotalBytes: z.number().nonnegative().nullish(),
+  memAvailableBytes: z.number().nonnegative().nullish(),
 });
 
 // ---------------------------------------------------------------------------

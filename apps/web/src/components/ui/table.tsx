@@ -3,10 +3,20 @@ import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 import type { SortDirection } from "@/lib/table-sort";
 import { cn } from "@/lib/utils";
 
-const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    // Wide fleet tables scroll inside their own box rather than the page.
-    <div className="relative w-full overflow-x-auto">
+type TableProps = React.HTMLAttributes<HTMLTableElement> & {
+  /**
+   * Classes for the scroll box around the table — this is where a height cap
+   * goes (`max-h-[60vh]`), which turns on vertical scrolling with the header
+   * pinned.
+   */
+  containerClassName?: string;
+};
+
+const Table = React.forwardRef<HTMLTableElement, TableProps>(
+  ({ className, containerClassName, ...props }, ref) => (
+    // Wide fleet tables scroll inside their own box rather than the page, and
+    // with a height cap they scroll vertically here too.
+    <div className={cn("relative w-full overflow-auto", containerClassName)}>
       <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
     </div>
   ),
@@ -17,9 +27,15 @@ const TableHeader = React.forwardRef<
   HTMLTableSectionElement,
   React.HTMLAttributes<HTMLTableSectionElement>
 >(({ className, ...props }, ref) => (
+  // Pinned so the columns stay readable while the body scrolls. Under
+  // `border-collapse: collapse` a sticky header's own border is painted away
+  // as it moves, so the rule under it is an inset shadow on the cells.
   <thead
     ref={ref}
-    className={cn("bg-subtle [&_tr]:border-b [&_tr]:border-border", className)}
+    className={cn(
+      "sticky top-0 z-20 bg-subtle [&_th]:shadow-[inset_0_-1px_0_var(--color-border)]",
+      className,
+    )}
     {...props}
   />
 ));

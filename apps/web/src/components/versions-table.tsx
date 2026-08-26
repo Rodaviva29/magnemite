@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Check, Download, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Download, ExternalLink, RefreshCw, Trash2, X } from "lucide-react";
 import type { VersionSource, VersionStatus } from "@magnemite/db";
 import { cacheVersion, pollSources, pruneVersions, setVersionApproval } from "@/actions/versions";
 import { Badge } from "@/components/ui/badge";
@@ -17,8 +17,10 @@ import {
   TableRow,
   TableSortHead,
 } from "@/components/ui/table";
+import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { VersionStatusBadge } from "@/components/status";
 import { formatBytes, formatRelative } from "@/lib/format";
+import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 
 type SortKey = "version" | "source" | "status" | "size" | "devices" | "published";
@@ -28,6 +30,8 @@ export type VersionRow = {
   version: string;
   buildCode: string | null;
   source: VersionSource;
+  /** Where the artifact was fetched from; empty for an upload. */
+  remoteUrl: string;
   arch: string;
   status: VersionStatus;
   cacheProgress: number;
@@ -40,6 +44,40 @@ export type VersionRow = {
   devicesOnThis: number;
 };
 
+/**
+ * Where a version came from, as somewhere a person can actually go.
+ *
+ * A GitHub asset URL points straight at the 170 MB download; the release page
+ * behind it is what someone clicking "github" wants to read, and the tag is
+ * already in the download URL, so it is derived rather than guessed. The
+ * mirror has no page — the file *is* the listing entry — so that one stays the
+ * file, and the tooltip says so before you click it.
+ */
+function sourceLink(row: VersionRow): { href: string; hint: string } | null {
+  if (!row.remoteUrl) return null;
+
+  if (row.source === "GITHUB") {
+    // https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>
+    const match = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/releases\/download\/([^/]+)\//.exec(
+      row.remoteUrl,
+    );
+    if (match) {
+      return {
+        href: `${match[1]}/releases/tag/${match[2]}`,
+        hint: `Open the ${match[2]} release on GitHub`,
+      };
+    }
+    return { href: row.remoteUrl, hint: "Open the release asset on GitHub" };
+  }
+
+  if (row.source === "MIRROR") {
+    const file = row.remoteUrl.split("/").pop() || "the file";
+    return { href: row.remoteUrl, hint: `Download ${file} from the mirror` };
+  }
+
+  return null;
+}
+
 export function VersionsTable({
   rows,
   packageName,
@@ -51,10 +89,9 @@ export function VersionsTable({
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
 
-  const { headProps, sortRows } = useTableSort<SortKey, VersionRow>(
+  const { headProps, sort, sortRows } = useTableSort<SortKey, VersionRow>(
     {
       version: (r) => r.version,
       source: (r) => r.source,
@@ -81,10 +118,12 @@ export function VersionsTable({
     return sortRows(filtered);
   }, [rows, query, sortRows]);
 
-  // A search is its own shortlist; capping it again would just hide matches.
-  const searching = query.trim() !== "";
-  const showingAll = showAll || searching;
-  const visible = showingAll ? matching : matching.slice(0, 12);
+  const pagination = useTablePagination(matching, {
+    // Anything that reshuffles the list starts the reader at the top again;
+    // a background refresh of the same list does not.
+    resetKey: `${query}|${sort.key}|${sort.direction}`,
+  });
+  const visible = pagination.rows;
   const cached = rows.filter((r) => r.status === "READY").length;
 
   function run(fn: () => Promise<{ error?: string; message?: string }>) {
@@ -131,7 +170,7 @@ export function VersionsTable({
       />
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <Table>
+        <Table containerClassName="max-h-[62vh]">
           <TableHeader>
             <TableRow>
               <TableSortHead {...headProps("version")}>Version</TableSortHead>
@@ -169,7 +208,7 @@ export function VersionsTable({
                 </TableCell>
 
                 <TableCell className="text-sm text-muted-foreground">
-                  {row.source.toLowerCase()}
+                  <SourceCell row={row} />
                 </TableCell>
 
                 <TableCell className="min-w-40">
@@ -210,14 +249,18 @@ export function VersionsTable({
                           Cache
                         </Button>
                       ) : null}
+                      {/* Fixed width: the label flips between two words of
+                          different lengths, and without this the button — and
+                          the Cache button beside it — resize on every click. */}
                       <Button
                         variant={row.approved ? "ghost" : "secondary"}
                         size="sm"
+                        className="w-[6.5rem] justify-center"
                         disabled={pending}
                         onClick={() => run(() => setVersionApproval(row.id, !row.approved))}
                       >
-                        <Check />
-                        {row.approved ? "Unapprove" : "Approve"}
+                        {row.approved ? <X /> : <Check />}
+                        {row.approved ? "Decline" : "Approve"}
                       </Button>
                     </div>
                   ) : null}
@@ -226,23 +269,38 @@ export function VersionsTable({
             ))}
           </TableBody>
         </Table>
+        <TablePaginationBar pagination={pagination} unit="versions" />
       </div>
-
-      {!showingAll && matching.length > 12 ? (
-        <Button variant="ghost" className="w-fit" onClick={() => setShowAll(true)}>
-          Show all {matching.length} versions
-        </Button>
-      ) : null}
-      {showAll && !searching && matching.length > 12 ? (
-        <Button variant="ghost" className="w-fit" onClick={() => setShowAll(false)}>
-          Show fewer versions
-        </Button>
-      ) : null}
 
       <p className="text-xs text-muted-foreground">
         Approving a version only matters for auto-update, it is the gate the policy checks before
         starting a rollout on its own. Manual rollouts can pick any cached version.
       </p>
     </div>
+  );
+}
+
+function SourceCell({ row }: { row: VersionRow }) {
+  const link = sourceLink(row);
+
+  if (!link) {
+    return (
+      <span title={row.source === "MANUAL" ? "Uploaded here — no upstream" : undefined}>
+        {row.source.toLowerCase()}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={link.href}
+      target="_blank"
+      rel="noreferrer"
+      title={link.hint}
+      className="group inline-flex items-center gap-1 hover:text-foreground hover:underline"
+    >
+      {row.source.toLowerCase()}
+      <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+    </a>
   );
 }

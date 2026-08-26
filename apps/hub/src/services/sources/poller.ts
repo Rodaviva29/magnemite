@@ -10,11 +10,25 @@ import type { DiscoveredVersion } from "./types.js";
 let timer: NodeJS.Timeout | null = null;
 let inFlight = false;
 
+/** What each source did the last time it was asked, for the Status page. */
+export type SourcePollStat = { at: string; ok: boolean; found: number; error: string | null };
+
+const pollStats: Record<"github" | "mirror", SourcePollStat | null> = {
+  github: null,
+  mirror: null,
+};
+
+export function getPollStats(): Record<"github" | "mirror", SourcePollStat | null> {
+  return pollStats;
+}
+
 export async function pollAllSources() {
   if (inFlight) return;
   inFlight = true;
   try {
-    const targets = await prisma.appTarget.findMany({ where: { enabled: true } });
+    // Manual targets exist only to hold uploads: nothing to poll, and no
+    // auto-update policy to run against them.
+    const targets = await prisma.appTarget.findMany({ where: { enabled: true, manual: false } });
 
     for (const target of targets) {
       const found: DiscoveredVersion[] = [];
@@ -24,10 +38,23 @@ export async function pollAllSources() {
         ["mirror", pollMirror],
       ] as const) {
         try {
-          found.push(...(await poll(target)));
+          const listed = await poll(target);
+          found.push(...listed);
+          pollStats[name] = {
+            at: new Date().toISOString(),
+            ok: true,
+            found: listed.length,
+            error: null,
+          };
         } catch (err) {
           // One source being down must not stop the other from being checked.
           log.warn({ err, source: name, target: target.packageName }, "source poll failed");
+          pollStats[name] = {
+            at: new Date().toISOString(),
+            ok: false,
+            found: 0,
+            error: err instanceof Error ? err.message : String(err),
+          };
         }
       }
 

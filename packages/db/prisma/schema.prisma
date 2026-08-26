@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // "native" covers local development on Windows/macOS; the musl target is
   // what the alpine-based hub and web images actually load.
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
@@ -110,6 +110,18 @@ model Device {
   totalBytes    BigInt?
   uptimeSeconds Int?
 
+  /// Run-queue averages and memory, straight off /proc on each heartbeat.
+  /// Null on boxes running an agent old enough not to report them.
+  loadAvg1          Float?
+  loadAvg5          Float?
+  loadAvg15         Float?
+  cpuCount          Int?
+  memTotalBytes     BigInt?
+  memAvailableBytes BigInt?
+  /// When the agent last sent a full third-party package list, as opposed to
+  /// just the tracked apps.
+  packagesSyncedAt  DateTime?
+
   // --- Rotom (optional integration) ---------------------------------------
   /// The `origin` this box reports to Rotom.
   rotomOrigin      String?
@@ -185,10 +197,16 @@ model AppTarget {
   displayName String
   enabled     Boolean @default(true)
 
+  /// Set on targets created by a manual upload rather than configured as a
+  /// watched app. They have no source to poll and no auto-update policy: the
+  /// Fleet and Versions pages are about the watched app and skip these, while
+  /// the agent still reports their installed version like any other.
+  manual Boolean @default(false)
+
   /// owner/repo — releases are matched against assetPattern.
-  githubRepo    String?
+  githubRepo     String?
   /// JS regex matched against release asset names.
-  assetPattern  String?
+  assetPattern   String?
   mirrorIndexUrl String?
   mirrorBaseUrl  String?
   /// Only versions built for this ABI are tracked. Android TV boxes in this
@@ -248,9 +266,9 @@ model AppVersion {
   cacheProgress Int           @default(0)
   error         String?
 
-  approved    Boolean   @default(false)
-  publishedAt DateTime?
-  discoveredAt DateTime @default(now())
+  approved     Boolean   @default(false)
+  publishedAt  DateTime?
+  discoveredAt DateTime  @default(now())
 
   rollouts Rollout[]
 
@@ -278,14 +296,20 @@ model Rollout {
   maxConcurrency Int?
   maxAttempts    Int     @default(3)
 
+  /// Hooks for this rollout only, overriding the ones on the device's group.
+  /// A manual install of some other app needs to stop and start that app, not
+  /// whatever the group stops for the watched one.
+  preInstallHook  String?
+  postInstallHook String?
+
   note        String?
   createdById String?
   createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  createdAt        DateTime  @default(now())
-  startedAt        DateTime?
-  canaryPassedAt   DateTime?
-  finishedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  startedAt      DateTime?
+  canaryPassedAt DateTime?
+  finishedAt     DateTime?
 
   jobs Job[]
 
@@ -330,11 +354,11 @@ model Job {
 }
 
 model JobEvent {
-  id      String   @id @default(cuid())
+  id      String    @id @default(cuid())
   jobId   String
-  job     Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  ts      DateTime @default(now())
-  level   LogLevel @default(INFO)
+  job     Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  ts      DateTime  @default(now())
+  level   LogLevel  @default(INFO)
   phase   JobState?
   message String
 
@@ -346,18 +370,18 @@ model JobEvent {
 // ---------------------------------------------------------------------------
 
 model EnrollmentToken {
-  id     String @id @default(cuid())
-  label  String
+  id        String @id @default(cuid())
+  label     String
   /// sha256 of the token. The plaintext is shown once, when it is created.
   tokenHash String @unique
   /// First 8 chars of the plaintext, so the UI can tell tokens apart.
   prefix    String
 
   /// Devices enrolling with this token skip manual approval.
-  autoApprove Boolean @default(true)
+  autoApprove Boolean   @default(true)
   maxUses     Int?
-  uses        Int     @default(0)
-  revoked     Boolean @default(false)
+  uses        Int       @default(0)
+  revoked     Boolean   @default(false)
   expiresAt   DateTime?
 
   createdAt DateTime @default(now())
@@ -409,7 +433,7 @@ model Session {
 }
 
 model Account {
-  id String @id @default(cuid())
+  id         String @id @default(cuid())
   /// Namespaces the identity so an OAuth provider id can never collide with a
   /// local one. Credential accounts use "local:credential"
   /// (`CREDENTIAL_ISSUER` in @magnemite/db) — sign-in looks the account up by

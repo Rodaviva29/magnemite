@@ -1,13 +1,14 @@
 <div align="center">
-  <h1>🧲 Magnemite</h1>
+  <img src="docs/magnemite.png" alt="Magnemite" width="160" />
+  <h1>Magnemite</h1>
   <p><strong>Over-the-air updater for a fleet of rooted Android TV boxes.</strong></p>
   <p>
     It watches for new Pokémon GO <code>.apkm</code> releases, caches them once on your
-    server, and installs them on 1 to 200 boxes from a dashboard — with per-device
+    server, and installs them on 1 to 200 boxes from a dashboard. Supports per-device
     progress, automatic retries, canary rollouts and a hands-off mode.
   </p>
   <p>
-    Built for boxes already running the UnownHash stack (Dragonite / Golbat / Rotom).
+    Built for boxes already running the Unown# stack (Dragonite / Golbat / Rotom).
   </p>
 </div>
 
@@ -179,6 +180,14 @@ the address.
 > from the hub service's environment — which is why they are set on `hub` and
 > not only on `web`.
 
+> [!NOTE]
+> The dashboard's own URL is read from `BETTER_AUTH_URL` /
+> `MAGNEMITE_DASHBOARD_URL`, and falls back to the `SERVICE_FQDN_WEB` that
+> Coolify injects. Coolify does not always have `SERVICE_URL_WEB` populated by
+> the time Compose interpolates it, and Better Auth without a base URL derives
+> the origin from the incoming Host header — which breaks callbacks behind the
+> proxy. Nothing to set by hand; a bare host (no `https://`) is accepted too.
+
 **Upgrading from an earlier version of this file.** The boxes' domain moved
 from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE`. Keep the same domain
 value and nothing needs re-flashing: a box only ever knows the URL.
@@ -251,16 +260,21 @@ so flashing is the only step per box:
 # Caddy setup:  https://magnemite.example.com
 # Coolify:      https://agents.magnemite.example.com
 make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
-# → dist/magnemite-agent-0.1.1.zip
+# → dist/magnemite-agent-0.1.2.zip
 ```
 
 On Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`
 
-Install it through the Magisk app, or in bulk over the LAN:
+Install it through the Magisk app
+```sh
+adb push .\magnemite-agent-0.1.0.zip /data/local/tmp/magnemite-agent-0.1.0.zip; adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-0.1.0.zip'"
+```
+
+Or in bulk over the LAN:
 
 ```sh
-./scripts/enroll.sh dist/magnemite-agent-0.1.1.zip 192.168.1.10 192.168.1.11
-./scripts/enroll.sh dist/magnemite-agent-0.1.1.zip -f hosts.txt
+./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip 192.168.1.10 192.168.1.11
+./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f hosts.txt
 ```
 
 That is the only time a box needs hands-on work. After it reboots, every later
