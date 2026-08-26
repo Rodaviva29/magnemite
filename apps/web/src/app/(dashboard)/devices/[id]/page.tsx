@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -10,6 +11,7 @@ import { OnlineDot } from "@/components/status";
 import { DeviceControls } from "@/components/device-controls";
 import { DeviceHistory, type DeviceJobRow } from "@/components/device-history";
 import { DevicePackages, type DevicePackageRow } from "@/components/device-packages";
+import { DeviceLastSeen } from "@/components/device-last-seen";
 import { formatBytes, formatDuration, formatRelative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -140,15 +142,11 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
             />
             <Field
               label="Last seen"
-              // The relative label rounds hard — "2m ago" covers anything from
-              // 61 to 119 seconds — and when you are watching a box come back
-              // the exact age is the whole point.
               value={
-                device.lastSeenAt
-                  ? `${online ? "now" : formatRelative(device.lastSeenAt)} (${secondsSince(
-                      device.lastSeenAt,
-                    )}s)`
-                  : "never"
+                <DeviceLastSeen
+                  lastSeenAt={device.lastSeenAt?.toISOString() ?? null}
+                  online={online}
+                />
               }
             />
           </CardContent>
@@ -256,11 +254,6 @@ function loadText(load: number | null, cores: number | null): string {
   return `${Math.round((load / cores) * 100)}%`;
 }
 
-/** Whole seconds since a timestamp, floored at zero for a clock skew. */
-function secondsSince(date: Date): number {
-  return Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
-}
-
 /**
  * A labelled bar. `percent` is null when the box has not reported the reading —
  * an agent old enough to predate these metrics — and that reads as "not
@@ -296,7 +289,7 @@ function Meter({
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
       <span className="text-muted-foreground">{label}</span>
