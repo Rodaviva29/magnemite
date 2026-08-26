@@ -191,3 +191,21 @@
     animation: none;
   }
 }
+
+/*
+ * iOS Safari zooms the whole page in whenever you focus a field whose text is
+ * under 16px — and it never zooms back out. Our fields are 14px (`text-sm`),
+ * which is right on a desktop, so on touch screens they go up to the threshold
+ * instead. The other fix, `maximum-scale=1` on the viewport, would take pinch
+ * zoom away from everyone who needs it.
+ *
+ * Deliberately outside `@layer base`: unlayered rules beat Tailwind's utility
+ * layer, which is where the `text-sm` on those fields comes from.
+ */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
