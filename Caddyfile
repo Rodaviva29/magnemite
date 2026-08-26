@@ -1,7 +1,6 @@
-{
-	email {$ACME_EMAIL}
-}
-
+# No global `email` directive: Caddy issues certificates without a registered
+# ACME contact, and an empty ACME_EMAIL would fail to parse. Add
+# `email you@example.com` in a global block if you want expiry notices.
 {$MAGNEMITE_DOMAIN} {
 	log {
 		output stdout

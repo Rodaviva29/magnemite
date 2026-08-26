@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+/*
+ * Theming.
+ *
+ * next-themes puts `class="dark"` on <html> before first paint, so there is no
+ * flash and no `prefers-color-scheme` guessing at runtime. Every colour is a
+ * token; no component ever hard-codes one, which is what keeps both themes
+ * consistent as the UI grows.
+ *
+ * Dark is built on #101010 for the page, with cards and dialogs lifted a shade
+ * above it rather than outlined in a brighter border.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Palette: a flat neutral scale, cal.com style. Two surfaces above the page —
+ * `subtle` for chrome that should recede (sidebar, table headers, hovers) and
+ * `emphasis` for the one thing that is selected — plus a single accent, which
+ * is simply black on light and white on dark. Colour is reserved for status.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #101010;
+  --card: #ffffff;
+  --card-foreground: #101010;
+  --popover: #ffffff;
+
+  --subtle: #f7f7f7;
+  --emphasis: #ececec;
+  --muted: #f7f7f7;
+  --muted-foreground: #6b7280;
+
+  --border: #e6e6e6;
+  --border-emphasis: #d4d4d4;
+  --input: #d9d9d9;
+  --ring: #fdc026;
+
+  /* Magnemite is an Electric type, so the one accent in the UI is its yellow.
+     Nothing legible ever sits in yellow *text* — it is a fill, and what goes on
+     top of it is near-black in both themes. */
+  --primary: #fdc026;
+  --primary-foreground: #101010;
+  --secondary: #f1f1f1;
+  --secondary-foreground: #101010;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --success: #15803d;
+  /* Kept orange rather than amber so a warning never reads as the brand. */
+  --warning: #c2410c;
+  --info: #1d4ed8;
+
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #101010;
+  --foreground: #f5f5f5;
+  --card: #161616;
+  --card-foreground: #f5f5f5;
+  --popover: #1c1c1c;
+
+  --subtle: #1d1d1d;
+  --emphasis: #2e2e2e;
+  --muted: #1d1d1d;
+  --muted-foreground: #a1a1a1;
+
+  --border: #262626;
+  --border-emphasis: #3d3d3d;
+  --input: #3d3d3d;
+  --ring: #fdc026;
+
+  --primary: #fdc026;
+  --primary-foreground: #101010;
+  --secondary: #232323;
+  --secondary-foreground: #f5f5f5;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --success: #4ade80;
+  --warning: #fb923c;
+  --info: #93b4fc;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-subtle: var(--subtle);
+  --color-emphasis: var(--emphasis);
+  --color-border-emphasis: var(--border-emphasis);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans:
+    var(--font-cal-sans-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-heading:
+    var(--font-cal-sans-text), var(--font-cal-sans-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    var(--font-cal-sans-geo), var(--font-cal-sans-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    background-color: var(--background);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    letter-spacing: -0.006em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.018em;
+  }
+
+  /* Long device tables scroll a lot; keep the scrollbar out of the way. */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 18%, transparent);
+  }
+}
+
+/* Steady pulse on the online dot, so a live fleet reads as alive at a glance. */
+@keyframes magnemite-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pulse-dot {
+  animation: magnemite-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot {
+    animation: none;
+  }
+}

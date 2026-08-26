@@ -1,0 +1,113 @@
+# Magnemite on Coolify.
+#
+# Coolify's own proxy terminates TLS and routes to the containers, so there is
+# no Caddy service here. Two domains are used instead of path routing, because
+# the agents and the dashboard are separate audiences:
+#
+#   SERVICE_FQDN_WEB_3000  → the dashboard people log into
+#   SERVICE_FQDN_HUB_3001  → what the boxes talk to: /ws/device, /api/enroll
+#                            and /files/*
+#
+# Coolify replaces every SERVICE_* placeholder on first deploy and shows the
+# generated values (domains, passwords) in the app's Environment tab. Point the
+# hub domain at a subdomain such as agents.<your-domain>.
+#
+# Deploying: New Resource → Docker Compose → point it at this file, set the two
+# domains, then run the seed once:
+#   docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
+#
+# Trade-off vs. the Caddy setup: with no reverse proxy of our own, the hub
+# serves the ~170 MB bundles itself (SERVE_ARTIFACTS=true). Node streams them
+# fine at this fleet size, but it is not nginx — if egress becomes the
+# bottleneck, put a static file server in front of /files.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SERVICE_USER_POSTGRES:-magnemite}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+      POSTGRES_DB: ${POSTGRES_DB:-magnemite}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${SERVICE_USER_POSTGRES:-magnemite} -d ${POSTGRES_DB:-magnemite}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  hub:
+    build:
+      context: .
+      dockerfile: apps/hub/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Coolify turns this into the public URL for port 3001 and injects it back
+      # as the variable's value.
+      SERVICE_FQDN_HUB_3001: ${SERVICE_FQDN_HUB_3001}
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
+      HUB_PORT: 3001
+      HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
+      # Artifact URLs handed to the boxes are built from this, so it has to be
+      # the hub's own domain.
+      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_HUB_3001}
+      ARTIFACT_DIR: /data/artifacts
+      # No reverse proxy of ours in this setup, so the hub serves the bundles.
+      SERVE_ARTIFACTS: "true"
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-10}
+      JOB_STALL_TIMEOUT: ${JOB_STALL_TIMEOUT:-900}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      SOURCE_POLL_MINUTES: ${SOURCE_POLL_MINUTES:-15}
+      ROTOM_ENABLED: ${ROTOM_ENABLED:-false}
+      ROTOM_URL: ${ROTOM_URL:-}
+      ROTOM_SECRET: ${ROTOM_SECRET:-}
+    volumes:
+      - artifacts:/data/artifacts
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3001/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hub:
+        condition: service_started
+    environment:
+      SERVICE_FQDN_WEB_3000: ${SERVICE_FQDN_WEB_3000}
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
+      # Better Auth signs and validates cookies against these two.
+      AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
+      BETTER_AUTH_URL: ${SERVICE_FQDN_WEB_3000}
+      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_HUB_3001}
+      MAGNEMITE_DASHBOARD_URL: ${SERVICE_FQDN_WEB_3000}
+      HUB_URL: http://hub:3001
+      HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  pgdata:
+  artifacts:

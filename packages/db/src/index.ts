@@ -17,6 +17,14 @@ export const prisma: PrismaClient =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
+/**
+ * Issuer Better Auth stamps on email/password accounts. Anything that writes a
+ * credential row — the seed, the admin account form — has to use it, because
+ * sign-in looks the account up by (issuer, accountId).
+ */
+export const CREDENTIAL_ISSUER = "local:credential";
+export const CREDENTIAL_PROVIDER_ID = "credential";
+
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------

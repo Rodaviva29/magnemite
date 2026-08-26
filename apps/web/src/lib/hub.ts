@@ -1,0 +1,80 @@
+import "server-only";
+
+/**
+ * Client for the hub's /internal API. Reads go straight to Postgres from the
+ * server components; this is only for the things that need a live socket or
+ * the scheduler — starting a rollout, cancelling a job, rebooting a box.
+ */
+const HUB_URL = process.env.HUB_URL ?? "http://localhost:3001";
+const SECRET = process.env.HUB_INTERNAL_SECRET ?? "";
+
+export class HubError extends Error {}
+
+async function call<T>(path: string, body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${HUB_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-magnemite-secret": SECRET,
+      },
+      body: JSON.stringify(body ?? {}),
+      cache: "no-store",
+    });
+  } catch (err) {
+    throw new HubError(
+      `The hub is not reachable at ${HUB_URL}. Is the hub container running? (${
+        err instanceof Error ? err.message : String(err)
+      })`,
+    );
+  }
+
+  const text = await res.text();
+  const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  if (!res.ok) {
+    throw new HubError(
+      typeof payload.error === "string" ? payload.error : `hub: HTTP ${res.status}`,
+    );
+  }
+  return payload as T;
+}
+
+export type CreateRolloutInput = {
+  appVersionId: string;
+  deviceIds?: string[];
+  forceClean?: boolean;
+  canaryCount?: number;
+  soakMinutes?: number;
+  maxConcurrency?: number | null;
+  maxAttempts?: number;
+  skipUpToDate?: boolean;
+  createdById?: string | null;
+  note?: string | null;
+};
+
+export const hub = {
+  status: () =>
+    call<{ online: number; onlineDeviceIds: string[]; maxConcurrentJobs: number }>(
+      "/internal/status",
+    ),
+  createRollout: (input: CreateRolloutInput) =>
+    call<{ id: string; jobs: number }>("/internal/rollouts", input),
+  cancelRollout: (id: string) => call(`/internal/rollouts/${id}/cancel`),
+  resumeRollout: (id: string) => call(`/internal/rollouts/${id}/resume`),
+  retryFailed: (id: string) => call<{ retried: number }>(`/internal/rollouts/${id}/retry-failed`),
+  retryJob: (id: string) => call(`/internal/jobs/${id}/retry`),
+  cancelJob: (id: string) => call(`/internal/jobs/${id}/cancel`),
+  rebootDevice: (id: string) => call(`/internal/devices/${id}/reboot`),
+  /** Rotom-side control: restart the scanner, or take a box in/out of the pool. */
+  rotomDeviceAction: (id: string, action: "restart" | "reboot" | "enable" | "disable") =>
+    call(`/internal/devices/${id}/rotom/${action}`),
+  rotomSync: () => call<{ seen: number; matched: number }>("/internal/rotom/sync"),
+  cacheVersion: (id: string) => call(`/internal/versions/${id}/cache`),
+  pruneVersions: (keepLatest?: number) =>
+    call<{ removed: number }>("/internal/versions/prune", { keepLatest }),
+  pollSources: () => call("/internal/sources/poll"),
+};
+
+export const HUB_BASE_URL = HUB_URL;
+export const HUB_SECRET = SECRET;

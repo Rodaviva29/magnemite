@@ -11,6 +11,9 @@ export default defineConfig({
   // Workspace packages ship TypeScript source, so they have to be bundled in
   // rather than resolved at runtime.
   noExternal: ["@magnemite/db", "@magnemite/protocol"],
-  // Prisma loads its query engine from disk at runtime; bundling it breaks that.
+  // Prisma loads its query engine from disk at runtime; bundling it breaks
+  // that. Because it stays external, the bundle resolves it from apps/hub —
+  // which is why @prisma/client is a direct dependency here and not only of
+  // @magnemite/db.
   external: ["@prisma/client", ".prisma/client"],
 });

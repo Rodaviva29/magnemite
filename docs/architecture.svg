@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" width="960" height="620" role="img" aria-label="Magnemite architecture: browsers and Android TV agents reach an edge proxy, which routes to the Next.js dashboard and the Fastify hub; both share Postgres, and the hub caches .apkm bundles onto a volume the proxy streams from.">
+  <title>Magnemite architecture</title>
+  <defs>
+    <style>
+      .bg    { fill: #111111; }
+      .panel { fill: #1b1b1b; stroke: #2e2e2e; stroke-width: 1.5; }
+      .panel-accent { fill: #16233a; stroke: #2f4a77; stroke-width: 1.5; }
+      .panel-data   { fill: #17211a; stroke: #2c4433; stroke-width: 1.5; }
+      .t      { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+      .title  { fill: #f4f4f5; font-size: 16px; font-weight: 600; }
+      .sub    { fill: #a1a1aa; font-size: 12px; }
+      .mono   { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; fill: #a1a1aa; font-size: 11.5px; }
+      .label  { fill: #d4d4d8; font-size: 11.5px; }
+      .flow   { stroke: #52525b; stroke-width: 1.6; fill: none; }
+      .flow-blue { stroke: #3b82f6; stroke-width: 1.8; fill: none; }
+      .flow-green { stroke: #22c55e; stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; }
+      .caption { fill: #71717a; font-size: 11px; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#52525b" />
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6" />
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22c55e" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="620" rx="14" />
+
+  <!-- ── Clients ─────────────────────────────────────────────────── -->
+  <g class="t">
+    <rect class="panel" x="64" y="40" width="300" height="76" rx="10" />
+    <text class="title" x="88" y="70">Operator’s browser</text>
+    <text class="sub" x="88" y="92">The dashboard: fleet, rollouts, versions</text>
+
+    <rect class="panel" x="596" y="40" width="300" height="76" rx="10" />
+    <text class="title" x="620" y="70">Android TV boxes · 1–200</text>
+    <text class="sub" x="620" y="92">Go agent, root via Magisk, dials out</text>
+  </g>
+
+  <!-- clients -> edge -->
+  <path class="flow" d="M 214 116 L 214 168" marker-end="url(#arrow)" />
+  <text class="label t" x="224" y="146">HTTPS</text>
+
+  <path class="flow-blue" d="M 746 116 L 746 168" marker-end="url(#arrow-blue)" />
+  <text class="label t" x="756" y="140">WSS + HTTPS</text>
+  <text class="caption t" x="756" y="156">outbound only — no open ports</text>
+
+  <!-- ── Edge ────────────────────────────────────────────────────── -->
+  <g class="t">
+    <rect class="panel-accent" x="64" y="170" width="832" height="94" rx="10" />
+    <text class="title" x="88" y="200">Edge · TLS</text>
+    <text class="sub" x="202" y="200">Caddy (docker-compose.yml) or Coolify’s proxy</text>
+
+    <rect x="88" y="216" width="150" height="30" rx="6" fill="#111827" stroke="#2f4a77" />
+    <text class="mono" x="102" y="236">/ → web</text>
+
+    <rect x="256" y="216" width="196" height="30" rx="6" fill="#111827" stroke="#2f4a77" />
+    <text class="mono" x="270" y="236">/ws/device → hub</text>
+
+    <rect x="470" y="216" width="196" height="30" rx="6" fill="#111827" stroke="#2f4a77" />
+    <text class="mono" x="484" y="236">/api/enroll → hub</text>
+
+    <rect x="684" y="216" width="188" height="30" rx="6" fill="#111827" stroke="#2f4a77" />
+    <text class="mono" x="698" y="236">/files/* → volume</text>
+  </g>
+
+  <!-- edge -> services -->
+  <path class="flow" d="M 214 264 L 214 320" marker-end="url(#arrow)" />
+  <path class="flow-blue" d="M 746 264 L 746 320" marker-end="url(#arrow-blue)" />
+
+  <!-- ── Services ────────────────────────────────────────────────── -->
+  <g class="t">
+    <rect class="panel" x="64" y="322" width="300" height="88" rx="10" />
+    <text class="title" x="88" y="352">web · Next.js</text>
+    <text class="sub" x="88" y="374">Dashboard + Better Auth</text>
+    <text class="mono" x="88" y="394">:3000</text>
+
+    <rect class="panel" x="596" y="322" width="300" height="88" rx="10" />
+    <text class="title" x="620" y="352">hub · Fastify</text>
+    <text class="sub" x="620" y="374">Device sockets · scheduler · pollers</text>
+    <text class="mono" x="620" y="394">:3001</text>
+  </g>
+
+  <!-- web <-> hub -->
+  <path class="flow" d="M 364 366 L 596 366" marker-end="url(#arrow)" />
+  <text class="label t" x="480" y="356" text-anchor="middle">internal API</text>
+  <text class="caption t" x="480" y="388" text-anchor="middle">start rollout · reboot · cache</text>
+
+  <!-- ── Data ────────────────────────────────────────────────────── -->
+  <g class="t">
+    <rect class="panel-data" x="64" y="486" width="300" height="82" rx="10" />
+    <text class="title" x="88" y="516">Postgres</text>
+    <text class="sub" x="88" y="538">Devices, rollouts, jobs, job log</text>
+
+    <rect class="panel-data" x="596" y="486" width="300" height="82" rx="10" />
+    <text class="title" x="620" y="516">artifacts volume</text>
+    <text class="sub" x="620" y="538">Each .apkm cached once, ~170 MB</text>
+  </g>
+
+  <!-- web -> postgres -->
+  <path class="flow" d="M 214 410 L 214 486" marker-end="url(#arrow)" />
+  <text class="label t" x="224" y="452">reads</text>
+
+  <!-- hub -> postgres (diagonal) -->
+  <path class="flow" d="M 596 400 C 470 448, 400 448, 364 486" marker-end="url(#arrow)" />
+  <text class="label t" x="430" y="470">writes</text>
+
+  <!-- hub -> artifacts -->
+  <path class="flow" d="M 746 410 L 746 486" marker-end="url(#arrow)" />
+  <text class="label t" x="734" y="440" text-anchor="end">downloads once</text>
+  <text class="caption t" x="734" y="458" text-anchor="end">md5 checked, sha256 computed</text>
+
+  <!-- artifacts -> edge (served) -->
+  <path class="flow-green" d="M 896 527 C 934 527, 934 214, 896 214" marker-end="url(#arrow-green)" />
+  <text class="label t" x="620" y="590" fill="#22c55e">served straight off disk</text>
+  <text class="caption t" x="620" y="606">~35 GB a rollout, none of it through Node</text>
+
+  <text class="caption t" x="64" y="590">The hub is a separate process, so 200 device</text>
+  <text class="caption t" x="64" y="606">sockets survive a dashboard rebuild.</text>
+</svg>

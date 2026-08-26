@@ -1,0 +1,10 @@
+node_modules
+.next
+dist
+data
+.dev
+agent/bin
+pnpm-lock.yaml
+packages/db/prisma/migrations
+# Caddy has its own format; prettier has no parser for it.
+Caddyfile

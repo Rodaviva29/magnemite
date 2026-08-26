@@ -1,0 +1,6 @@
+id=magnemite-agent
+name=Magnemite Agent
+version=v0.1.0
+versionCode=1
+author=magnemite
+description=Keeps a socket open to the Magnemite hub and installs .apkm updates on this box.

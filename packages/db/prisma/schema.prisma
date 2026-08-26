@@ -1,5 +1,8 @@
 generator client {
   provider = "prisma-client-js"
+  // "native" covers local development on Windows/macOS; the musl target is
+  // what the alpine-based hub and web images actually load.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -107,9 +110,19 @@ model Device {
   totalBytes    BigInt?
   uptimeSeconds Int?
 
-  /// Matches the `origin` this box reports to Rotom, when the integration is
-  /// on. Lets a rollout confirm the scanner came back after an update.
-  rotomOrigin String?
+  // --- Rotom (optional integration) ---------------------------------------
+  /// The `origin` this box reports to Rotom.
+  rotomOrigin      String?
+  /// Rotom's own device id, the handle its action endpoints take.
+  rotomDeviceId    String?
+  /// Whether Rotom currently has a live socket to this box. This — not
+  /// `pm` printing Success — is the real proof an update left it scanning.
+  rotomConnected   Boolean   @default(false)
+  rotomWorkerCount Int?
+  rotomLastSeenAt  DateTime?
+  /// Set while Magnemite has the box disabled in Rotom for an install, so a
+  /// crash mid-job cannot leave it parked out of the scanning pool forever.
+  rotomDisabledBy  String?
 
   notes   String?
   groupId String?
@@ -178,6 +191,9 @@ model AppTarget {
   assetPattern  String?
   mirrorIndexUrl String?
   mirrorBaseUrl  String?
+  /// Only versions built for this ABI are tracked. Android TV boxes in this
+  /// fleet are arm64; add a second target if that ever stops being true.
+  arch           String  @default("arm64-v8a")
 
   // --- auto-update policy -------------------------------------------------
   autoUpdateEnabled Boolean       @default(false)
@@ -215,6 +231,7 @@ model AppVersion {
   versionCode BigInt?
 
   source    VersionSource
+  arch      String        @default("arm64-v8a")
   remoteUrl String
   filename  String
   sizeBytes BigInt
@@ -237,7 +254,7 @@ model AppVersion {
 
   rollouts Rollout[]
 
-  @@unique([appTargetId, source, version])
+  @@unique([appTargetId, source, version, arch])
   @@index([status])
 }
 
@@ -346,17 +363,92 @@ model EnrollmentToken {
   createdAt DateTime @default(now())
 }
 
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String?
-  passwordHash String
-  role         UserRole @default(ADMIN)
+// ---------------------------------------------------------------------------
+// Better Auth
+//
+// These four models are the shape Better Auth's Prisma adapter expects; the
+// only addition is `role`, declared as an additional field in the auth config.
+// Passwords live on Account (providerId "credential"), hashed with bcrypt so
+// the database seed can create the first admin without pulling Better Auth
+// into the db package.
+// ---------------------------------------------------------------------------
 
+model User {
+  id            String   @id @default(cuid())
+  name          String   @default("")
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  role          UserRole @default(VIEWER)
+
+  sessions Session[]
+  accounts Account[]
   rollouts Rollout[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id String @id @default(cuid())
+  /// Namespaces the identity so an OAuth provider id can never collide with a
+  /// local one. Credential accounts use "local:credential"
+  /// (`CREDENTIAL_ISSUER` in @magnemite/db) — sign-in looks the account up by
+  /// this, so a row without it simply will not authenticate.
+  issuer     String
+  accountId  String
+  providerId String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  /// bcrypt hash for credential accounts; null for OAuth providers.
+  password              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([issuer, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
 }
 
 model AuditLog {

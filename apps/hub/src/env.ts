@@ -10,6 +10,14 @@ const schema = z.object({
   /** Base URL agents see. Artifact URLs are built from this. */
   MAGNEMITE_PUBLIC_URL: z.string().url(),
   ARTIFACT_DIR: z.string().default("/data/artifacts"),
+  /**
+   * Serve /files/* from the hub itself. Off in production, where Caddy does
+   * it off the shared volume without Node in the data path.
+   */
+  SERVE_ARTIFACTS: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
 
   /** Fleet-wide cap on how many devices download + install at once. */
   MAX_CONCURRENT_JOBS: z.coerce.number().int().positive().default(10),

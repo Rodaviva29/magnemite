@@ -1,0 +1,199 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, Rocket } from "lucide-react";
+import type { RolloutStatus, VersionSource } from "@magnemite/db";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { SearchInput } from "@/components/ui/search-input";
+import { Select } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableSortHead,
+} from "@/components/ui/table";
+import { RolloutStatusBadge } from "@/components/status";
+import { formatDuration, formatRelative } from "@/lib/format";
+import { useTableSort } from "@/lib/table-sort";
+
+export type RolloutRow = {
+  id: string;
+  version: string;
+  source: VersionSource;
+  status: RolloutStatus;
+  mode: string;
+  forceClean: boolean;
+  startedBy: string;
+  total: number;
+  done: number;
+  failed: number;
+  startedAt: string;
+  durationMs: number | null;
+  finishedAt: string | null;
+};
+
+type SortKey = "version" | "status" | "progress" | "startedBy" | "startedAt" | "duration";
+
+const OPEN_STATUSES: RolloutStatus[] = ["PENDING", "CANARY", "SOAKING", "RUNNING", "PAUSED"];
+
+export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+
+  const { headProps, sortRows } = useTableSort<SortKey, RolloutRow>(
+    {
+      version: (r) => r.version,
+      status: (r) => r.status,
+      progress: (r) => (r.total === 0 ? 0 : (r.done + r.failed) / r.total),
+      startedBy: (r) => r.startedBy,
+      startedAt: (r) => r.startedAt,
+      duration: (r) => r.durationMs,
+    },
+    { key: "startedAt", direction: "desc" },
+  );
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = rows.filter((row) => {
+      if (status === "open" && !OPEN_STATUSES.includes(row.status)) return false;
+      if (status && status !== "open" && row.status !== status) return false;
+      if (!q) return true;
+      return (
+        row.version.toLowerCase().includes(q) ||
+        row.source.toLowerCase().includes(q) ||
+        row.status.toLowerCase().includes(q) ||
+        row.startedBy.toLowerCase().includes(q)
+      );
+    });
+    return sortRows(filtered);
+  }, [rows, query, status, sortRows]);
+
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+          <Rocket className="h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            No rollouts yet. Start one from the fleet page.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search version, status, who started it…"
+        />
+        <Select
+          aria-label="Filter by status"
+          value={status}
+          onValueChange={setStatus}
+          className="w-44"
+          options={[
+            { value: "", label: "All rollouts" },
+            { value: "open", label: "Still running" },
+            { value: "COMPLETED", label: "Completed" },
+            { value: "PAUSED", label: "Paused" },
+            { value: "CANCELLED", label: "Cancelled" },
+          ]}
+        />
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableSortHead {...headProps("version")}>Version</TableSortHead>
+              <TableSortHead {...headProps("status")}>Status</TableSortHead>
+              <TableSortHead {...headProps("progress")} className="min-w-52">
+                Progress
+              </TableSortHead>
+              <TableSortHead {...headProps("startedBy")}>Started by</TableSortHead>
+              <TableSortHead {...headProps("startedAt")}>Started</TableSortHead>
+              <TableSortHead {...headProps("duration")}>Duration</TableSortHead>
+              <TableHead className="w-10" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visible.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                  No rollouts match this search.
+                </TableCell>
+              </TableRow>
+            ) : (
+              visible.map((rollout) => {
+                const pct =
+                  rollout.total === 0
+                    ? 0
+                    : ((rollout.done + rollout.failed) / rollout.total) * 100;
+
+                return (
+                  <TableRow key={rollout.id}>
+                    <TableCell>
+                      <Link
+                        href={`/rollouts/${rollout.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {rollout.version}
+                      </Link>
+                      <div className="text-xs text-muted-foreground">
+                        {rollout.source.toLowerCase()}
+                        {rollout.mode === "AUTO" ? " · automatic" : ""}
+                        {rollout.forceClean ? " · clean install" : ""}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <RolloutStatusBadge status={rollout.status} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {rollout.done}/{rollout.total} done
+                          </span>
+                          {rollout.failed > 0 ? (
+                            <Badge variant="danger">{rollout.failed} failed</Badge>
+                          ) : null}
+                        </div>
+                        <Progress value={pct} tone={rollout.failed > 0 ? "danger" : "primary"} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {rollout.startedBy}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatRelative(rollout.startedAt)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDuration(
+                        new Date(rollout.startedAt),
+                        rollout.finishedAt ? new Date(rollout.finishedAt) : null,
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Link href={`/rollouts/${rollout.id}`} aria-label="Open rollout">
+                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}

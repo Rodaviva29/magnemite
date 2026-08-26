@@ -31,11 +31,15 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
+      # Built from the POSTGRES_* vars rather than taken from .env, whose
+      # DATABASE_URL points at the host-mapped port for local development.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       HUB_PORT: ${HUB_PORT:-3001}
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
-      ARTIFACT_DIR: ${ARTIFACT_DIR:-/data/artifacts}
+      # Container path, deliberately not taken from .env — it has to match the
+      # volume mounted into caddy as /srv/artifacts.
+      ARTIFACT_DIR: /data/artifacts
       MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-10}
       JOB_STALL_TIMEOUT: ${JOB_STALL_TIMEOUT:-900}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
@@ -61,9 +65,14 @@ services:
         condition: service_started
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
+      # Built from the POSTGRES_* vars rather than taken from .env, whose
+      # DATABASE_URL points at the host-mapped port for local development.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       AUTH_SECRET: ${AUTH_SECRET}
-      AUTH_TRUST_HOST: "true"
+      # Behind Caddy the dashboard and the agents share one origin, so Better
+      # Auth's origin check uses the same URL. The Coolify setup splits them.
+      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_PUBLIC_URL}
+      BETTER_AUTH_URL: ${MAGNEMITE_PUBLIC_URL}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
       HUB_URL: http://hub:${HUB_PORT:-3001}
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
@@ -79,7 +88,6 @@ services:
       - hub
     environment:
       MAGNEMITE_DOMAIN: ${MAGNEMITE_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL:-}
       HUB_PORT: ${HUB_PORT:-3001}
     ports:
       - "80:80"

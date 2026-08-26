@@ -5,6 +5,8 @@ build/
 .next/
 out/
 *.tsbuildinfo
+.history
+.vscode/
 
 # Prisma generated client
 packages/db/generated/
@@ -18,6 +20,8 @@ data/
 artifacts/
 caddy_data/
 caddy_config/
+# Local scratch: fake-fleet configs, dev session tokens
+.dev/
 
 # Env
 .env

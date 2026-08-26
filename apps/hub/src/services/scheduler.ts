@@ -5,6 +5,7 @@ import { env } from "../env.js";
 import { log } from "../log.js";
 import { isOnline, sendTo } from "../registry.js";
 import { ACTIVE_STATES, logJobEvent, recomputeRollout, requeueStalled } from "./jobs.js";
+import { pauseForInstall, releaseOrphanedDevices, rotomEnabled } from "./rotom.js";
 
 const TICK_MS = 5_000;
 
@@ -46,6 +47,9 @@ async function tick() {
   try {
     await promoteSoakingRollouts();
     await requeueStalled(env.JOB_STALL_TIMEOUT);
+    // A hub restart mid-install would otherwise leave a box disabled in Rotom
+    // for good.
+    await releaseOrphanedDevices();
     await dispatchQueued();
   } catch (err) {
     log.error({ err }, "scheduler tick failed");
@@ -186,6 +190,13 @@ async function dispatchQueued() {
     await logJobEvent(job.id, `dispatched (attempt ${attempt}) → ${version.version}`, {
       phase: "DISPATCHED",
     });
+
+    // Take the box out of Rotom's pool so the controller stops handing it
+    // accounts, rather than having a scan die halfway through the install.
+    if (rotomEnabled()) {
+      const paused = await pauseForInstall(job.deviceId, job.id);
+      if (paused) await logJobEvent(job.id, "disabled in rotom for the install");
+    }
     capacity -= 1;
     if (groupId) groupActive.set(groupId, (groupActive.get(groupId) ?? 0) + 1);
     rolloutActive.set(rollout.id, (rolloutActive.get(rollout.id) ?? 0) + 1);
