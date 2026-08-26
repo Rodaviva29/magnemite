@@ -1,0 +1,381 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+}
+
+enum VersionSource {
+  GITHUB
+  MIRROR
+  MANUAL
+}
+
+enum VersionStatus {
+  DISCOVERED // seen at the source, not downloaded yet
+  CACHING // being downloaded onto the VPS
+  READY // cached + hashed, installable
+  FAILED
+}
+
+enum RolloutMode {
+  MANUAL
+  AUTO
+}
+
+enum RolloutStatus {
+  PENDING
+  CANARY // canary jobs dispatched
+  SOAKING // canary succeeded, waiting out soakMinutes
+  RUNNING // full fleet dispatched
+  PAUSED // canary failed or operator paused
+  COMPLETED
+  CANCELLED
+}
+
+/// Doubles as the current phase of a running job, which is what the dashboard
+/// renders next to the progress bar.
+enum JobState {
+  QUEUED // waiting for a slot, or for the device to come online
+  DISPATCHED // sent to the agent, not acknowledged yet
+  DOWNLOADING
+  EXTRACTING
+  INSTALLING
+  VERIFYING
+  SUCCESS
+  FAILED
+  CANCELLED
+  SKIPPED
+}
+
+enum InstallMode {
+  IN_PLACE // pm install-create -r, app data preserved
+  CLEAN // pm uninstall first, app data wiped
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+// ---------------------------------------------------------------------------
+// Fleet
+// ---------------------------------------------------------------------------
+
+model Device {
+  id     String @id @default(cuid())
+  name   String
+  /// ro.serialno, or a MAC-derived fallback. Identifies the box across
+  /// re-enrollments and IP changes.
+  serial String @unique
+
+  manufacturer   String?
+  model          String?
+  androidVersion String?
+  sdkInt         Int?
+  abi            String?
+  agentVersion   String?
+
+  /// sha256 of the bearer token the agent presents. The plaintext token is
+  /// shown once at enrollment and never stored.
+  tokenHash String  @unique
+  approved  Boolean @default(false)
+
+  status        DeviceStatus @default(OFFLINE)
+  lastSeenAt    DateTime?
+  publicIp      String?
+  freeBytes     BigInt?
+  totalBytes    BigInt?
+  uptimeSeconds Int?
+
+  /// Matches the `origin` this box reports to Rotom, when the integration is
+  /// on. Lets a rollout confirm the scanner came back after an update.
+  rotomOrigin String?
+
+  notes   String?
+  groupId String?
+  group   DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  packages DevicePackage[]
+  jobs     Job[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([groupId])
+}
+
+/// Installed version of each package we track, refreshed on every heartbeat.
+model DevicePackage {
+  id          String  @id @default(cuid())
+  deviceId    String
+  device      Device  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packageName String
+  versionName String?
+  versionCode BigInt?
+  installed   Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([deviceId, packageName])
+  @@index([packageName, versionName])
+}
+
+model DeviceGroup {
+  id   String @id @default(cuid())
+  name String @unique
+
+  /// Shell run as root on the device before the install session opens.
+  /// Typically stops the scanner: `am force-stop <pkg>`.
+  preInstallHook  String?
+  /// Shell run as root after the install is verified. Typically restarts the
+  /// scanner and re-applies the mod.
+  postInstallHook String?
+
+  /// Overrides the fleet-wide MAX_CONCURRENT_JOBS for boxes in this group,
+  /// e.g. to protect a site on a thin uplink.
+  maxConcurrency Int?
+
+  devices Device[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Apps + versions
+// ---------------------------------------------------------------------------
+
+model AppTarget {
+  id          String  @id @default(cuid())
+  packageName String  @unique
+  displayName String
+  enabled     Boolean @default(true)
+
+  /// owner/repo — releases are matched against assetPattern.
+  githubRepo    String?
+  /// JS regex matched against release asset names.
+  assetPattern  String?
+  mirrorIndexUrl String?
+  mirrorBaseUrl  String?
+
+  // --- auto-update policy -------------------------------------------------
+  autoUpdateEnabled Boolean       @default(false)
+  /// New versions are marked approved on discovery instead of waiting for a
+  /// human to press approve.
+  autoApprove       Boolean       @default(false)
+  preferredSource   VersionSource @default(MIRROR)
+  /// Devices updated first; the rest wait for them to succeed.
+  canaryCount       Int           @default(1)
+  /// Minutes to wait after the canary succeeds before releasing the fleet.
+  soakMinutes       Int           @default(30)
+  maxConcurrency    Int?
+  maxAttempts       Int           @default(3)
+  /// "HH:MM" local time. When both are set, auto rollouts only dispatch
+  /// inside this window.
+  windowStart       String?
+  windowEnd         String?
+
+  versions AppVersion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AppVersion {
+  id          String    @id @default(cuid())
+  appTargetId String
+  appTarget   AppTarget @relation(fields: [appTargetId], references: [id], onDelete: Cascade)
+
+  /// Marketing version, e.g. "0.425.1".
+  version     String
+  /// Play build code from the GitHub tag, e.g. "2026081202".
+  buildCode   String?
+  /// Android versionCode, filled in once a device reports it.
+  versionCode BigInt?
+
+  source    VersionSource
+  remoteUrl String
+  filename  String
+  sizeBytes BigInt
+
+  /// From the mirror index. GitHub publishes no hash, so those are verified
+  /// by size on download.
+  md5    String?
+  /// Computed by the hub after caching. This is what agents verify against.
+  sha256 String?
+
+  /// Path inside ARTIFACT_DIR, served by Caddy as /files/<basename>.
+  artifactPath  String?
+  status        VersionStatus @default(DISCOVERED)
+  cacheProgress Int           @default(0)
+  error         String?
+
+  approved    Boolean   @default(false)
+  publishedAt DateTime?
+  discoveredAt DateTime @default(now())
+
+  rollouts Rollout[]
+
+  @@unique([appTargetId, source, version])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Rollouts + jobs
+// ---------------------------------------------------------------------------
+
+model Rollout {
+  id           String     @id @default(cuid())
+  appVersionId String
+  appVersion   AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Restrict)
+
+  mode   RolloutMode   @default(MANUAL)
+  status RolloutStatus @default(PENDING)
+
+  /// Uninstall before installing on every device, wiping app data, instead of
+  /// only falling back to it when an in-place upgrade is rejected.
+  forceClean     Boolean @default(false)
+  canaryCount    Int     @default(0)
+  soakMinutes    Int     @default(0)
+  maxConcurrency Int?
+  maxAttempts    Int     @default(3)
+
+  note        String?
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt        DateTime  @default(now())
+  startedAt        DateTime?
+  canaryPassedAt   DateTime?
+  finishedAt       DateTime?
+
+  jobs Job[]
+
+  @@index([status])
+}
+
+model Job {
+  id        String  @id @default(cuid())
+  rolloutId String
+  rollout   Rollout @relation(fields: [rolloutId], references: [id], onDelete: Cascade)
+  deviceId  String
+  device    Device  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  state    JobState @default(QUEUED)
+  /// 0-100 within the current state. Download progress is the slow one.
+  progress Int      @default(0)
+  isCanary Boolean  @default(false)
+
+  attempt   Int     @default(0)
+  lastError String?
+
+  installMode InstallMode?
+  /// True when the install had to fall back to uninstall, or forceClean was
+  /// set. Surfaced in the UI because it means the box lost its app data.
+  dataWiped   Boolean      @default(false)
+
+  fromVersion String?
+  toVersion   String
+
+  queuedAt     DateTime  @default(now())
+  dispatchedAt DateTime?
+  startedAt    DateTime?
+  /// Last progress message from the agent, used to detect stalled jobs.
+  heartbeatAt  DateTime?
+  finishedAt   DateTime?
+
+  events JobEvent[]
+
+  @@unique([rolloutId, deviceId])
+  @@index([state])
+  @@index([deviceId, state])
+}
+
+model JobEvent {
+  id      String   @id @default(cuid())
+  jobId   String
+  job     Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  ts      DateTime @default(now())
+  level   LogLevel @default(INFO)
+  phase   JobState?
+  message String
+
+  @@index([jobId, ts])
+}
+
+// ---------------------------------------------------------------------------
+// Access
+// ---------------------------------------------------------------------------
+
+model EnrollmentToken {
+  id     String @id @default(cuid())
+  label  String
+  /// sha256 of the token. The plaintext is shown once, when it is created.
+  tokenHash String @unique
+  /// First 8 chars of the plaintext, so the UI can tell tokens apart.
+  prefix    String
+
+  /// Devices enrolling with this token skip manual approval.
+  autoApprove Boolean @default(true)
+  maxUses     Int?
+  uses        Int     @default(0)
+  revoked     Boolean @default(false)
+  expiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         UserRole @default(ADMIN)
+
+  rollouts Rollout[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  userEmail  String?
+  action     String
+  targetType String?
+  targetId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// Fleet-wide key/value settings that are editable from the dashboard.
+/// Anything that belongs in infrastructure config lives in env instead.
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,49 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$MAGNEMITE_DOMAIN} {
+	log {
+		output stdout
+		format console
+	}
+
+	# --- Artifact downloads -------------------------------------------------
+	# Up to 200 devices pulling a ~170 MB .apkm. Served straight off the shared
+	# volume so Node never sits in the data path: Caddy handles Range requests
+	# natively, which is what makes an interrupted download resumable.
+	handle_path /files/* {
+		# Every request carries the device's bearer token; the hub says yes or no.
+		forward_auth hub:{$HUB_PORT} {
+			uri /internal/authz
+			copy_headers X-Device-Id
+		}
+		root * /srv/artifacts
+		# No `encode` here: .apkm is a zip, compressing it again just burns CPU.
+		file_server
+	}
+
+	# --- Device WebSocket ---------------------------------------------------
+	handle /ws/device {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
+	# --- Agent enrollment (no session yet, so it bypasses the dashboard) -----
+	handle /api/enroll {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
+	# --- Live job/device updates for the dashboard --------------------------
+	handle /api/events* {
+		reverse_proxy hub:{$HUB_PORT} {
+			# SSE: never buffer, never time out an idle stream.
+			flush_interval -1
+		}
+	}
+
+	# --- Dashboard ----------------------------------------------------------
+	handle {
+		encode zstd gzip
+		reverse_proxy web:3000
+	}
+}

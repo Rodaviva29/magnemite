@@ -1,0 +1,31 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Prisma generated client
+packages/db/generated/
+
+# Go agent build output
+agent/bin/
+agent/dist/
+
+# Runtime data
+data/
+artifacts/
+caddy_data/
+caddy_config/
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.log
