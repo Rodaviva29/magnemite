@@ -138,7 +138,19 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
                   : "—"
               }
             />
-            <Field label="Last seen" value={online ? "now" : formatRelative(device.lastSeenAt)} />
+            <Field
+              label="Last seen"
+              // The relative label rounds hard — "2m ago" covers anything from
+              // 61 to 119 seconds — and when you are watching a box come back
+              // the exact age is the whole point.
+              value={
+                device.lastSeenAt
+                  ? `${online ? "now" : formatRelative(device.lastSeenAt)} (${secondsSince(
+                      device.lastSeenAt,
+                    )}s)`
+                  : "never"
+              }
+            />
           </CardContent>
         </Card>
 
@@ -184,9 +196,14 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
               percent={diskUsed === null || !diskTotal ? null : (diskUsed / diskTotal) * 100}
             />
             {device.loadAvg5 !== null || device.loadAvg15 !== null ? (
+              // The raw 5/15-minute load averages mean nothing to most people
+              // ("15 min 1.64" — of what?). Against the core count they turn
+              // into the same percentage the CPU bar above already shows, which
+              // is what makes "busy right now" versus "busy all afternoon"
+              // readable at a glance.
               <p className="text-xs text-muted-foreground">
-                5 min {device.loadAvg5?.toFixed(2) ?? "—"} · 15 min{" "}
-                {device.loadAvg15?.toFixed(2) ?? "—"}
+                CPU averaged {loadText(device.loadAvg5, device.cpuCount)} over the last 5m
+                and {loadText(device.loadAvg15, device.cpuCount)} over 15m
               </p>
             ) : null}
           </CardContent>
@@ -232,6 +249,18 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
   );
 }
 
+/** A load average as a share of the box's cores, which is how the bars read. */
+function loadText(load: number | null, cores: number | null): string {
+  if (load === null) return "—";
+  if (!cores) return load.toFixed(2);
+  return `${Math.round((load / cores) * 100)}%`;
+}
+
+/** Whole seconds since a timestamp, floored at zero for a clock skew. */
+function secondsSince(date: Date): number {
+  return Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+}
+
 /**
  * A labelled bar. `percent` is null when the box has not reported the reading —
  * an agent old enough to predate these metrics — and that reads as "not
@@ -250,7 +279,10 @@ function Meter({
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-muted-foreground">{label}</span>
-        <span className="text-right text-xs">{detail}</span>
+        <span className="text-right text-xs">
+          {detail}
+          {percent === null ? "" : ` (${Math.round(percent)}%)`}
+        </span>
       </div>
       {percent === null ? (
         <Progress value={0} tone="muted" />
