@@ -104,7 +104,7 @@ compose fills the dashboard one in for you. Set `MAGNEMITE_PUBLIC_URL` and
 you are done.
 
 **With Coolify** they are split across two domains — the dashboard on
-`magnemite.example.com`, the hub on `agents.magnemite.example.com` — so the
+`magnemite.example.com`, the hub on `agents.magnemite.example.com`: so the
 boxes get the `agents.` one.
 
 ---
@@ -191,6 +191,65 @@ the address.
 **Upgrading from an earlier version of this file.** The boxes' domain moved
 from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE`. Keep the same domain
 value and nothing needs re-flashing: a box only ever knows the URL.
+
+#### Deploying the dashboard without dropping the fleet
+
+A Coolify Compose resource is one deploy unit: every service with a `build:`
+is rebuilt under a tag carrying the current commit, so `up -d` sees changed
+config everywhere and recreates the lot. That is fine for `web` and fatal for
+`hub` — a couple of hundred device sockets go down with it, and they all come
+back at once.
+
+`hub` is a separate process from `web` precisely so a dashboard rebuild does
+not touch those sockets. To get that on Coolify, narrow the deploy with the
+resource's **Custom Build Command** and **Custom Start Command** (General tab),
+which replace the Compose commands Coolify would otherwise run. It injects the
+`-f` and `--env-file` flags itself, so leave those out.
+
+Dashboard-only — the common case:
+
+```sh
+# Custom Build Command
+docker compose build web
+# Custom Start Command
+docker compose up -d --no-deps web
+```
+
+Hub and edge, when the hub itself changed:
+
+```sh
+# Custom Build Command
+docker compose build hub
+# Custom Start Command
+docker compose up -d --no-deps hub edge
+```
+
+Clearing both fields restores the full-stack deploy, which is what the first
+deploy has to be.
+
+> [!IMPORTANT]
+> `--no-deps` is not optional. Without it Compose starts what `web` declares in
+> `depends_on` — `postgres` and `hub` — and recreates them, because their image
+> tags moved with the commit. That is the exact restart this is meant to avoid.
+>
+> For the same reason, never add `--remove-orphans` or `--force-recreate`: both
+> reach past the service you named.
+
+Two things follow from the build being narrowed. The compose file Coolify
+generates still points `hub` at an image tagged with the current commit, and
+that image will not exist if only `web` was built — harmless while every
+`up` carries `--no-deps`, but a plain `docker compose up -d` over SSH would try
+to pull it. And the fields are a property of the resource, not of a single run:
+until they are changed back, **Deploy** means *deploy the dashboard*, whoever
+presses it.
+
+When hub deploys stop being rare, or once more than one person is pressing that
+button, split the stack into two Coolify resources instead — one for
+`postgres` + `hub` + `edge`, one for `web`, joined by an external network and an
+external `artifacts` volume. Each gets its own deploy button and its own watch
+paths; the cost is that `SERVICE_PASSWORD_*` values are generated per resource,
+so `HUB_INTERNAL_SECRET`, `DATABASE_URL` and `MAGNEMITE_PUBLIC_URL` have to be
+copied onto the `web` resource as plain variables.
 
 #### Why there is still a Caddy on Coolify
 
