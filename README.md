@@ -72,9 +72,11 @@ fine and updating two hundred is not.
 - **hub** — holds the device sockets, schedules jobs, polls both releases, and downloads each `.apkm` onto the server once.
 - **web** — the dashboard. Reads Postgres directly; anything that touches a
   live socket goes through the hub's internal API.
-- **edge** — Caddy in `docker-compose.yml`, or Coolify's own proxy in
-  `docker-compose.coolify.yml`. It terminates TLS and, in the Caddy setup,
-  streams the cached bundles straight off the shared volume.
+- **edge** — Caddy. It fronts the hub and streams the cached bundles straight
+  off the shared volume, so the ~35 GB of a fleet-wide rollout never passes
+  through Node. In `docker-compose.yml` it also terminates TLS and serves the
+  dashboard; in `docker-compose.coolify.yml` Coolify's proxy handles TLS and
+  Caddy sits behind it, in front of the hub only.
 
 The hub is a separate process from the dashboard on purpose: 200 device sockets
 have to survive a dashboard rebuild.
@@ -143,16 +145,18 @@ domain with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 
 ### With Coolify
 
-`docker-compose.coolify.yml` drops Caddy and lets Coolify's proxy terminate
-TLS. It uses two domains rather than path routing:
+`docker-compose.coolify.yml` lets Coolify's proxy terminate TLS and keeps a
+small Caddy of our own (`edge`) in front of the hub — see
+[Why there is still a Caddy on Coolify](#why-there-is-still-a-caddy-on-coolify).
+It uses two domains rather than path routing:
 
-| Coolify variable        | Points at                                                            |
-| ----------------------- | -------------------------------------------------------------------- |
-| `SERVICE_FQDN_WEB_3000` | the dashboard you log into                                           |
-| `SERVICE_FQDN_HUB_3001` | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
+| Coolify variable         | Points at                                                            |
+| ------------------------ | -------------------------------------------------------------------- |
+| `SERVICE_FQDN_WEB_3000`  | the dashboard you log into                                           |
+| `SERVICE_FQDN_EDGE_8080` | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
 
-Deploy it as **New Resource → Docker Compose**, set both domains, then run the
-seed once:
+Deploy it as **New Resource → Docker Compose**, set both domains, set
+`ADMIN_EMAIL` and `ADMIN_PASSWORD`, then run the seed once:
 
 ```sh
 docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
@@ -161,11 +165,32 @@ docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
 Coolify generates the Postgres password, the internal secret and `AUTH_SECRET`
 itself and shows them in the Environment tab.
 
-> [!NOTE]
-> With no reverse proxy of ours, the hub serves the ~170 MB bundles
-> (`SERVE_ARTIFACTS=true`). Node handles it fine at this fleet size, but it is
-> not nginx — if egress becomes the bottleneck, put a static file server in
-> front of `/files`.
+> [!IMPORTANT]
+> `ADMIN_PASSWORD` has no default here on purpose — the deploy fails rather
+> than seeding a well-known password onto a public domain. There is no `.env`
+> file inside the container, so the seed reads these from the hub service's
+> environment.
+
+**Upgrading from an earlier version of this file.** The boxes' domain moved
+from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE_8080`. Keep the same domain
+value and nothing needs re-flashing: a box only ever knows the URL.
+
+#### Why there is still a Caddy on Coolify
+
+Coolify's proxy (Traefik) routes; it does not serve files. It has no
+`file_server` equivalent, and the `artifacts` volume belongs to this stack, not
+to the Coolify-managed proxy container — so pointing the boxes' domain straight
+at the hub means every one of those ~170 MB bundles is read and pushed by Node.
+
+The `edge` service closes that gap. It mounts `artifacts` read-only, answers
+`/files/*` with `file_server` (native `Range`, so an interrupted download
+resumes) behind a `forward_auth` call to the hub's `/internal/authz`, and
+proxies only `/ws/device`, `/api/enroll` and `/healthz` through. Everything else
+on that domain is a 404, which keeps the hub's `/internal/*` API unreachable
+from outside — the same guarantee the Caddy setup gives.
+
+So `SERVE_ARTIFACTS` is `false` in both deployments, and Node stays out of the
+data path either way.
 
 ---
 
@@ -380,7 +405,8 @@ pnpm --filter @magnemite/web dev     # :3000
 
 The dev `.env` sets `SERVE_ARTIFACTS=true` so the hub serves `/files/*` itself,
 standing in for Caddy, and points `MAGNEMITE_PUBLIC_URL` straight at `:3001`.
-Leave `SERVE_ARTIFACTS` **off** in a Caddy deployment.
+Leave `SERVE_ARTIFACTS` **off** in either deployment: both put Caddy in front
+of `/files/*`.
 
 ### Testing without hardware
 

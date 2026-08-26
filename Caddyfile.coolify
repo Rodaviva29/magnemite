@@ -1,0 +1,59 @@
+# Magnemite's own edge, for the Coolify deployment.
+#
+# Coolify's proxy (Traefik) terminates TLS and forwards plain HTTP here, so
+# auto-HTTPS is off and the site address carries no domain: this listens on
+# :8080 and serves whatever Coolify routes to it.
+#
+# It exists for one reason. Traefik is a reverse proxy, not a file server, and
+# it cannot mount our artifacts volume — so without this the ~170 MB bundles
+# would go out through Node (SERVE_ARTIFACTS=true). Here they stream straight
+# off the shared volume, with Range handled natively, and Node stays out of the
+# data path.
+#
+# This is the domain the boxes talk to, and only what the boxes need is routed.
+# /internal/* is dashboard-only and deliberately unreachable from here.
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	log {
+		output stdout
+		format console
+	}
+
+	# --- Artifact downloads -------------------------------------------------
+	# Up to MAX_CONCURRENT_JOBS devices pulling a ~170 MB .apkm at once.
+	handle_path /files/* {
+		# Every request carries the device's bearer token; the hub says yes or no.
+		forward_auth hub:{$HUB_PORT} {
+			uri /internal/authz
+			copy_headers X-Device-Id
+		}
+		root * /srv/artifacts
+		# No `encode` here: .apkm is a zip, compressing it again just burns CPU.
+		file_server
+	}
+
+	# --- Device WebSocket ---------------------------------------------------
+	handle /ws/device {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
+	# --- Agent enrollment ---------------------------------------------------
+	handle /api/enroll {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
+	# --- Liveness -----------------------------------------------------------
+	handle /healthz {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
+	# The dashboard lives on its own domain and reaches the hub over the compose
+	# network, so nothing else belongs on this one.
+	handle {
+		respond "not found" 404
+	}
+}

@@ -1,25 +1,29 @@
 # Magnemite on Coolify.
 #
-# Coolify's own proxy terminates TLS and routes to the containers, so there is
-# no Caddy service here. Two domains are used instead of path routing, because
-# the agents and the dashboard are separate audiences:
+# Coolify's proxy terminates TLS and routes to the containers, so there is no
+# Caddy in front of the whole stack. There is still one in front of the hub:
+# Traefik is a reverse proxy, not a file server, and it cannot mount our
+# artifacts volume, so the `edge` service serves the ~170 MB bundles straight
+# off that volume and keeps Node out of the data path.
 #
-#   SERVICE_FQDN_WEB_3000  → the dashboard people log into
-#   SERVICE_FQDN_HUB_3001  → what the boxes talk to: /ws/device, /api/enroll
-#                            and /files/*
+# Two domains are used instead of path routing, because the agents and the
+# dashboard are separate audiences:
+#
+#   SERVICE_FQDN_WEB_3000   -> the dashboard people log into
+#   SERVICE_FQDN_EDGE_8080  -> what the boxes talk to: /ws/device, /api/enroll
+#                              and /files/*
 #
 # Coolify replaces every SERVICE_* placeholder on first deploy and shows the
 # generated values (domains, passwords) in the app's Environment tab. Point the
-# hub domain at a subdomain such as agents.<your-domain>.
+# edge domain at a subdomain such as agents.<your-domain>.
 #
-# Deploying: New Resource → Docker Compose → point it at this file, set the two
-# domains, then run the seed once:
+# Deploying: New Resource -> Docker Compose -> point it at this file, set the
+# two domains and ADMIN_EMAIL / ADMIN_PASSWORD, then run the seed once:
 #   docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
 #
-# Trade-off vs. the Caddy setup: with no reverse proxy of our own, the hub
-# serves the ~170 MB bundles itself (SERVE_ARTIFACTS=true). Node streams them
-# fine at this fleet size, but it is not nginx — if egress becomes the
-# bottleneck, put a static file server in front of /files.
+# Upgrading from an earlier version of this file: the hub domain moved from
+# SERVICE_FQDN_HUB_3001 to SERVICE_FQDN_EDGE_8080. Keep the same domain value
+# and the fleet needs no re-flashing -- the boxes only know the URL.
 
 services:
   postgres:
@@ -50,19 +54,16 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # Coolify turns this into the public URL for port 3001 and injects it back
-      # as the variable's value.
-      SERVICE_FQDN_HUB_3001: ${SERVICE_FQDN_HUB_3001}
       NODE_ENV: production
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
       HUB_PORT: 3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
       # Artifact URLs handed to the boxes are built from this, so it has to be
-      # the hub's own domain.
-      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_HUB_3001}
+      # the domain the boxes reach -- the edge's, not the dashboard's.
+      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_EDGE_8080}
       ARTIFACT_DIR: /data/artifacts
-      # No reverse proxy of ours in this setup, so the hub serves the bundles.
-      SERVE_ARTIFACTS: "true"
+      # The edge serves /files/* off the shared volume, so Node never does.
+      SERVE_ARTIFACTS: "false"
       MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-10}
       JOB_STALL_TIMEOUT: ${JOB_STALL_TIMEOUT:-900}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
@@ -70,10 +71,43 @@ services:
       ROTOM_ENABLED: ${ROTOM_ENABLED:-false}
       ROTOM_URL: ${ROTOM_URL:-}
       ROTOM_SECRET: ${ROTOM_SECRET:-}
+      # `pnpm db:seed` runs in this container, and there is no .env file inside
+      # it -- without these the seed would fall back to its own defaults and
+      # create admin@example.com with a well-known password.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set a strong admin password}
     volumes:
       - artifacts:/data/artifacts
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3001/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # The piece Coolify's proxy cannot be: a file server with the artifacts
+  # volume mounted. Everything the boxes touch goes through here.
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      hub:
+        condition: service_started
+    environment:
+      # Coolify turns this into the public URL for port 8080 and injects it
+      # back as the variable's value. This is the domain the boxes are built
+      # with -- use a subdomain such as agents.<your-domain>.
+      SERVICE_FQDN_EDGE_8080: ${SERVICE_FQDN_EDGE_8080}
+      HUB_PORT: 3001
+    volumes:
+      - ./Caddyfile.coolify:/etc/caddy/Caddyfile:ro
+      # Read-only: Caddy streams the cached .apkm files straight off here, so
+      # the ~35 GB of a full rollout never passes through Node.
+      - artifacts:/srv/artifacts:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -96,7 +130,7 @@ services:
       # Better Auth signs and validates cookies against these two.
       AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
       BETTER_AUTH_URL: ${SERVICE_FQDN_WEB_3000}
-      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_HUB_3001}
+      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_EDGE_8080}
       MAGNEMITE_DASHBOARD_URL: ${SERVICE_FQDN_WEB_3000}
       HUB_URL: http://hub:3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
@@ -111,3 +145,5 @@ services:
 volumes:
   pgdata:
   artifacts:
+  caddy_data:
+  caddy_config:
