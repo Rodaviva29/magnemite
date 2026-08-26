@@ -101,11 +101,13 @@ services:
       hub:
         condition: service_started
     environment:
-      # Coolify turns this into the public URL for port 8080 and injects it
-      # back as the variable's value. This is the domain the boxes are built
-      # with -- use a subdomain such as agents.<your-domain>.
-      SERVICE_FQDN_EDGE_8080: ${SERVICE_FQDN_EDGE_8080}
-      HUB_PORT: 3001
+      # Declared bare on purpose: Coolify sees the key, generates the public
+      # URL for port 8080 and injects it as the value. Writing
+      # `${SERVICE_FQDN_EDGE_8080}` here would make Compose interpolate a
+      # variable that does not exist yet and blank it out.
+      # Use a subdomain such as agents.<your-domain>.
+      - SERVICE_FQDN_EDGE_8080
+      - HUB_PORT=3001
     volumes:
       - ./Caddyfile.coolify:/etc/caddy/Caddyfile:ro
       # Read-only: Caddy streams the cached .apkm files straight off here, so
@@ -131,17 +133,20 @@ services:
       hub:
         condition: service_started
     environment:
-      SERVICE_FQDN_WEB_3000: ${SERVICE_FQDN_WEB_3000}
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
+      # Bare, like the edge one above: Coolify generates the dashboard URL for
+      # port 3000 from this key. The `${SERVICE_FQDN_WEB_3000}` references
+      # below resolve once Coolify has written the generated value out.
+      - SERVICE_FQDN_WEB_3000
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
       # Better Auth signs and validates cookies against these two.
-      AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
-      BETTER_AUTH_URL: ${SERVICE_FQDN_WEB_3000}
-      MAGNEMITE_PUBLIC_URL: ${SERVICE_FQDN_EDGE_8080}
-      MAGNEMITE_DASHBOARD_URL: ${SERVICE_FQDN_WEB_3000}
-      HUB_URL: http://hub:3001
-      HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@magnemite.com}
+      - AUTH_SECRET=${SERVICE_BASE64_64_AUTHSECRET}
+      - BETTER_AUTH_URL=${SERVICE_FQDN_WEB_3000}
+      - MAGNEMITE_PUBLIC_URL=${SERVICE_FQDN_EDGE_8080}
+      - MAGNEMITE_DASHBOARD_URL=${SERVICE_FQDN_WEB_3000}
+      - HUB_URL=http://hub:3001
+      - HUB_INTERNAL_SECRET=${SERVICE_PASSWORD_HUBSECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@magnemite.com}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
       interval: 15s

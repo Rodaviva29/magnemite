@@ -159,6 +159,7 @@ Deploy it as **New Resource → Docker Compose**, set both domains, then run the
 seed once:
 
 ```sh
+docker ps --format '{{.Names}}' | grep hub
 docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
 ```
 
