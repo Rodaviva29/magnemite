@@ -150,10 +150,10 @@ small Caddy of our own (`edge`) in front of the hub — see
 [Why there is still a Caddy on Coolify](#why-there-is-still-a-caddy-on-coolify).
 It uses two domains rather than path routing:
 
-| Coolify variable         | Points at                                                            |
-| ------------------------ | -------------------------------------------------------------------- |
-| `SERVICE_FQDN_WEB_3000`  | the dashboard you log into                                           |
-| `SERVICE_FQDN_EDGE_8080` | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
+| Coolify variable     | Points at                                                             |
+| -------------------- | --------------------------------------------------------------------- |
+| `SERVICE_FQDN_WEB`   | the dashboard you log into                                            |
+| `SERVICE_FQDN_EDGE`  | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
 
 Deploy it as **New Resource → Docker Compose**, set both domains, then run the
 seed once:
@@ -180,7 +180,7 @@ the address.
 > not only on `web`.
 
 **Upgrading from an earlier version of this file.** The boxes' domain moved
-from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE_8080`. Keep the same domain
+from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE`. Keep the same domain
 value and nothing needs re-flashing: a box only ever knows the URL.
 
 #### Why there is still a Caddy on Coolify
