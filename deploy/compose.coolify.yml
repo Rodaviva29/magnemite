@@ -113,13 +113,17 @@ services:
       hub:
         condition: service_started
     environment:
-      # Declared bare on purpose: Coolify fills this from the service's
-      # Domains tab. Writing `${SERVICE_FQDN_EDGE}` here would make Compose
-      # interpolate a variable that does not exist yet and blank it out.
+      # Declared with no value on purpose: Coolify fills this from the
+      # service's Domains tab. Writing `${SERVICE_FQDN_EDGE}` here would make
+      # Compose interpolate a variable that does not exist yet and blank it
+      # out. A list-form bare entry (`- SERVICE_FQDN_EDGE`) means the same
+      # thing but Coolify's own compose preview mis-converts it into a
+      # numeric map key, which fails with "non-string key in
+      # services.edge.environment: 0" -- use map form instead.
       # Use a subdomain such as agents.<your-domain>, and give the domain the
       # `:8080` suffix in the Domains tab so the proxy hits Caddy's port.
-      - SERVICE_FQDN_EDGE
-      - HUB_PORT=3001
+      SERVICE_FQDN_EDGE:
+      HUB_PORT: 3001
     volumes:
       # Read-only: Caddy streams the cached .apkm files straight off here, so
       # the ~35 GB of a full rollout never passes through Node.
@@ -144,24 +148,26 @@ services:
       hub:
         condition: service_started
     environment:
-      # Bare, like the edge one above: Coolify fills this from the Domains
-      # tab, and the container gets the dashboard's domain under this name.
-      # It is also the safety net for the auth URLs below: `${SERVICE_URL_WEB}`
-      # is not always populated by the time Compose interpolates it, and when
-      # it is not, the reference collapses to an empty string. The app falls
-      # back to SERVICE_FQDN_WEB, so keep this line even if you set the two
-      # explicitly.
-      - SERVICE_FQDN_WEB
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
+      # No value, like the edge one above: Coolify fills this from the
+      # Domains tab, and the container gets the dashboard's domain under this
+      # name. It is also the safety net for the auth URLs below:
+      # `${SERVICE_URL_WEB}` is not always populated by the time Compose
+      # interpolates it, and when it is not, the reference collapses to an
+      # empty string. The app falls back to SERVICE_FQDN_WEB, so keep this
+      # line even if you set the two explicitly. Map form (not a bare list
+      # item) so Coolify's compose preview doesn't mis-key it -- see the edge
+      # service's comment.
+      SERVICE_FQDN_WEB:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
       # Better Auth signs and validates cookies against these two.
-      - AUTH_SECRET=${SERVICE_BASE64_64_AUTHSECRET}
-      - BETTER_AUTH_URL=${SERVICE_URL_WEB}
-      - MAGNEMITE_PUBLIC_URL=${SERVICE_URL_EDGE}
-      - MAGNEMITE_DASHBOARD_URL=${SERVICE_URL_WEB}
-      - HUB_URL=http://hub:3001
-      - HUB_INTERNAL_SECRET=${SERVICE_PASSWORD_HUBSECRET}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@magnemite.com}
+      AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
+      BETTER_AUTH_URL: ${SERVICE_URL_WEB}
+      MAGNEMITE_PUBLIC_URL: ${SERVICE_URL_EDGE}
+      MAGNEMITE_DASHBOARD_URL: ${SERVICE_URL_WEB}
+      HUB_URL: http://hub:3001
+      HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@magnemite.com}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
       interval: 15s
