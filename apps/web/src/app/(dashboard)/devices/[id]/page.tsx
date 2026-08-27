@@ -9,7 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { OnlineDot } from "@/components/status";
 import { DeviceControls } from "@/components/device-controls";
-import { DeviceHistory, type DeviceJobRow } from "@/components/device-history";
+import {
+  DeviceHistory,
+  type DeviceAgentUpdateRow,
+  type DeviceJobRow,
+} from "@/components/device-history";
 import { DevicePackages, type DevicePackageRow } from "@/components/device-packages";
 import { DeviceLastSeen } from "@/components/device-last-seen";
 import { formatBytes, formatDuration, formatRelative } from "@/lib/format";
@@ -26,6 +30,12 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
       include: {
         group: true,
         packages: { orderBy: { packageName: "asc" } },
+        agentUpdates: {
+          orderBy: { sentAt: "desc" },
+          // Same idea as the job cap below: enough history to see a pattern,
+          // not the whole life of the box.
+          take: 50,
+        },
         jobs: {
           orderBy: { queuedAt: "desc" },
           // The table pages client-side, so this is a cap on how far back the
@@ -65,6 +75,16 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
     finishedAt: job.finishedAt?.toISOString() ?? null,
     durationMs:
       job.startedAt && job.finishedAt ? job.finishedAt.getTime() - job.startedAt.getTime() : null,
+  }));
+
+  const agentUpdateRows: DeviceAgentUpdateRow[] = device.agentUpdates.map((update) => ({
+    id: update.id,
+    fromVersion: update.fromVersion,
+    toVersion: update.toVersion,
+    state: update.state,
+    error: update.error,
+    sentAt: update.sentAt.toISOString(),
+    finishedAt: update.finishedAt?.toISOString() ?? null,
   }));
 
   const tracked = new Set(targets.map((t) => t.packageName));
@@ -248,7 +268,7 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           <CardTitle className="text-sm">Update history</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <DeviceHistory jobs={jobRows} />
+          <DeviceHistory jobs={jobRows} agentUpdates={agentUpdateRows} />
         </CardContent>
       </Card>
     </div>

@@ -8,6 +8,11 @@ import { eventRoutes } from "./routes/events.js";
 import { fileRoutes } from "./routes/files.js";
 import { internalRoutes } from "./routes/internal.js";
 import { connectionCount } from "./registry.js";
+import {
+  loadAgentRelease,
+  startAgentUpdateSweep,
+  stopAgentUpdateSweep,
+} from "./services/agentRelease.js";
 import { ensureArtifactDir } from "./services/artifacts.js";
 import { sweepOffline } from "./services/devices.js";
 import { rotomEnabled, syncDevices } from "./services/rotom.js";
@@ -19,6 +24,9 @@ const OFFLINE_SWEEP_MS = 30_000;
 
 async function main() {
   await ensureArtifactDir();
+  // Publishes the agent binaries this image was built with, so boxes on an
+  // older build are updated as they reconnect.
+  await loadAgentRelease();
 
   const app = Fastify({
     loggerInstance: log,
@@ -56,6 +64,7 @@ async function main() {
 
   startScheduler();
   startPolling();
+  startAgentUpdateSweep();
 
   // Catches sockets that died without a close frame — a box losing power
   // leaves the connection hanging until TCP notices.
@@ -81,6 +90,7 @@ async function main() {
     clearInterval(rotom);
     stopScheduler();
     stopPolling();
+    stopAgentUpdateSweep();
     await app.close().catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     process.exit(0);

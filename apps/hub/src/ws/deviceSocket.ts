@@ -5,7 +5,8 @@ import { agentMessageSchema, type ServerMessage } from "@magnemite/protocol";
 import { hashToken, prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
-import { register, unregister } from "../registry.js";
+import { getConnection, register, unregister } from "../registry.js";
+import { maybeUpdateAgent, recordAgentUpdateFailure } from "../services/agentRelease.js";
 import { applyMetrics, markOffline, markOnline, trackedPackages } from "../services/devices.js";
 import { ACTIVE_STATES, applyProgress, completeJob, logJobEvent } from "../services/jobs.js";
 import { nudge } from "../services/scheduler.js";
@@ -101,6 +102,7 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
     socket: ws,
     remoteIp: ip,
     agentVersion: null,
+    abi: null,
     connectedAt: Date.now(),
     lastSeenAt: Date.now(),
     currentJobId: null,
@@ -201,11 +203,34 @@ async function handleMessage(ws: WebSocket, deviceId: string, ip: string | null,
       });
       await applyMetrics(deviceId, msg.metrics);
       await reconcileJobs(deviceId, msg.currentJobId ?? null, (m) => ws.send(JSON.stringify(m)));
+      // Kept on the connection so the periodic sweep can update a box that
+      // was busy — or over the batch limit — when it said hello.
+      const conn = getConnection(deviceId);
+      if (conn) {
+        conn.agentVersion = msg.agentVersion;
+        conn.abi = msg.device.abi ?? null;
+        conn.currentJobId = msg.currentJobId ?? null;
+      }
+
+      // A box on an older binary than the hub ships gets told to update
+      // itself. It re-execs and comes straight back with a new hello, which
+      // is where the update is confirmed.
+      maybeUpdateAgent(
+        {
+          id: deviceId,
+          abi: msg.device.abi ?? null,
+          agentVersion: msg.agentVersion,
+          currentJobId: msg.currentJobId ?? null,
+        },
+        (m) => ws.send(JSON.stringify(m)),
+      );
       nudge();
       break;
     }
 
     case "heartbeat": {
+      const conn = getConnection(deviceId);
+      if (conn) conn.currentJobId = msg.currentJobId ?? null;
       await applyMetrics(deviceId, msg.metrics);
       if (msg.currentJobId) {
         await prisma.job
@@ -247,6 +272,13 @@ async function handleMessage(ws: WebSocket, deviceId: string, ip: string | null,
       } else {
         log.debug({ deviceId, level: msg.level }, msg.message);
       }
+      break;
+    }
+
+    case "agent_update_result": {
+      // Only failures are reported. A successful swap is confirmed by the
+      // hello the new binary sends, not by a frame from the old one.
+      if (!msg.ok) await recordAgentUpdateFailure(deviceId, msg.version, msg.error ?? null);
       break;
     }
 

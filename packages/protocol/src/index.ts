@@ -132,6 +132,20 @@ export const logSchema = z.object({
   message: z.string(),
 });
 
+/**
+ * Sent when a self-update does not happen, so a failure is visible in the
+ * dashboard rather than only in the box's own log. Success needs no frame:
+ * the agent re-execs and the next `hello` carries the new version, which is
+ * the only proof that the new binary actually runs.
+ */
+export const agentUpdateResultSchema = z.object({
+  type: z.literal("agent_update_result"),
+  /** Version the agent was told to move to. */
+  version: z.string(),
+  ok: z.boolean(),
+  error: z.string().nullish(),
+});
+
 export const pongSchema = z.object({ type: z.literal("pong") });
 
 export const agentMessageSchema = z.discriminatedUnion("type", [
@@ -140,6 +154,7 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
   jobProgressSchema,
   jobResultSchema,
   logSchema,
+  agentUpdateResultSchema,
   pongSchema,
 ]);
 export type AgentMessage = z.infer<typeof agentMessageSchema>;

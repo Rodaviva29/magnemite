@@ -1,0 +1,141 @@
+---
+title: Shipping a change
+description: What to bump, what to rebuild, and in what order — for the hub, the dashboard, the agent and the database.
+icon: PackageCheck
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Magnemite is four moving parts that ship on different clocks: the **hub**, the
+**dashboard**, the **agent** on every box, and the **database schema**. This is
+what each one needs.
+
+## The one rule that catches everyone
+
+**The agent is versioned by the `VERSION` file at the repo root, and the fleet
+only moves when that string changes.**
+
+The hub compares the version a box reports with the version its own image was
+built from, as plain strings. New code with the same `VERSION` is a hub that
+believes the fleet is already where it should be — you deploy, nothing happens,
+and nothing is wrong in the logs either.
+
+```sh
+cat VERSION          # 0.1.2
+echo 0.1.3 > VERSION # this is what makes the fleet move
+```
+
+Same string, same fleet. It is not semver, so a _lower_ value is a downgrade
+the boxes will happily apply — which is also how you roll the agent back on
+purpose.
+
+<Callout type="warn">
+  `VERSION` is only about the **agent**. Changing hub or dashboard code needs no bump: those ship by
+  being redeployed, and nothing compares their versions.
+</Callout>
+
+## What each change needs
+
+| You changed                        | Bump `VERSION`? | What to do                                                          |
+| ---------------------------------- | --------------- | ------------------------------------------------------------------- |
+| `apps/web`                         | no              | Redeploy `web`                                                      |
+| `apps/hub`                         | no              | Redeploy `hub` (drops every device socket — see below)              |
+| `agent/`                           | **yes**         | Redeploy `hub`; the fleet updates itself                            |
+| `packages/protocol`                | **yes**         | Both sides implement it — redeploy `hub` **and** bump the agent     |
+| `packages/db/prisma/schema.prisma` | no              | Commit the migration; `hub` applies it on start                     |
+| `magisk-module/`                   | **yes**         | `make module` and reflash — this part is not delivered over the air |
+| `apps/docs`                        | no              | Redeploy `docs`                                                     |
+
+## The order that matters
+
+The wire protocol is implemented twice, and the two sides do not update at the
+same instant: the hub is redeployed in seconds, the fleet converges over
+minutes. So **only ever add optional fields**, and deploy the hub first.
+
+The hub tolerating a field an old agent does not send is fine — it is the
+normal state of the world for a while after every release. An agent sending
+something the hub does not understand yet is a dropped frame.
+
+## Database changes
+
+```sh
+pnpm db:migrate    # creates the migration and applies it locally
+git add packages/db/prisma/migrations
+```
+
+The hub's entrypoint runs `prisma migrate deploy` on every container start, so
+deploying the hub applies whatever is committed. Nothing is applied by the
+dashboard. Because the migration lands **before** the new hub code serves a
+request, additive changes are safe on their own; a destructive one (dropping or
+renaming a column something still reads) needs two releases, exactly as with
+the protocol.
+
+## Shipping the agent
+
+```sh
+echo 0.1.3 > VERSION
+git commit -am "agent: report the LAN address"
+git push
+# redeploy the hub
+docker compose up -d --build hub
+```
+
+The hub's image cross-compiles the agent, publishes the binaries, and tells
+each box to update as it reconnects — full flow, settings and failure handling
+in [updating the agent](/docs/fleet/agent-update).
+
+Before shipping something that touches the agent's connection or install path,
+run it against a [fake fleet](/docs/development/fake-fleet): a binary that
+crashes is caught by the module's respawn loop, but one that starts and cannot
+reach the hub takes the boxes offline for good, and that is a physical trip to
+each of them.
+
+## Redeploying the hub drops the fleet
+
+Every device socket goes down with the hub process. The agents reconnect on
+their own with backoff and queued jobs resume, so it is a few minutes of noise
+rather than damage — but on a large fleet, pick your moment. Narrowing a deploy
+so only the dashboard restarts is one setting on
+[Coolify](/docs/deployment/zero-downtime), and free under plain compose
+(`docker compose up -d --build web`).
+
+## Checklist
+
+<Steps>
+
+<Step>
+
+### Before the commit
+
+`pnpm --filter @magnemite/hub typecheck`, `pnpm --filter @magnemite/web typecheck`,
+`make agent-test` (vet + tests in Docker, no Go toolchain needed on the host).
+
+</Step>
+
+<Step>
+
+### If the agent or the protocol changed
+
+Bump `VERSION`. Check that new protocol fields are optional on both sides.
+
+</Step>
+
+<Step>
+
+### Deploy
+
+Hub first, then the dashboard. Migrations ride along with the hub.
+
+</Step>
+
+<Step>
+
+### Watch it land
+
+**Settings → Health** shows the agent target version and how many boxes are
+updating. Each device page lists its own agent updates in the update history,
+including failures and why.
+
+</Step>
+
+</Steps>

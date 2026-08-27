@@ -55,7 +55,9 @@ In bulk over the LAN:
 ```
 
 That is the only time a box needs hands-on work. After it reboots, every later
-update rides the socket it opened itself: no adb, no LAN access.
+update rides the socket it opened itself: no adb, no LAN access. That includes
+the agent itself — see [updating the agent](/docs/fleet/agent-update), which the
+hub drives on its own and which never needs the module reflashing.
 
 ## Without a baked-in config
 
@@ -68,7 +70,8 @@ Write `/data/adb/magnemite/config.json` on the box before rebooting:
 }
 ```
 
-The same values are available as flags: `-server`, `-enroll-token`, `-name`. 
+The same values are available as flags: `-server`, `-enroll-token`, `-name`.
+
 - The full list is in the [environment reference](/docs/deployment/environment#the-agents-own-configuration).
 
 ## What it does at boot

@@ -145,8 +145,9 @@ model Device {
   groupId String?
   group   DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
-  packages DevicePackage[]
-  jobs     Job[]
+  packages     DevicePackage[]
+  jobs         Job[]
+  agentUpdates AgentUpdate[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -156,6 +157,37 @@ model Device {
 }
 
 /// Installed version of each package we track, refreshed on every heartbeat.
+/// One attempt at swapping the agent binary on a box.
+///
+/// The row is written when the hub sends the update and closed when the box
+/// comes back — on the new version, or with the error the agent reported. It
+/// is what makes an agent update as auditable as an app update: without it a
+/// failed self-update is invisible, because the only symptom is a box that
+/// keeps reconnecting on the old version.
+model AgentUpdate {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  /// Null when the box never reported a version before this update.
+  fromVersion String?
+  toVersion   String
+  state       AgentUpdateState @default(SENT)
+  /// What the agent said went wrong. Null unless state is FAILED.
+  error       String?
+
+  sentAt     DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([deviceId, sentAt])
+}
+
+enum AgentUpdateState {
+  SENT // told to update, not seen on the new version yet
+  SUCCESS // reconnected running the new binary
+  FAILED // the agent reported a download, checksum or swap failure
+}
+
 model DevicePackage {
   id          String  @id @default(cuid())
   deviceId    String

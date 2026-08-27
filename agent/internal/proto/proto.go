@@ -118,6 +118,16 @@ type LogMessage struct {
 	Message string `json:"message"`
 }
 
+// AgentUpdateResult reports a self-update that did not happen. Success is not
+// reported: the agent re-execs, and the hello the new binary sends is the only
+// proof that it actually runs.
+type AgentUpdateResult struct {
+	Type    string `json:"type"` // "agent_update_result"
+	Version string `json:"version"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+}
+
 // --- hub -> agent ----------------------------------------------------------
 
 // Envelope is decoded first to find out which concrete message arrived.

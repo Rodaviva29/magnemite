@@ -33,11 +33,14 @@ export async function fileRoutes(app: FastifyInstance) {
     });
     if (!device?.approved) return reply.status(401).send();
 
-    // basename only: nothing under /files may escape the artifact directory.
-    const name = path.basename(request.params["*"] ?? "");
-    if (!name || name.startsWith(".")) return reply.status(404).send();
-
-    const full = path.join(env.ARTIFACT_DIR, name);
+    // Subpaths are allowed — agent releases live under agent/<version>/ — but
+    // nothing under /files may escape the artifact directory, so the resolved
+    // path is checked rather than the requested one.
+    const requested = request.params["*"] ?? "";
+    const root = path.resolve(env.ARTIFACT_DIR);
+    const full = path.resolve(root, requested);
+    if (full !== root && !full.startsWith(root + path.sep)) return reply.status(404).send();
+    if (path.basename(full).startsWith(".")) return reply.status(404).send();
     const stat = await fs.stat(full).catch(() => null);
     if (!stat?.isFile()) return reply.status(404).send();
 

@@ -1,0 +1,138 @@
+---
+title: Updating the agent
+description: The hub ships the binary it wants the fleet on, and the boxes converge by themselves.
+icon: RefreshCw
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+The agent updates itself over the air. Nothing is flashed again, and the Magisk
+module does not need reinstalling — it only ever delivered the binary and the
+`service.sh` that keeps it alive.
+
+## How a release happens
+
+```sh
+echo 0.1.3 > VERSION
+git commit -am "agent 0.1.3" && git push
+# then redeploy the hub
+docker compose up -d --build hub
+```
+
+That is the whole release. The hub's image cross-compiles the agent for arm64
+and arm during the build, so the running hub always carries the exact binary it
+wants the fleet on, plus the `VERSION` it came from.
+
+## What the hub does with it
+
+<Steps>
+
+<Step>
+
+### On boot
+
+The binaries are copied into `ARTIFACT_DIR` under `agent/<version>/` — the same
+volume the edge already serves `/files/*` from — and the hub takes their sha256.
+Earlier versions in that directory are removed.
+
+</Step>
+
+<Step>
+
+### On every hello
+
+A box that reports an `agentVersion` other than the hub's target, and is not
+running a job, is sent an `agent_update` with the URL, the checksum and the
+version. Boxes on the target version are left alone.
+
+</Step>
+
+<Step>
+
+### On the box
+
+The agent downloads with its own device token — the edge checks it through
+`forward_auth` exactly as it does for an `.apkm` — verifies the sha256, keeps
+the old binary as `.old`, swaps the new one in with an atomic rename and
+re-execs. The new process sends a fresh `hello`, which is what confirms the
+update.
+
+</Step>
+
+</Steps>
+
+Updates roll out in batches of `AGENT_UPDATE_CONCURRENCY` (5 by default). A box
+that was powered off for a month catches up the moment it dials in.
+
+## Settings
+
+| Variable                   | Default          | What it does                                                                             |
+| -------------------------- | ---------------- | ---------------------------------------------------------------------------------------- |
+| `AGENT_AUTO_UPDATE`        | `true`           | Set to `false` to pin the fleet and drive updates by hand.                               |
+| `AGENT_UPDATE_CONCURRENCY` | `5`              | How many boxes may be swapping their binary at once.                                     |
+| `AGENT_BIN_DIR`            | `/app/agent-bin` | Where the image keeps the binaries. Only worth changing if you build the image yourself. |
+
+**Settings → Health** shows the target version, and how many boxes are updating
+right now, on the Hub card. Each device's own version is on its page.
+
+## The history of it
+
+Every attempt is a row in the device's **Update history**, alongside the app
+installs, tagged `agent`:
+
+| State      | Means                                                                               |
+| ---------- | ----------------------------------------------------------------------------------- |
+| `updating` | The hub sent the update and has not seen the box on the new version yet.            |
+| `done`     | The box reconnected running the new binary. This is the only real proof.            |
+| `failed`   | The agent reported a download, checksum or swap failure — the reason is on the row. |
+
+A row that sits on `updating` is a box that never came back: it lost power, or
+the new binary starts but cannot reach the hub. The `Agent updates` option in
+the history filter shows only these rows.
+
+## Doing it by hand
+
+With `AGENT_AUTO_UPDATE=false`, or to push one box out of turn, the underlying
+route is still there:
+
+```sh
+curl -X POST http://hub:3001/internal/devices/<deviceId>/agent-update \
+  -H "x-magnemite-secret: $HUB_INTERNAL_SECRET" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://<box-facing domain>/files/agent/0.1.3/magnemite-agent-linux-arm64",
+       "sha256":"<sha256>","version":"0.1.3"}'
+```
+
+<Callout type="warn">
+  `/internal/*` is never routed by the edge — it is reachable only over the compose network, so run
+  this from inside the stack (`docker compose exec hub …`), not from the internet.
+</Callout>
+
+## When you do need the module again
+
+- **A brand-new box.** It has no agent at all yet — flash the module.
+- **A box that never comes online.** It cannot be told to update.
+- **`service.sh` or `customize.sh` changed.** Those live in the module, not in
+  the binary.
+
+Reinstalling an **old** module zip over an updated box puts the old binary back,
+so keep a freshly built zip around (`make module`) for the boxes you enroll
+later.
+
+## If an update goes wrong
+
+The swap is a rename on the same filesystem, so a box that loses power mid-update
+comes back running either the old binary or the new one, never half of one. If
+the new binary cannot start, the module's respawn loop puts `.old` back:
+
+```sh
+adb shell su -c 'tail -50 /data/adb/magnemite/agent.log'
+```
+
+Look for `self-update: downloading`, `self-update: restarting into <version>`,
+or a `checksum mismatch` — the last one means the box was served a different
+file than the hub published, which is what the checksum is there to catch.
+
+Those failures are also sent to the hub as an `agent_update_result` frame, so
+in most cases the reason is already on the device page and the box's log is
+only needed when nothing came back at all.

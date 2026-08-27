@@ -8,6 +8,8 @@ export type Connection = {
   socket: WebSocket;
   remoteIp: string | null;
   agentVersion: string | null;
+  /** ro.product.cpu.abi, so an agent update picks the right binary. */
+  abi: string | null;
   connectedAt: number;
   lastSeenAt: number;
   /** Job the agent says it is running right now, from hello/heartbeat. */
@@ -46,6 +48,10 @@ export function getConnection(deviceId: string): Connection | undefined {
 
 export function isOnline(deviceId: string): boolean {
   return connections.has(deviceId);
+}
+
+export function listConnections(): Connection[] {
+  return [...connections.values()];
 }
 
 export function onlineDeviceIds(): string[] {

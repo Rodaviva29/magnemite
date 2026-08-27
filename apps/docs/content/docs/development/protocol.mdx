@@ -10,13 +10,14 @@ The message set is small on purpose — it is implemented twice, in
 
 ## Box → hub
 
-| Message        | When                                                                                 |
-| -------------- | ------------------------------------------------------------------------------------ |
-| `hello`        | On connect: serial, model, Android version, installed Pokémon GO version, free space |
-| `heartbeat`    | Periodically, carrying the same live facts                                           |
-| `job_progress` | Download percentage, install phase, log lines                                        |
-| `job_result`   | Success or failure, with the verified version and whether data was wiped             |
-| `pong`         | Answering a `ping`                                                                   |
+| Message               | When                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `hello`               | On connect: serial, model, Android version, installed Pokémon GO version, free space |
+| `heartbeat`           | Periodically, carrying the same live facts                                           |
+| `job_progress`        | Download percentage, install phase, log lines                                        |
+| `job_result`          | Success or failure, with the verified version and whether data was wiped             |
+| `agent_update_result` | Only on failure: the self-update did not happen, and why                             |
+| `pong`                | Answering a `ping`                                                                   |
 
 ## Hub → box
 

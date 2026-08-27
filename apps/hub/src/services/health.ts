@@ -4,6 +4,7 @@ import { prisma } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount } from "../registry.js";
+import { agentTargetVersion, agentUpdatesInFlight } from "./agentRelease.js";
 import { listDevices, rotomEnabled } from "./rotom.js";
 import { getPollStats } from "./sources/poller.js";
 import { compareVersions } from "./sources/types.js";
@@ -74,6 +75,8 @@ function checkHub(): IntegrationCheck {
   const uptime = process.uptime();
   const hours = Math.floor(uptime / 3600);
   const minutes = Math.floor((uptime % 3600) / 60);
+  const agentTarget = agentTargetVersion();
+  const updating = agentUpdatesInFlight();
 
   return {
     key: "hub",
@@ -86,6 +89,12 @@ function checkHub(): IntegrationCheck {
       { label: "Concurrent installs", value: String(env.MAX_CONCURRENT_JOBS) },
       { label: "Source poll", value: `every ${env.SOURCE_POLL_MINUTES} min` },
       { label: "Artifacts served by", value: env.SERVE_ARTIFACTS ? "hub (Node)" : "edge (Caddy)" },
+      {
+        label: "Agent target",
+        value: agentTarget
+          ? `${agentTarget}${updating > 0 ? ` · ${updating} updating` : ""}`
+          : "auto-update off",
+      },
     ],
     detail: null,
     link: null,

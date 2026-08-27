@@ -19,6 +19,24 @@ const schema = z.object({
     .default("false")
     .transform((v) => v === "true" || v === "1"),
 
+  /**
+   * Agent self-update. The hub image ships the binaries it wants the fleet to
+   * run, so a box that reconnects on an older build is told to update itself.
+   * Turn it off to pin the fleet and drive updates by hand instead.
+   */
+  AGENT_AUTO_UPDATE: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false" && v !== "0"),
+  /** Where those binaries live, next to the VERSION they were built from. */
+  AGENT_BIN_DIR: z.string().default("/app/agent-bin"),
+  /**
+   * How many boxes may be swapping their binary at once. A self-update is a
+   * ~6 MB download and an exec, but the whole fleet reconnecting at the same
+   * second is still the hub's worst moment, so it converges in batches.
+   */
+  AGENT_UPDATE_CONCURRENCY: z.coerce.number().int().positive().default(5),
+
   /** Fleet-wide cap on how many devices download + install at once. */
   MAX_CONCURRENT_JOBS: z.coerce.number().int().positive().default(10),
   /** Seconds of silence from an agent mid-job before the job is re-queued. */

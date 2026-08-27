@@ -1,4 +1,4 @@
-import type { JobState, RolloutStatus, VersionStatus } from "@magnemite/db";
+import type { AgentUpdateState, JobState, RolloutStatus, VersionStatus } from "@magnemite/db";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +32,22 @@ const JOB_LABEL: Record<JobState, string> = {
 
 export function JobStateBadge({ state }: { state: JobState }) {
   return <Badge variant={JOB_TONE[state]}>{JOB_LABEL[state]}</Badge>;
+}
+
+const AGENT_UPDATE_TONE: Record<AgentUpdateState, Tone> = {
+  SENT: "info",
+  SUCCESS: "success",
+  FAILED: "danger",
+};
+
+const AGENT_UPDATE_LABEL: Record<AgentUpdateState, string> = {
+  SENT: "updating",
+  SUCCESS: "done",
+  FAILED: "failed",
+};
+
+export function AgentUpdateStateBadge({ state }: { state: AgentUpdateState }) {
+  return <Badge variant={AGENT_UPDATE_TONE[state]}>{AGENT_UPDATE_LABEL[state]}</Badge>;
 }
 
 const ROLLOUT_TONE: Record<RolloutStatus, Tone> = {

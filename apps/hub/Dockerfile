@@ -1,4 +1,26 @@
-# Build context is the repo root: the hub bundles two workspace packages.
+# Build context is the repo root: the hub bundles two workspace packages and
+# cross-compiles the Go agent so the fleet can update itself off this image.
+#
+# The agent binaries ship inside the hub for one reason: a hub that knows which
+# version it wants but has no copy of it turns every agent update into a manual
+# build-upload-curl. Here `docker compose up -d --build hub` is the whole
+# release, and the boxes converge on their own.
+FROM golang:1.23-alpine AS agent
+WORKDIR /src
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+COPY agent ./
+COPY VERSION /VERSION
+RUN set -e; \
+    v=$(cat /VERSION); \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+      go build -trimpath -ldflags "-s -w -X main.version=$v" \
+      -o /out/magnemite-agent-linux-arm64 ./cmd/magnemite-agent; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+      go build -trimpath -ldflags "-s -w -X main.version=$v" \
+      -o /out/magnemite-agent-linux-arm ./cmd/magnemite-agent; \
+    cp /VERSION /out/VERSION
+
 FROM node:22-alpine AS build
 # pnpm is baked into the image below with `corepack install`: with only
 # `corepack enable`, the first pnpm call in a fresh container downloads the
@@ -29,6 +51,9 @@ ENV NODE_ENV=production
 COPY --from=build /app ./
 # `packageManager` in the copied package.json pins the version.
 RUN corepack install
+# What the hub hands out as the agent's target version, with the VERSION file
+# it was built from next to it. AGENT_BIN_DIR points here.
+COPY --from=agent /out /app/agent-bin
 COPY apps/hub/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

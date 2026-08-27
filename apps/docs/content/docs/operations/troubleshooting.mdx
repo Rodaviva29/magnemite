@@ -57,6 +57,15 @@ weight — but so does the single-binary cross-compile.
 
 </Callout>
 
+## An agent that will not update
+
+The hub only sends `agent_update` to a box whose reported version differs from
+its target, that is not mid-job, and whose ABI it has a build for. Check
+**Settings → Health** for the target version and `AGENT_AUTO_UPDATE`, the
+device page for the version that box reports, and the box's own log for
+`self-update:` lines. Full flow in
+[updating the agent](/docs/fleet/agent-update).
+
 ## Small `/data`
 
 Boxes need roughly **450 MB** free: a 172 MB bundle unpacks to ~250 MB and both
