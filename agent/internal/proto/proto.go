@@ -48,6 +48,10 @@ type DeviceInfo struct {
 	SdkInt         int    `json:"sdkInt,omitempty"`
 	Abi            string `json:"abi,omitempty"`
 	Density        int    `json:"density,omitempty"`
+	// LAN address of the box itself. The hub only ever sees the reverse
+	// proxy's address on its own network, so this is the only way it learns
+	// where the box sits on the local network.
+	LocalIp string `json:"localIp,omitempty"`
 }
 
 type DeviceMetrics struct {

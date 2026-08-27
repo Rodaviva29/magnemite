@@ -1,0 +1,132 @@
+---
+title: Quick start
+description: From a clean server to a logged-in dashboard and a first enrolled box.
+icon: Rocket
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Two supported ways to run the stack. Pick one:
+
+<Cards>
+  <Card
+    title="Docker, behind a proxy"
+    href="/docs/deployment/docker-compose"
+    description="One virtual host; your own reverse proxy handles TLS."
+  />
+  <Card
+    title="Coolify"
+    href="/docs/deployment/coolify"
+    description="Coolify's proxy terminates TLS; two domains."
+  />
+</Cards>
+
+What follows is the short version of the docker compose path, end to end.
+
+<Steps>
+
+<Step>
+
+### Bring the stack up
+
+```sh
+git clone https://github.com/Rodaviva29/magnemite.git && cd magnemite
+cp .env.example .env
+# Set MAGNEMITE_PUBLIC_URL (and EDGE_PORT if 8080 is taken), then generate the
+# secrets:
+#   openssl rand -base64 32
+$EDITOR .env
+
+docker compose up -d --build
+```
+
+The stack publishes plain HTTP on `EDGE_PORT` (8080) and never binds 80 or 443:
+point a virtual host on your own reverse proxy at `http://127.0.0.1:8080` and
+terminate TLS there.
+
+</Step>
+
+<Step>
+
+### Seed the database
+
+```sh
+docker compose exec hub pnpm --filter @magnemite/db run seed
+```
+
+This creates the admin account from `ADMIN_EMAIL` / `ADMIN_PASSWORD`, the app
+target, and one **enrollment token** — printed once, so copy it now. Losing it
+costs nothing: mint another from Settings.
+
+</Step>
+
+<Step>
+
+### Sign in
+
+Open your domain and log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Sign-up is
+disabled by design; further accounts are created from **Settings → Accounts**.
+
+</Step>
+
+<Step>
+
+### Build the Magisk module
+
+`SERVER` is the **hub** URL — the same value as `MAGNEMITE_PUBLIC_URL`.
+
+```sh
+make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
+# → dist/magnemite-agent-0.1.2.zip
+```
+
+On Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`.
+
+</Step>
+
+<Step>
+
+### Flash a box
+
+```sh
+adb push dist/magnemite-agent-0.1.2.zip /data/local/tmp/
+adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-0.1.2.zip'"
+adb reboot
+```
+
+Or in bulk over the LAN: `./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f hosts.txt`.
+
+</Step>
+
+<Step>
+
+### Watch it appear
+
+The box enrolls itself on first boot and shows up in the fleet table with its
+serial, model, current Pokémon GO version and free space. 
+
+That is the only time it needs hands-on work. Every later update rides the socket it opened itself.
+
+</Step>
+
+</Steps>
+
+## Then what
+
+<Cards>
+  <Card
+    title="Run a rollout"
+    href="/docs/fleet/rollouts"
+    description="Canary a build on three boxes before the other 197."
+  />
+  <Card
+    title="Turn on automatic updates"
+    href="/docs/fleet/auto-update"
+    description="New version, cached, rolled out inside a time window."
+  />
+  <Card
+    title="Wire up Rotom (optional)"
+    href="/docs/fleet/rotom"
+    description="Make the scanner coming back the success signal."
+  />
+</Cards>

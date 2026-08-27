@@ -1,0 +1,110 @@
+---
+title: Docker, behind a proxy
+description: One virtual host, TLS from your own reverse proxy, four containers.
+icon: Container
+---
+
+`docker-compose.yml` is the self-contained deployment: our own Caddy publishes
+one plain-HTTP port, serves the dashboard and the artifacts, and proxies what
+belongs to the hub. TLS is not ours, nothing here binds 80 or 443, and
+whatever reverse proxy already fronts the server terminates it and forwards to
+`EDGE_PORT`.
+
+Use it when you have a VPS, a domain, and a proxy of your own (nginx, Caddy,
+Traefik, a tunnel) to put in front.
+
+## What runs
+
+| Service    | Image / build         | Ports                              |
+| ---------- | --------------------- | ---------------------------------- |
+| `postgres` | `postgres:17-alpine`  | `127.0.0.1:5433` → 5432, host-only |
+| `hub`      | `apps/hub/Dockerfile` | 3001, internal                     |
+| `web`      | `apps/web/Dockerfile` | 3000, internal                     |
+| `caddy`    | `caddy:2-alpine`      | `EDGE_PORT` (8080) → 8080, HTTP    |
+
+Postgres is published on `127.0.0.1:5433` on purpose: it is enough for Prisma
+Studio or `psql` from the host, and reachable from nowhere else.
+
+## Configuration
+
+Everything comes from `.env` at the repo root — copy `.env.example` and fill it
+in. The two that matter most:
+
+```sh title=".env"
+# Host port the edge publishes, in plain HTTP. Your proxy forwards to it.
+EDGE_PORT=8080
+# The base URL handed to agents. Artifact URLs are built from it.
+MAGNEMITE_PUBLIC_URL=https://magnemite.example.com
+```
+
+Both audiences share one virtual host, so compose sets
+`MAGNEMITE_DASHBOARD_URL` and `BETTER_AUTH_URL` from `MAGNEMITE_PUBLIC_URL` for
+you. The full list is in the [environment reference](/docs/deployment/environment).
+
+Generate the secrets rather than inventing them:
+
+```sh
+openssl rand -base64 32   # AUTH_SECRET
+openssl rand -base64 32   # HUB_INTERNAL_SECRET
+openssl rand -base64 24   # POSTGRES_PASSWORD
+```
+
+## Bringing it up
+
+```sh
+docker compose up -d --build
+docker compose exec hub pnpm --filter @magnemite/db run seed
+```
+
+The Makefile wraps the same commands:
+
+| Target         | Runs                                                  |
+| -------------- | ----------------------------------------------------- |
+| `make up`      | `docker compose up -d --build`                        |
+| `make down`    | `docker compose down`                                 |
+| `make logs`    | `docker compose logs -f hub web`                      |
+| `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub` |
+| `make seed`    | the seed inside `hub`                                 |
+
+## What your proxy needs to do
+
+Point one virtual host at `http://127.0.0.1:8080` and terminate TLS there. It
+has to forward WebSocket upgrades on `/ws/device`, and must not buffer
+`/api/events` (SSE, an idle stream that must never time out) or `/files/*`
+(~170 MB responses that agents resume with `Range`).
+
+## What the edge routes
+
+```
+:8080 {
+  /files/*      → file_server off the artifacts volume, behind forward_auth
+  /ws/device    → hub
+  /api/enroll   → hub
+  /healthz      → hub
+  everything else → web
+}
+```
+
+`/internal/*` is deliberately absent: the dashboard reaches it over the compose
+network, and nothing outside can.
+
+<Callout type="warn">
+  Leave `SERVE_ARTIFACTS=false`. Caddy streams the cached `.apkm` files straight off the shared
+  volume with native `Range` support; flipping this to `true` puts ~35 GB of a fleet-wide rollout
+  through Node for no benefit.
+</Callout>
+
+## Upgrading
+
+```sh
+git pull
+docker compose up -d --build
+make migrate
+```
+
+Rebuilding restarts `hub`, which drops every device socket. The agents
+reconnect on their own with backoff, and queued jobs resume — but on a large
+fleet, do it in a window where a few minutes of reconnects are acceptable. If
+you want dashboard deploys that leave the sockets alone, that property comes
+free here (`docker compose up -d --build web` touches only the dashboard) and
+takes one setting on [Coolify](/docs/deployment/zero-downtime).

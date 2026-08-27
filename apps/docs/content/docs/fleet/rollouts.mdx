@@ -1,0 +1,68 @@
+---
+title: Rollouts explained
+description: Canary, soak, concurrency caps, retries, and what happens to a box that is unplugged mid-install.
+icon: Rocket
+---
+
+A rollout is a version, a target set, and a policy. The hub turns it into one
+job per device and dispatches them dinamically as capacity allows. The dashboard shows the overall progress, and each box reports back.
+
+## Targeting
+
+One box, a selection, a device group, or the whole fleet. Groups are the useful
+unit once you have more than one site: they carry their own pre/post-install
+hooks and can cap concurrency below the fleet-wide limit.
+
+## Canary and soak
+
+The first **N** devices update alone. The rest are held until those succeed,
+plus a soak period you choose.
+
+A failed canary parks the rollout at `PAUSED` instead of pushing a bad build to
+the fleet. Resuming is deliberate: look at the failed job's log, decide, then
+press resume.
+
+<Callout type="info">
+  Canary is worth setting even at three devices. Most bad builds fail the same way on every box, and
+  the first three tell you as much as the first fifty.
+</Callout>
+
+## Concurrency
+
+| Setting               | Scope                               |
+| --------------------- | ----------------------------------- |
+| `MAX_CONCURRENT_JOBS` | The whole fleet. Default 10.        |
+| A group's own cap     | Lower, for a site on a thin uplink. |
+
+The cap counts devices downloading/installing, which is what actually
+consumes your egress and their `/data`.
+
+## Failure handling
+
+| Situation              | What happens                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Device offline**     | The job stays queued and dispatches the moment the agent reconnects. Nothing to retry by hand.                            |
+| **Job failed**         | Re-queued automatically up to the rollout's attempt limit. The bytes already on disk make the retry cheap.                |
+| **Attempts exhausted** | `Retry` and `Retry all failed` are in the UI.                                                                             |
+| **Job stalled**        | A box unplugged mid-install stops sending progress; after `JOB_STALL_TIMEOUT` seconds (default 900) the hub re-queues it. |
+| **Hub restarted**      | Jobs survive in Postgres; the scheduler picks them up on the next tick.                                                   |
+
+## Rollout states
+
+```
+QUEUED ──► RUNNING ──┬─► COMPLETED
+                     ├─► PAUSED     (canary failed — needs a human)
+                     └─► CANCELLED  (you stopped it)
+```
+
+## Reading a job
+
+Each job carries the device's own log lines alongside the phase and percentage,
+so a failure is diagnosable from the dashboard without adb: the `pm` output,
+the sha256 mismatch, or the free-space refusal.
+
+## Egress
+
+A full rollout to 200 boxes is roughly **35 GB** off your server.
+`MAX_CONCURRENT_JOBS` paces it, but it does not reduce it, check your traffic
+allowance before the first fleet-wide update.

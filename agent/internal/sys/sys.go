@@ -3,13 +3,14 @@
 //
 // Every call goes through the System interface so the whole install pipeline
 // can be exercised on a laptop against the Fake implementation — which is how
-// 200-device load tests run without 200 devices.
+// fleet-scale load tests run without the hardware.
 package sys
 
 import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -241,7 +242,58 @@ func (a *Android) DeviceInfo(ctx context.Context) proto.DeviceInfo {
 		SdkInt:         sdk,
 		Abi:            abi,
 		Density:        density,
+		LocalIp:        LocalIP(),
 	}
+}
+
+// LocalIP returns the box's LAN address, empty when it has none.
+//
+// A TV box normally has exactly one usable interface up (wlan0 or eth0), but
+// it can also carry docker/tun leftovers and a link-local 169.254 address
+// while DHCP is still running. Prefer a real private address, and among those
+// the one on an interface that looks like the box's own network card.
+func LocalIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	var fallback string
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || !ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			if isPhysicalIface(iface.Name) {
+				return ip.String()
+			}
+			if fallback == "" {
+				fallback = ip.String()
+			}
+		}
+	}
+	return fallback
+}
+
+func isPhysicalIface(name string) bool {
+	for _, prefix := range []string{"wlan", "eth", "en", "wl", "rmnet"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func fallbackSerial(ctx context.Context, a *Android) string {

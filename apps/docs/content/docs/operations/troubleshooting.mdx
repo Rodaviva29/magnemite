@@ -1,0 +1,89 @@
+---
+title: Troubleshooting
+description: Android's missing resolv.conf, small /data partitions, and 35 GB of egress.
+icon: Bug
+---
+
+## DNS on Android
+
+<Callout type="warn" title="Symptom">
+  The agent never connects, and its log repeats one line:
+
+```
+lookup magnemite.example.com: no such host
+```
+
+Meanwhile the box browses the web perfectly, and `ping` from `adb shell`
+resolves the same name without trouble.
+
+</Callout>
+
+### Why it happens
+
+The agent is built with `CGO_ENABLED=0` so it is one static binary that needs no
+NDK to cross-compile and no shared libraries on the box. The cost is that Go
+stops calling the system resolver and uses its own, written in Go — and that
+resolver learns which nameservers to use by reading `/etc/resolv.conf`.
+
+Android does not have that file. Bionic, Android's libc, asks the `netd` daemon
+over a socket instead, and publishes the current servers as system properties:
+
+```sh
+adb shell getprop net.dns1
+```
+
+So everything on the box resolves names except a CGO-free Go program, which
+finds no config, has no servers to ask, and fails every lookup.
+
+### The fix
+
+It lives in `agent/internal/netfix`. At startup the agent checks for
+`/etc/resolv.conf`; if the file is missing it installs a `net.Resolver` whose
+dialer walks this list, rotating to the next entry whenever a server refuses a
+connection — common on a LAN where the router's resolver black-holes.
+
+| Order | Nameserver              | Where it comes from                  |
+| ----- | ----------------------- | ------------------------------------ |
+| 1-4   | `net.dns1` … `net.dns4` | `getprop`, i.e. what `netd` is using |
+| 5     | `1.1.1.1`               | Fallback                             |
+| 6     | `8.8.8.8`               | Fallback                             |
+
+<Callout type="info" title="Consequences worth knowing">
+  On a box whose DNS is genuinely broken, set `serverUrl` to a bare IP and skip
+  resolution entirely.
+
+And if you ever rebuild the agent with CGO enabled, this code becomes dead
+weight — but so does the single-binary cross-compile.
+
+</Callout>
+
+## Small `/data`
+
+Boxes need roughly **450 MB** free: a 172 MB bundle unpacks to ~250 MB and both
+sit on disk at once. The agent refuses to start an install below that rather
+than filling the partition.
+
+The fleet table shows free space per device and warns under 500 MB, so you can
+see the problem before a rollout instead of during one.
+
+## Egress
+
+A full rollout to 200 boxes is ~35 GB off your server. `MAX_CONCURRENT_JOBS`
+paces it; check your traffic allowance before the first fleet-wide update.
+
+## A box enrolled but never appears online?
+
+| Check                         | How                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| Right URL?                    | `serverUrl` must be the **hub** domain (`MAGNEMITE_PUBLIC_URL`), not the dashboard's.  |
+| Right port suffix on Coolify? | The edge domain needs `:8080` in the Domains tab, so the proxy hits Caddy.             |
+| Approved?                     | With auto-approve off, a box sits as _pending approval_ and receives nothing.          |
+| Token still valid?            | A revoked enrollment token blocks _new_ enrollments; a revoked device is disconnected. |
+| DNS?                          | See [DNS on Android](/docs/operations/troubleshooting#dns-on-android) above.           |
+
+## Downloads 401 at the edge
+
+`/files/*` is gated by `forward_auth` against the hub's `/internal/authz`. A 401
+means the device token the box presented is not one the hub recognises — most
+often a box restored from a backup image whose device row was deleted. Delete
+its `config.json` device token and let it enroll again.

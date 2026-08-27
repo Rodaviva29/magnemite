@@ -1,0 +1,110 @@
+---
+title: App update explained
+description: The eight steps between "install this version" and a verified package on the box.
+icon: PackageCheck
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+<Steps>
+
+<Step>
+
+### Check the free space
+
+This is important, it refuses to start unless `/data` has roughly **3× the bundle size** free. A
+172 MB `.apkm` unpacks to about 250 MB, and both sit on disk at once.
+
+</Step>
+
+<Step>
+
+### Download and verify
+
+Fetch the `.apkm` from your server with a `Range` header, so a box that drops
+its uplink at 80% resumes instead of starting over. Verify the sha256 the hub
+computed while caching.
+
+</Step>
+
+<Step>
+
+### Pick the splits
+
+An `.apkm` is a zip holding `base.apk` plus `split_config.arm64_v8a.apk`. The
+agent selects base plus the matching ABI, and the nearest density and language
+splits if the bundle has them.
+
+</Step>
+
+<Step>
+
+### Run the pre-install hook
+
+Usually stopping the scanner/MITM. Configured per device group, or replaced
+entirely by [Rotom](/docs/fleet/rotom), which disables the box in the
+controller instead (optional).
+
+</Step>
+
+<Step>
+
+### Install the session
+
+```sh
+pm install-create -r -d -i com.android.vending
+pm install-write …   # once per split
+pm install-commit …
+```
+
+A plain `pm install` cannot take a split bundle, which is why this is a session.
+
+</Step>
+
+<Step>
+
+### Fall back to a clean install, if Android insists
+
+If Android rejects the in-place upgrade, like a different signing key, or a
+downgrade, the agent uninstalls and installs clean. **This wipes the app's
+data**, so the job is flagged as `data wiped`.
+
+</Step>
+
+<Step>
+
+### Verify
+
+`dumpsys package` has to report the expected version. `pm` printing _Success_
+is not taken as proof.
+
+</Step>
+
+<Step>
+
+### Run the post-install hook
+
+Usually starting the scanner again or a personalized command.
+
+</Step>
+
+</Steps>
+
+Every step keeps progress over the socket, so we get a real
+percentage and the box's own log.
+
+## In-place vs clean
+
+The default approach preserves app data and only falls back to a wipe when Android
+insists. Ticking **force a clean install** on a rollout uninstalls first on
+every device.
+
+<Callout type="warn">
+  A clean install is the right answer when the signing key changed and you know it. It is the wrong
+  answer as a habit.
+</Callout>
+
+## What the agent never does
+
+It runs as root but changes **no device settings**. It installs, reads package
+versions and free space, and runs the hooks you configured: **nothing else**.

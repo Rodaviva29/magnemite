@@ -264,7 +264,7 @@ export async function requeueStalled(stallTimeoutSeconds: number) {
 /**
  * Roll the per-job outcomes up into the rollout state machine:
  * canary finishes -> soak -> full fleet -> done, with a failed canary
- * parking the rollout instead of pushing a bad build to 200 boxes.
+ * parking the rollout instead of pushing a bad build to the whole fleet.
  */
 export async function recomputeRollout(rolloutId: string) {
   const rollout = await prisma.rollout.findUnique({

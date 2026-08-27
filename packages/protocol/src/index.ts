@@ -48,6 +48,14 @@ export const deviceInfoSchema = z.object({
   abi: z.string().nullish(),
   /** ro.sf.lcd_density, used to pick the right density split out of the .apkm. */
   density: z.number().int().nullish(),
+  /**
+   * The box's own LAN address (192.168.x.x and friends). The socket's remote
+   * address is the reverse proxy on the hub's overlay network, so it is the
+   * same useless 10.x for every device; only the agent knows where the box
+   * actually lives on the local network. Null on agents old enough not to
+   * report it.
+   */
+  localIp: z.string().nullish(),
 });
 
 export const deviceMetricsSchema = z.object({

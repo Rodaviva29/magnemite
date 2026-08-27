@@ -200,8 +200,8 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
               // is what makes "busy right now" versus "busy all afternoon"
               // readable at a glance.
               <p className="text-xs text-muted-foreground">
-                CPU averaged {loadText(device.loadAvg5, device.cpuCount)} over the last 5m
-                and {loadText(device.loadAvg15, device.cpuCount)} over 15m
+                CPU averaged {loadText(device.loadAvg5, device.cpuCount)} over the last 5m and{" "}
+                {loadText(device.loadAvg15, device.cpuCount)} over 15m
               </p>
             ) : null}
           </CardContent>
@@ -213,7 +213,15 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           </CardHeader>
           <CardContent className="flex flex-col gap-1 text-sm">
             <Field label="Version" value={device.agentVersion ?? "—"} />
-            <Field label="Public IP" value={device.publicIp ?? "—"} />
+            {/* The socket's remote address is the reverse proxy on the hub's
+                own network — the same 10.x on every box — so show the LAN
+                address the agent reports, and fall back only for agents too
+                old to send one. */}
+            {device.localIp ? (
+              <Field label="Local IP" value={device.localIp} />
+            ) : (
+              <Field label="Public IP" value={device.publicIp ?? "—"} />
+            )}
             <Field label="Enrolled" value={formatRelative(device.createdAt)} />
             <Field
               label="Scanner (rotom)"

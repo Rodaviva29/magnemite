@@ -1,0 +1,77 @@
+---
+title: What Magnemite is
+description: An over-the-air updater for a fleet of rooted Android TV boxes running the Unown# scanning.
+icon: Album
+---
+
+Magnemite watches for new Pokémon GO `.apkm` releases, caches each one **once**
+on your server, and installs it on anywhere from 1 to N boxes from a
+dashboard. 
+It provides per-device progress, automatic retries, canary rollouts and a
+hands-off mode.
+
+## Why "Magnemite"
+
+The scanning stack names everything after Pokémon: Dragonite, Golbat, Rotom,
+Koji, Poracle — so this one keeps the habit. Magnemite is the magnet: it pulls
+new builds down once and sticks them onto every box. It is also the Pokémon
+that only becomes interesting in numbers. Three of them make a Magneton, and
+this tool exists precisely because updating one box by hand is fine and
+updating two hundred is not.
+
+## What it actually does?
+
+| Features                   | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| **Watches two sources**   | GitHub releases and `mirror.unownhash.com`, polled on a schedule.           |
+| **Caches once**           | The server downloads each `.apkm` a single time and hashes it.              |
+| **Targets what you pick** | One box, a selection, a group, or the whole fleet.                          |
+| **Canary first**          | A few boxes update alone; a failure parks the rollout instead of spreading. |
+| **Real progress**         | Download percentage, install phase and the box's own log, per device.       |
+| **Retries by itself**     | Offline, stalled or failed jobs come back without anyone watching.          |
+| **Or fully automatic**    | New version → cached → rolled out inside your time window.                  |
+| **No open ports**         | Boxes dial out; nothing on the LAN needs exposing.                          |
+
+## Where to go next
+
+<Cards>
+  <Card
+    title="How it fits together?"
+    href="/docs/architecture"
+    description="The four main processes, check them out."
+  />
+  <Card
+    title="Quick start"
+    href="/docs/quick-start"
+    description="From a clean VPS to a logged-in dashboard."
+  />
+  <Card
+    title="Deploy on Coolify"
+    href="/docs/deployment/coolify"
+    description="Two domains, generated secrets, dashboard redeploys."
+  />
+  <Card
+    title="Putting the agent on a box"
+    href="/docs/fleet/agent"
+    description="Build the Magisk module with the hub URL."
+  />
+  <Card
+    title="Rollouts"
+    href="/docs/fleet/rollouts"
+    description="Canary, soak, concurrency, retries and stalls."
+  />
+  <Card
+    title="Things that will bite you"
+    href="/docs/operations/troubleshooting"
+    description="Android DNS, small /data, and 35 GB of egress."
+  />
+</Cards>
+
+## What it is not!
+
+- This is **not a complete device manager**: The agent installs packages, reads versions and free
+  space, and runs the hooks you configure. It changes no device settings.
+- Not an MDM enrolment system: A box is identified by a token it holds, not by
+  an account.
+- Not a mirror: It caches what the two upstream sources publish; it does not
+  build or repackage APKs.

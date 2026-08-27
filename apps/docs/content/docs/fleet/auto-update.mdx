@@ -1,0 +1,51 @@
+---
+title: Automatic updates
+description: New version, cached, rolled out inside your time window, with the guardrails that make that safe.
+icon: RefreshCw
+---
+
+**Settings → Auto-update.** When it is on, the hub:
+
+1. polls both sources every `SOURCE_POLL_MINUTES`,
+2. caches the newest **approved** version onto the server,
+3. creates a rollout with your canary and soak settings,
+4. dispatches only inside the time window, if you set one.
+
+## What it will not do
+
+- **Never downgrades.** A source publishing an older build is ignored.
+- **Never runs two rollouts for the same app at once.**
+- **Does nothing at all** if every device is already on the newest version.
+- **Only touches approved versions** (see below).
+
+## Approval
+
+Leaving **approve new versions automatically** off means a human ticks _approve_
+on the Versions page before anything moves. That is a reasonable default while
+you are still learning to trust it.
+
+With it on, the pipeline is fully hands-off: a release appears upstream and the
+fleet is on it.
+
+<Callout type="warn">
+  Auto-approve plus no canary means an upstream mistake reaches 200 boxes unattended. Keep a canary
+  of at least a few devices, and a soak long enough that a scanner failure would show up in Rotom
+  before the rest go.
+</Callout>
+
+## The time window
+
+A window is the difference between 35 GB of egress at 04:00 and 35 GB during
+your peak scanning hours. Jobs created outside it stay queued; the scheduler
+dispatches them when it opens.
+
+## Polling
+
+`SOURCE_POLL_MINUTES` defaults to 15 in the compose files. `.env.example` ships
+a much lazier 10080 (7 days), because we don't need to update that often. 
+
+Both
+sources are polled on the same tick, and a poll can be forced from the Versions
+page.
+
+

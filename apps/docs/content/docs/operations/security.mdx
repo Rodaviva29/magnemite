@@ -1,0 +1,50 @@
+---
+title: Security model
+description: What holds a token, what is stored, and what the root agent will not do.
+icon: ShieldCheck
+---
+
+## Tokens
+
+- **Each device gets its own bearer token**; only its sha256 is stored. Artifact
+  downloads are gated on it — through Caddy's `forward_auth`, or the hub's own
+  check when it serves the files.
+- **The enrollment token is dropped** from the box's config once it has traded
+  it for a device token, so a stolen box cannot enroll more devices.
+- Enrollment tokens can be limited by use count and revoked from Settings.
+
+## The dashboard
+
+- Sessions are Better Auth cookies signed with `AUTH_SECRET`, and the request
+  origin is checked against `MAGNEMITE_DASHBOARD_URL`.
+- Sign-up is disabled; accounts are created by an admin.
+- Every server action re-checks the caller's role — the UI hiding a control is
+  a convenience, not the control.
+
+## The internal API
+
+The hub's `/internal/*` API is reachable only from the `web` container, behind
+`HUB_INTERNAL_SECRET`, and neither proxy routes to it from outside. On the
+agents' domain, anything that is not `/ws/device`, `/api/enroll`, `/files/*` or
+`/healthz` is a 404.
+
+## The agent
+
+It runs as root but **changes no device settings**. It installs, reads package
+versions and free space, and runs the hooks you configured: nothing else.
+
+## Integrity of what gets installed
+
+The hub computes a sha256 while caching a bundle. Every agent verifies that
+hash before it opens an install session, and verifies with `dumpsys package`
+that the expected version is really installed afterwards. `pm` printing
+_Success_ is not taken as proof.
+
+## What to rotate, and when
+
+| Secret                | Rotate when                                                                  |
+| --------------------- | ---------------------------------------------------------------------------- |
+| `HUB_INTERNAL_SECRET` | Anyone who had shell on the server leaves. Restart `hub` and `web` together. |
+| `AUTH_SECRET`         | Same, note it signs out every session.                                      |
+| Enrollment tokens     | A batch is flashed and done, or a laptop with the token on it goes missing.  |
+| A device token        | The box is lost or reimaged: delete the device, let it enroll again.         |

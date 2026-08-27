@@ -1,0 +1,25 @@
+---
+title: Dashboard login
+description: Way back in when you lose the admin login.
+icon: Users
+---
+
+## Passwords
+
+- bcrypt, configured through Better Auth's hasher hooks. That is what lets
+  `pnpm db:seed` create the first admin without importing Better Auth into the
+  database package.
+- Changing someone's password deletes their sessions, signing them out
+  everywhere.
+- `ADMIN_EMAIL` must be a well-formed address. `admin@localhost` is rejected.
+
+<Callout type="info" title="Locked out?">
+  Re-running the seed resets `ADMIN_EMAIL`'s password to `ADMIN_PASSWORD`.
+  That is the way back in, and it is why both live on the **hub** service's
+  environment rather than in a file inside the container.
+
+```sh
+docker compose exec hub pnpm --filter @magnemite/db run seed
+```
+
+</Callout>

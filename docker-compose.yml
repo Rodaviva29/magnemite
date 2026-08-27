@@ -87,11 +87,10 @@ services:
       - web
       - hub
     environment:
-      MAGNEMITE_DOMAIN: ${MAGNEMITE_DOMAIN}
       HUB_PORT: ${HUB_PORT:-3001}
     ports:
-      - "80:80"
-      - "443:443"
+      # Plain HTTP: your own reverse proxy terminates TLS and forwards here.
+      - "${EDGE_PORT:-8080}:8080"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Caddy streams the cached .apkm files straight off this volume, so the

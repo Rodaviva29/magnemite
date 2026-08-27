@@ -27,6 +27,9 @@ export async function markOnline(
       lastSeenAt: new Date(),
       agentVersion: opts.agentVersion,
       publicIp: opts.publicIp,
+      // Only the agent knows the box's LAN address; keep whatever we had if an
+      // older agent does not report one.
+      localIp: opts.info.localIp ?? undefined,
       manufacturer: opts.info.manufacturer ?? undefined,
       model: opts.info.model ?? undefined,
       androidVersion: opts.info.androidVersion ?? undefined,

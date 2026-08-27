@@ -1,0 +1,68 @@
+---
+title: Rotom (wip)
+description: Optional, and worth turning on, it makes the scanner coming back the success signal.
+icon: RadioTower
+---
+
+Set `ROTOM_ENABLED=true`, `ROTOM_URL` (RotomNG's HTTP listener, usually
+`:7072`) and `ROTOM_SECRET`, and Rotom becomes part of the update itself rather
+than a status widget.
+
+## What changes
+
+<Cards>
+  <Card
+    title="Before an install"
+    description="The box is disabled in Rotom, so the controller stops handing it accounts instead of a scan dying mid-session."
+  />
+  <Card
+    title="After it succeeds"
+    description="The box is enabled and the scanner restarted onto the new build, replacing the post-install hook you would otherwise write per group."
+  />
+  <Card
+    title="The success signal"
+    description="The box reappearing in Rotom with live workers, not `pm` having printed Success. If it does not come back within five minutes, the job log says so."
+  />
+</Cards>
+
+That third point is the reason to turn this on. An install can succeed and the
+scanner still fail to come up, a bad build, a wiped login, a hook that raced.
+Without Rotom, Magnemite calls that a success and moves to the next device.
+With it, the rollout stops.
+
+## Crash safety
+
+If the hub restarts mid-install, the next scheduler tick re-enables any box it
+had disabled for a job that is no longer running. Nothing is left parked out of
+the pool because a Node process went away.
+
+## Matching devices
+
+Devices are matched to Rotom by `origin`, falling back to the serial, and then
+to an unambiguous public IP. Once at least one box is matched:
+
+- the fleet table grows a **Scanner** column,
+- the device page gains a **Restart scanner** button.
+
+A box that never matches keeps working normally, it simply uses its group's
+hooks instead.
+
+## Configuration
+
+```sh title=".env"
+ROTOM_ENABLED=true
+# /api is appended, so either form works.
+ROTOM_URL=http://rotom:7072
+# Matches `secret` under http_listener in the Rotom config.
+ROTOM_SECRET=…
+```
+
+Built against the
+[RotomNG API](https://github.com/UnownHash/RotomNG/blob/main/docs/RotomNG-API.md).
+- `GET /api/device`, `PUT /api/device/{id}/action/{action}`, authenticated with
+`X-Rotom-Secret`.
+
+<Callout type="info">
+  If Rotom runs in another compose project, the hub needs to reach it, either put both on a shared
+  external network, or point `ROTOM_URL` at its published host and port.
+</Callout>

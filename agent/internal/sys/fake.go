@@ -241,7 +241,7 @@ func (f *Fake) PackageInfo(_ context.Context, pkg string) (proto.PackageInfo, er
 	return proto.PackageInfo{PackageName: pkg, Installed: false}, nil
 }
 
-// The fake fleet is what the 200-device load test runs against, so these
+// The fake fleet is what the load test runs against, so these
 // wobble a little rather than returning a constant: a dashboard that only
 // ever shows 0.00 load hides the bugs this is meant to catch.
 func (f *Fake) LoadAvg() (float64, float64, float64) {
@@ -291,6 +291,7 @@ func (f *Fake) DeviceInfo(ctx context.Context) proto.DeviceInfo {
 		SdkInt:         30,
 		Abi:            "arm64-v8a",
 		Density:        320,
+		LocalIp:        LocalIP(),
 	}
 }
 

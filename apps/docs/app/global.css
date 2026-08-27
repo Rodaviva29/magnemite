@@ -1,0 +1,56 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+/* Cal Sans, loaded in layout.tsx under the same variable names the dashboard
+   uses: `ui` for body copy, `text` for headings, `geo` for the landing hero. */
+@theme {
+  --font-sans:
+    var(--font-cal-sans-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-heading:
+    var(--font-cal-sans-text), var(--font-cal-sans-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    var(--font-cal-sans-geo), var(--font-cal-sans-ui), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Magnemite's own yellow. It carries dark text, not white: #fdc026 against
+   white fails contrast at any size. */
+:root {
+  --color-fd-primary: #fdc026;
+  --color-fd-primary-foreground: #1a1400;
+}
+
+/* The dashboard's dark surfaces, so the docs and the product look related:
+   #111111 for the page, #222222 for anything raised off it. */
+.dark {
+  --color-fd-background: #111111;
+  --color-fd-card: #1a1a1a;
+  --color-fd-popover: #222222;
+  --color-fd-secondary: #222222;
+  --color-fd-muted: #1c1c1c;
+  --color-fd-primary: #fdc026;
+  --color-fd-primary-foreground: #1a1400;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* Headings take the text cut, the same split the dashboard makes. Code blocks
+   are left alone -- Cal Sans has no monospace. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+}
+
+/* Fumadocs pads the sidebar's header, tree and footer with a flat 1rem, which
+   puts a three-level tree right up against the border. Pad the wrapper rather
+   than each section, so all three keep the same inline start. */
+#nd-sidebar > * {
+  padding-inline-start: 0.75rem;
+}

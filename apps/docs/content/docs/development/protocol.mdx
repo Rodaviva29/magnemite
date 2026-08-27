@@ -1,0 +1,49 @@
+---
+title: The wire protocol
+description: What travels over the device socket, in both directions.
+icon: Cable
+---
+
+One WebSocket per box, opened by the box, authenticated with its device token.
+The message set is small on purpose — it is implemented twice, in
+`packages/protocol` and in Go under `agent/`.
+
+## Box → hub
+
+| Message        | When                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `hello`        | On connect: serial, model, Android version, installed Pokémon GO version, free space |
+| `heartbeat`    | Periodically, carrying the same live facts                                           |
+| `job_progress` | Download percentage, install phase, log lines                                        |
+| `job_result`   | Success or failure, with the verified version and whether data was wiped             |
+| `pong`         | Answering a `ping`                                                                   |
+
+## Hub → box
+
+| Message        | When                                               |
+| -------------- | -------------------------------------------------- |
+| `welcome`      | Accepting the socket                               |
+| `install_job`  | Artifact URL, sha256, target version, hooks, flags |
+| `cancel_job`   | You cancelled it, or the scheduler re-queued it    |
+| `reboot`       | From the device page                               |
+| `agent_update` | A newer agent build is available                   |
+| `ping`         | Liveness                                           |
+
+## Properties worth knowing
+
+- **The box always dials out.** Nothing initiates a connection towards a box,
+  which is why no ports are open on the LAN and CGNAT is irrelevant.
+- **Jobs are idempotent by version.** A box already on the target version
+  reports success without installing anything.
+- **Progress is advisory, absence is not.** `JOB_STALL_TIMEOUT` seconds with no
+  `job_progress` is what makes the hub re-queue a job — a box unplugged
+  mid-install never sends a failure.
+- **Downloads do not use the socket.** The bundle comes over plain HTTPS from
+  the edge with a `Range` header, so an interrupted download resumes and the
+  socket stays free for control messages.
+
+## Changing it
+
+Change `packages/protocol`, mirror it in Go, and remember that a fleet updates
+its agents on its own schedule: a hub must keep understanding the previous
+message set until every box has taken an `agent_update`.

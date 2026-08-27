@@ -1,0 +1,132 @@
+---
+title: On a Coolify setup
+description: Two domains, generated secrets, and a Caddy that stays in front of the hub.
+icon: Cloud
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+`docker-compose.coolify.yml` lets Coolify's proxy terminate TLS and keeps a
+small Caddy of our own (`edge`) in front of the hub. It uses **two domains**
+rather than path routing, because the agents and the dashboard are separate
+audiences.
+
+| Coolify variable    | Points at                                                            |
+| ------------------- | -------------------------------------------------------------------- |
+| `SERVICE_FQDN_WEB`  | the dashboard you log into                                           |
+| `SERVICE_FQDN_EDGE` | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
+
+## Deploying
+
+<Steps>
+
+<Step>
+
+### Create the resource
+
+**New Resource → Docker Compose**, pointed at `docker-compose.coolify.yml`.
+
+</Step>
+
+<Step>
+
+### Set both domains
+
+In the **Domains** tab, give `web` your dashboard domain and `edge` the agents'
+subdomain. Give the edge domain the `:8080` suffix so the proxy hits Caddy's
+port:
+
+```
+https://agents.magnemite.example.com:8080
+```
+
+</Step>
+
+<Step>
+
+### Deploy, then seed once
+
+```sh
+docker ps --format '{{.Names}}' | grep hub
+docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
+```
+
+</Step>
+
+<Step>
+
+### Read the generated admin password
+
+Coolify generates the Postgres password, the internal secret, `AUTH_SECRET` and
+the **admin password** itself, and shows them in the **Environment** tab. Read
+`SERVICE_PASSWORD_ADMIN` from there to sign in the first time; change it from
+**Settings → Accounts** afterwards if you prefer one you can remember.
+
+</Step>
+
+</Steps>
+
+## The admin login
+
+The login defaults to `admin@magnemite.com`. Nothing is ever sent to it — the
+address is an identifier, not a mailbox — so it only needs changing if you want
+your own.
+
+<Callout type="warn">
+  Set `ADMIN_EMAIL` **before the first seed** if you want a different one. Changing it later seeds a
+  *second* admin rather than renaming the first, because the seed upserts on the address.
+</Callout>
+
+<Callout type="info">
+  There is no `.env` file inside the container, so the seed reads `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+  from the **hub** service's environment. That is why they are set on `hub` and not only on `web`.
+</Callout>
+
+## Things this file does differently
+
+### Bare `SERVICE_FQDN_*` declarations
+
+`edge` and `web` declare `- SERVICE_FQDN_EDGE` and `- SERVICE_FQDN_WEB` with no
+value. That is deliberate: Coolify fills them from the Domains tab, and writing
+`${SERVICE_FQDN_EDGE}` would make Compose interpolate a variable that does not
+exist yet and blank it out.
+
+### The auth URL fallback
+
+`BETTER_AUTH_URL` is set from `${SERVICE_URL_WEB}`, which Coolify does not
+always have populated by the time Compose interpolates — in which case the
+reference collapses to an empty string. Better Auth without a base URL derives
+the origin from the incoming `Host` header, which breaks callbacks behind a
+proxy. The app therefore falls back to the bare `SERVICE_FQDN_WEB` that Coolify
+injects, so keep that line even if you set the two explicitly. A bare host with
+no `https://` is accepted.
+
+### Why there is still a Caddy
+
+Coolify's proxy (Traefik) routes; it does not serve files. It has no
+`file_server` equivalent, and the `artifacts` volume belongs to this stack, not
+to the Coolify-managed proxy container — so pointing the boxes' domain straight
+at the hub means every one of those ~170 MB bundles is read and pushed by Node.
+
+The `edge` service closes that gap. It mounts `artifacts` read-only, answers
+`/files/*` with `file_server` (native `Range`, so an interrupted download
+resumes) behind a `forward_auth` call to the hub's `/internal/authz`, and
+proxies only `/ws/device`, `/api/enroll` and `/healthz` through. Everything else
+on that domain is a 404, which keeps the hub's `/internal/*` API unreachable
+from outside — the same guarantee the Caddy setup gives.
+
+## Upgrading from an earlier version of this file
+
+The boxes' domain moved from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE`.
+Keep the same domain value and nothing needs re-flashing: a box only ever knows
+the URL.
+
+## Next
+
+<Cards>
+  <Card
+    title="Deploying without dropping the fleet"
+    href="/docs/deployment/zero-downtime"
+    description="Narrow the deploy so a dashboard change leaves 200 sockets alone."
+  />
+</Cards>

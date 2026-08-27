@@ -105,7 +105,12 @@ model Device {
 
   status        DeviceStatus @default(OFFLINE)
   lastSeenAt    DateTime?
+  /// Address the socket came from. Behind the reverse proxy this is the same
+  /// internal 10.x for every box, which is why the UI shows localIp instead.
   publicIp      String?
+  /// The box's own LAN address, as reported by the agent. Null on agents old
+  /// enough not to send it.
+  localIp       String?
   freeBytes     BigInt?
   totalBytes    BigInt?
   uptimeSeconds Int?

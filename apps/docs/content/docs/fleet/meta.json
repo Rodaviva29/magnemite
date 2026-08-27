@@ -1,0 +1,5 @@
+{
+  "title": "Features help",
+  "icon": "Smartphone",
+  "pages": ["enrollment", "agent", "update", "rollouts", "auto-update", "rotom"]
+}

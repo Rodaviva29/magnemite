@@ -1,0 +1,50 @@
+---
+title: APKs sources
+description: Two upstream sources, one cache, and what each one lets you verify.
+icon: Download
+---
+
+| Source                                | Index               | Notes                                                  |
+| ------------------------------------- | ------------------- | ------------------------------------------------------ |
+| `mirror.unownhash.com`                | `index.json`        | Publishes an md5 per file. Default source.             |
+| `The-Treeline-Project/Silva-Releases` | GitHub releases API | No hash published, so the download is checked by size. |
+
+Both ship `com.nianticlabs.pokemongo` as an arm64-v8a `.apkm`, a zip holding
+`base.apk` plus `split_config.arm64_v8a.apk`. That is why installs go through a
+`pm install-create` / `install-write` / `install-commit` session rather than a
+plain `pm install`.
+
+## What the hub does with them
+
+1. Polls both every `SOURCE_POLL_MINUTES` and records what it finds as
+   **versions**.
+2. Downloads a version **once**, when it is cached (either by you pressing
+   _Cache_ or by auto-update).
+3. Computes a **sha256** while writing it to `ARTIFACT_DIR`.
+
+That sha256 is what each agent verifies before it opens an install session. 
+
+The upstream md5, where it exists, is checked at download time against the mirror's
+index; the GitHub path can only compare the size the API reports.
+
+<Callout type="info">
+  The two sources are watched independently, so a version that appears on the mirror first is
+  available immediately rather than waiting for a GitHub release to catch up.
+</Callout>
+
+## Pruning
+
+Cached bundles are ~170 MB each and accumulate. **Versions → Prune** removes
+artifacts for versions nothing is on and nothing is rolling out to, leaving the
+database rows.
+
+## Configuration
+
+```sh title=".env"
+GITHUB_REPO=The-Treeline-Project/Silva-Releases
+# Optional. Raises the GitHub API rate limit from 60/h to 5000/h.
+GITHUB_TOKEN=
+MIRROR_INDEX_URL=https://mirror.unownhash.com/index.json
+MIRROR_BASE_URL=https://mirror.unownhash.com/apks/
+SOURCE_POLL_MINUTES=15
+```

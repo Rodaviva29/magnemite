@@ -8,6 +8,9 @@ out/
 .history
 .vscode/
 
+# Fumadocs generated collections
+apps/docs/.source/
+
 # Prisma generated client
 packages/db/generated/
 

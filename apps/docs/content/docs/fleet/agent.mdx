@@ -1,0 +1,96 @@
+---
+title: Agent on all boxes
+description: Build the Magisk module with the hub URL baked in, flash it once, and never touch the box again.
+icon: Smartphone
+---
+
+The agent is a ~6 MB static Go binary started as root at boot by a Magisk
+module. It dials **out** over WSS, so the boxes work behind any NAT, CGNAT or
+changing IP with no ports open and no VPN.
+
+## Build the module
+
+Bake the **hub URL** and an enrollment token in, so flashing is the only
+per-box step:
+
+```sh
+# SERVER is the hub URL — the same value as MAGNEMITE_PUBLIC_URL.
+# docker compose: https://magnemite.example.com
+# Coolify:        https://agents.magnemite.example.com
+make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
+# → dist/magnemite-agent-0.1.2.zip
+```
+
+On Windows:
+
+```powershell
+./scripts/build-agent.ps1 -Server https://magnemite.example.com -Token <token>
+```
+
+Everything Go-related runs inside the `golang` image, so no toolchain is needed
+on the host. The version comes from the `VERSION` file at the repo root, and
+both build paths stamp it into `module.prop`.Magisk compares `versionCode`,
+which is derived so it always moves with the version (`0.1.2` → `102`).
+
+<Callout type="warn">
+  `SERVER` is the **hub** URL, never the dashboard's. A box pointed at the dashboard's domain fails
+  the handshake.
+</Callout>
+
+## Install it now!
+
+Through the Magisk app, or over adb:
+
+```sh
+adb push dist/magnemite-agent-0.1.2.zip /data/local/tmp/
+adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-0.1.2.zip'"
+adb reboot
+```
+
+In bulk over the LAN:
+
+```sh
+./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip 192.168.1.10 192.168.1.11
+./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f hosts.txt
+```
+
+That is the only time a box needs hands-on work. After it reboots, every later
+update rides the socket it opened itself: no adb, no LAN access.
+
+## Without a baked-in config
+
+Write `/data/adb/magnemite/config.json` on the box before rebooting:
+
+```json title="/data/adb/magnemite/config.json"
+{
+  "serverUrl": "https://magnemite.example.com",
+  "enrollmentToken": "…"
+}
+```
+
+The same values are available as flags: `-server`, `-enroll-token`, `-name`. 
+- The full list is in the [environment reference](/docs/deployment/environment#the-agents-own-configuration).
+
+## What it does at boot
+
+1. Reads `config.json` (or its flags).
+2. Fixes DNS if `/etc/resolv.conf` is missing, see
+   [DNS on Android](/docs/operations/troubleshooting#dns-on-android).
+3. Enrolls if it has no device token yet, then rewrites the config without the
+   enrollment token.
+4. Opens the WebSocket and sends `hello` with its serial, model, Android
+   version, current Pokémon GO version and other useful information.
+5. Heartbeats, and waits for an `install_job`.
+
+## Which build goes on which box
+
+`make agent` cross-compiles four binaries:
+
+| Target                | Used for                     |
+| --------------------- | ---------------------------- |
+| `linux/arm64`         | the boxes                    |
+| `linux/arm` (GOARM=7) | older 32-bit boxes           |
+| `linux/amd64`         | a fake fleet on a Linux host |
+| `windows/amd64`       | a fake fleet on Windows      |
+
+The module zip carries the two Linux ARM builds and picks at install time.

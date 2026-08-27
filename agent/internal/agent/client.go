@@ -77,7 +77,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			log.Printf("connection lost: %v", err)
 		}
 
-		// Jitter matters at fleet scale: 200 boxes reconnecting in lockstep
+		// Jitter matters at fleet scale: a whole fleet reconnecting in lockstep
 		// after the VPS restarts is a self-inflicted denial of service.
 		jitter := time.Duration(rand.Int63n(int64(backoff / 4)))
 		wait := backoff - backoff/8 + jitter

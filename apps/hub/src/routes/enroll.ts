@@ -54,6 +54,7 @@ export async function enrollRoutes(app: FastifyInstance) {
             androidVersion: body.device.androidVersion ?? undefined,
             sdkInt: body.device.sdkInt ?? undefined,
             abi: body.device.abi ?? undefined,
+            localIp: body.device.localIp ?? undefined,
             name: body.name ?? existing.name,
           },
         })
@@ -71,6 +72,7 @@ export async function enrollRoutes(app: FastifyInstance) {
             androidVersion: body.device.androidVersion ?? null,
             sdkInt: body.device.sdkInt ?? null,
             abi: body.device.abi ?? null,
+            localIp: body.device.localIp ?? null,
             group: {
               connectOrCreate: { where: { name: "default" }, create: { name: "default" } },
             },

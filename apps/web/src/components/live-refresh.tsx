@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
  *
  * The hub pushes an event whenever a device, job, rollout or version changes;
  * this listens and asks Next to re-render the current route. Refreshes are
- * coalesced because a 200-device rollout emits events far faster than anyone
+ * coalesced because a fleet-wide rollout emits events far faster than anyone
  * needs to see them — one repaint per second is plenty.
  */
 export function LiveRefresh({ throttleMs = 1000 }: { throttleMs?: number }) {

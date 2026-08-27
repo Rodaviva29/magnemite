@@ -1,0 +1,97 @@
+---
+title: How it fits together
+description: Four processes, two domains, and the reasons each one is separate.
+icon: Network
+---
+
+Magnemite is four processes and a database.<br></br>Three of them run on your local server; the fourth is a ~6 MB static binary on each box.
+
+## All the pieces
+
+| Piece        | What it is                              | What it does                                                                                                |
+| ------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **agent**    | Go binary, installed as a Magisk module | Dials **out** to the hub over WSS, downloads bundles, drives `pm`                                           |
+| **hub**      | Fastify, port 3001                      | Holds the device sockets, schedules jobs, polls both release sources, caches each `.apkm` once              |
+| **web**      | Next.js, port 3000                      | The dashboard. Reads Postgres directly; anything touching a live socket goes through the hub's internal API |
+| **edge**     | Caddy                                   | Fronts the hub and streams cached bundles straight off the shared volume                                    |
+| **postgres** | Postgres 17                             | Devices, versions, rollouts, jobs, accounts                                                                 |
+
+```
+                         ┌──────────┐
+  you ───────────────────►   web    │──────► postgres
+       dashboard domain  └────┬─────┘           ▲
+                              │ /internal/*     │
+                         ┌────▼─────┐           │
+  box ──── WSS ─────────►│   hub    ├───────────┘
+       agents domain     └────┬─────┘
+                              │ writes artifacts
+                         ┌────▼─────┐
+  box ──── /files/* ────►│   edge   │  (reads the same volume, read-only)
+                         └──────────┘
+```
+
+## Why there is an edge at all?
+
+The hub _can_ serve `/files/*` itself (`SERVE_ARTIFACTS=true`), and in local
+development it does. In production it does not, because a fleet-wide rollout is
+~35 GB of `.apkm` bytes and there is no reason for Node to touch them.
+
+<Callout type="info">`SERVE_ARTIFACTS` is `false` in **both** deployments.</Callout>
+
+Caddy mounts the artifacts volume read-only, answers `Range` requests natively —
+so a box that drops its uplink at 80% resumes instead of starting over — and
+asks the hub whether the requesting device's token is good via `forward_auth`
+against `/internal/authz`.
+
+## Two URLs, two audiences
+
+Two different things talk to Magnemite, and it matters which URL each one gets.
+
+| Audience              | What it needs                                        | Env var                   |
+| --------------------- | ---------------------------------------------------- | ------------------------- |
+| **You**, in a browser | The **dashboard**: login, fleet, rollouts            | `MAGNEMITE_DASHBOARD_URL` |
+| **The boxes**         | The **hub**: `/ws/device`, `/api/enroll`, `/files/*` | `MAGNEMITE_PUBLIC_URL`    |
+
+<Callout type="warn" title="Everywhere a box is configured, the value is the hub URL">
+  `SERVER=` when building the module, `serverUrl` in `config.json`, `-server` on the agent: all of
+  them are what `MAGNEMITE_PUBLIC_URL` is set to, never the dashboard's domain. The agent builds its
+  artifact download URLs from it, and a box pointed at the dashboard fails the handshake on
+  `/ws/device`.
+</Callout>
+
+A. **With docker compose** both live behind one virtual host on your proxy, so
+the two URLs are identical and compose fills the dashboard one in for you. Set
+`MAGNEMITE_PUBLIC_URL` and you are done.
+
+B. **With Coolify** they are split across two domains — the dashboard on
+`magnemite.example.com`, the boxes on `agents.magnemite.example.com`.
+
+## What the boxes can reach
+
+Only four paths are routed on the agents' domain. Everything else is a 404,
+which is what keeps the hub's `/internal/*` API unreachable from outside.
+
+| Path          | Handled by | Purpose                                                                |
+| ------------- | ---------- | ---------------------------------------------------------------------- |
+| `/ws/device`  | hub        | The persistent WebSocket each box opens                                |
+| `/api/enroll` | hub        | First-boot registration, trades an enrollment token for a device token |
+| `/files/*`    | edge       | Cached `.apkm` downloads, gated by `forward_auth`                      |
+| `/healthz`    | hub        | Liveness                                                               |
+
+## The hub's internal API
+
+Reachable only from the `web` container over the compose network, behind
+`HUB_INTERNAL_SECRET`. It is the whole set of operations that need a live
+socket or the scheduler.
+
+```
+GET  /internal/status                     GET  /internal/events        (SSE)
+POST /internal/nudge                      POST /internal/health
+POST /internal/rollouts                   POST /internal/rollouts/:id/cancel
+POST /internal/rollouts/:id/resume        POST /internal/rollouts/:id/retry-failed
+POST /internal/jobs/:id/retry             POST /internal/jobs/:id/cancel
+POST /internal/devices/:id/reboot         POST /internal/devices/:id/install
+POST /internal/devices/:id/rotom/:action  POST /internal/rotom/sync
+POST /internal/versions/:id/cache         POST /internal/versions/prune
+POST /internal/sources/poll               GET  /internal/authz         (forward_auth)
+```

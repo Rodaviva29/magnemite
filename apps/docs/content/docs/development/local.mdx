@@ -1,0 +1,64 @@
+---
+title: Running it locally
+description: Postgres in Docker, the hub and the dashboard on your machine.
+icon: SquareTerminal
+---
+
+```sh
+pnpm install
+docker compose up -d postgres
+pnpm --filter @magnemite/db exec dotenv -e ../../.env -- prisma migrate dev
+pnpm db:seed
+
+pnpm --filter @magnemite/hub dev     # :3001
+pnpm --filter @magnemite/web dev     # :3000
+pnpm --filter @magnemite/docs dev    # :3002 — this site
+```
+
+`pnpm dev` at the root runs every app in `apps/*` in parallel.
+
+## What the dev `.env` does differently
+
+```sh
+SERVE_ARTIFACTS=true
+MAGNEMITE_PUBLIC_URL=http://localhost:3001
+```
+
+With no Caddy in front, the hub serves `/files/*` itself and stands in for it.
+`DATABASE_URL` points at the host-mapped `127.0.0.1:5433`, which is the port
+compose publishes Postgres on for exactly this.
+
+<Callout type="warn">
+  Leave `SERVE_ARTIFACTS` **off** in either deployment. Both put Caddy in front of `/files/*`, and
+  turning it on there routes ~35 GB of a fleet-wide rollout through Node.
+</Callout>
+
+## Database work
+
+| Command            | Does                                       |
+| ------------------ | ------------------------------------------ |
+| `pnpm db:generate` | Regenerate the Prisma client               |
+| `pnpm db:migrate`  | Create and apply a migration (development) |
+| `pnpm db:deploy`   | Apply pending migrations (production)      |
+| `pnpm db:push`     | Push the schema without a migration        |
+| `pnpm db:studio`   | Prisma Studio                              |
+| `pnpm db:seed`     | Admin, app target, first enrollment token  |
+
+## Checks
+
+```sh
+pnpm lint          # prettier --check .
+pnpm format        # prettier --write .
+make typecheck     # hub and web
+make agent-test    # go vet ./... && go test ./...
+```
+
+## Building the agent
+
+Everything Go-related runs inside the `golang` image, so no toolchain is needed
+on the host:
+
+```sh
+make agent     # four binaries into agent/bin
+make module    # the Magisk zip into dist/
+```

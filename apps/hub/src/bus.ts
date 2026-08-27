@@ -24,5 +24,7 @@ class Bus extends EventEmitter {
 }
 
 export const bus = new Bus();
-// One listener per open dashboard tab; the default cap of 10 is too low.
-bus.setMaxListeners(200);
+// One listener per open dashboard tab. Node's default cap of 10 is only there
+// to catch leaks, and every listener here is unsubscribed on disconnect, so
+// there is no reason to put a ceiling on how many tabs may be open.
+bus.setMaxListeners(0);

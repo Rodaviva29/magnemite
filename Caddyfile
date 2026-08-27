@@ -1,14 +1,27 @@
-# No global `email` directive: Caddy issues certificates without a registered
-# ACME contact, and an empty ACME_EMAIL would fail to parse. Add
-# `email you@example.com` in a global block if you want expiry notices.
-{$MAGNEMITE_DOMAIN} {
+# Magnemite's own edge, for the docker-compose deployment.
+#
+# TLS is not ours to terminate: whatever reverse proxy already fronts your
+# server does that and forwards plain HTTP here, so auto-HTTPS is off and the
+# site address carries no domain — this listens on :8080 and serves whatever
+# is routed to it. Point your proxy's virtual host at the published EDGE_PORT.
+#
+# It exists because a reverse proxy is not a file server and cannot mount our
+# artifacts volume — so without this the ~170 MB bundles would go out through
+# Node (SERVE_ARTIFACTS=true). Here they stream straight off the shared volume,
+# with Range handled natively, and Node stays out of the data path.
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
 	log {
 		output stdout
 		format console
 	}
 
 	# --- Artifact downloads -------------------------------------------------
-	# Up to 200 devices pulling a ~170 MB .apkm. Served straight off the shared
+	# Up to N devices pulling a ~170 MB .apkm. Served straight off the shared
 	# volume so Node never sits in the data path: Caddy handles Range requests
 	# natively, which is what makes an interrupted download resumable.
 	handle_path /files/* {

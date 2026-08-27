@@ -1,0 +1,50 @@
+---
+title: Deploying without dropping the fleet
+description: Narrowing a Coolify deploy so a dashboard change leaves the device sockets alone.
+icon: ShieldAlert
+---
+
+A Coolify Compose resource can be a one deploy unit synced with auto-deployments with GitHub webhooks managed by Coolify: every service with a `build:` is
+rebuilt under a tag carrying the current commit, so `up -d` sees changed config
+everywhere and recreates the lot. That is fine for `web` and fatal for `hub`:
+a couple of hundred device sockets go down with it, and they all come back at
+once.
+
+`hub` is a separate process from `web` precisely so a dashboard rebuild does not
+touch those sockets. To get that on Coolify, narrow the deploy with the
+resource's **Custom Build Command** and **Custom Start Command** (General tab),
+which replace the Compose commands Coolify would otherwise run. Coolify injects
+the `-f` and `--env-file` flags itself, so leave those out.
+
+## Dashboard-only Build
+
+```sh title="Custom Build Command"
+docker compose build web
+```
+
+```sh title="Custom Start Command"
+docker compose up -d --no-deps web
+```
+
+## Hub and edge, when the hub itself changed
+
+```sh title="Custom Build Command"
+docker compose build hub
+```
+
+```sh title="Custom Start Command"
+docker compose up -d --no-deps hub edge
+```
+
+Clearing both fields restores the full-stack deploy, which is what the **first**
+deploy has to be.
+
+<Callout type="error" title="--no-deps is not optional">
+  Without it, Compose starts what `web` declares in `depends_on`. Service `postgres`
+  and `hub`, and recreates them, because their image tags moved with the
+  commit. That is the exact restart this is meant to avoid.
+
+For the same reason, never add `--remove-orphans` or `--force-recreate`: both
+reach past the service you named.
+
+</Callout>

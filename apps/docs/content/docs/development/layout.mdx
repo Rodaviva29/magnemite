@@ -1,0 +1,44 @@
+---
+title: Repository layout
+description: What lives where, and which pieces are duplicated on purpose.
+icon: FolderTree
+---
+
+```
+apps/hub          Fastify: device sockets, scheduler, source pollers, artifact cache
+apps/web          Next.js dashboard
+apps/docs         This documentation site (Fumadocs)
+packages/db       Prisma schema + client
+packages/protocol Wire protocol shared by hub and dashboard (mirrored in Go)
+agent             The Go agent
+magisk-module     Module that starts the agent as root at boot
+scripts           Bulk provisioning, fake fleet, builds
+docs              Diagrams
+```
+
+A pnpm workspace (`apps/*`, `packages/*`) on Node 22.
+
+## Inside the hub
+
+```
+apps/hub/src
+├── index.ts              Fastify bootstrap, /healthz
+├── env.ts                Typed environment
+├── bus.ts                In-process event bus, fanned out over SSE
+├── registry.ts           Live device sockets
+├── routes/
+│   ├── enroll.ts         POST /api/enroll
+│   ├── authz.ts          GET  /internal/authz   (Caddy forward_auth)
+│   ├── files.ts          GET  /files/*          (only when SERVE_ARTIFACTS)
+│   ├── events.ts         GET  /internal/events  (SSE to the dashboard)
+│   └── internal.ts       Everything the dashboard commands
+├── services/
+│   ├── scheduler.ts      Dispatch, concurrency caps, stall detection
+│   ├── rollouts.ts       Canary, soak, pause/resume
+│   ├── jobs.ts           Per-device job lifecycle
+│   ├── artifacts.ts      Cache-once + sha256
+│   ├── autoUpdate.ts     The hands-off pipeline
+│   ├── rotom.ts          Disable/enable/restart, matching
+│   └── sources/          github.ts, mirror.ts, poller.ts
+└── ws/deviceSocket.ts    The protocol, server side
+```
