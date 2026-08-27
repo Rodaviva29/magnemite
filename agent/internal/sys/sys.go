@@ -79,22 +79,230 @@ func (a *Android) LogcatStream(ctx context.Context) (io.ReadCloser, error) {
 	return a.stream(ctx, "exec logcat -v time -T 200 2>&1")
 }
 
+// FileStream follows a file the way `tail -F` is supposed to.
+//
+// Not actually `tail -F`: that is toybox on these boxes, its follow support
+// varies by ROM, and when it decides not to follow it still prints the tail
+// first — which looks exactly like a working stream that then goes quiet. Done
+// here, the polling loop is ours and behaves the same everywhere.
 func (a *Android) FileStream(ctx context.Context, path string) (io.ReadCloser, error) {
-	// -F rather than -f: a log the app rotates under us keeps streaming
-	// instead of following an inode nobody writes to any more.
-	//
-	// The path arrives as "$1" rather than inside the script, so a filename
-	// with a semicolon in it is a filename and never a second command.
-	return a.stream(ctx, `exec tail -n 200 -F "$1" 2>&1`, path)
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	offset, err := tailOffset(file, followTailLines)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	reader, writer := io.Pipe()
+	go followFile(ctx, file, path, offset, writer)
+	return reader, nil
 }
 
-// stream runs a script that keeps writing, with stderr folded into stdout so a
-// "can't open" reaches the panel instead of vanishing.
-func (a *Android) stream(ctx context.Context, script string, args ...string) (io.ReadCloser, error) {
-	// sh -c <script> sh <args...>: the extra "sh" is $0, so the first real
-	// argument lands on $1.
-	argv := append([]string{"-c", script, "sh"}, args...)
-	cmd := exec.CommandContext(ctx, "sh", argv...)
+const (
+	// Lines of context when a follow starts, matching logcat's -T.
+	followTailLines = 200
+	// How long to wait for more, when the log is busy and when it is not.
+	//
+	// A log being written to is checked often, so lines land in the panel
+	// while they still feel live; one that has gone quiet backs off, because
+	// waking four times a second to find nothing is the only thing polling
+	// could plausibly waste. Either way it is one read on an open handle.
+	followBusyInterval = 250 * time.Millisecond
+	followIdleInterval = time.Second
+	// How long a log counts as busy after its last line.
+	followBusyFor = 5 * time.Second
+)
+
+// tailOffset finds where the last `lines` lines start, reading backwards in
+// chunks so a 200 MB log does not become 200 MB of memory.
+func tailOffset(file *os.File, lines int) (int64, error) {
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	const chunk = 8 * 1024
+	end := stat.Size()
+	buf := make([]byte, chunk)
+	newlines := 0
+
+	for pos := end; pos > 0; {
+		size := int64(chunk)
+		if pos < size {
+			size = pos
+		}
+		pos -= size
+
+		if _, err := file.ReadAt(buf[:size], pos); err != nil && err != io.EOF {
+			return 0, err
+		}
+		for i := int(size) - 1; i >= 0; i-- {
+			if buf[i] != '\n' {
+				continue
+			}
+			newlines++
+			// The newline *before* the first line we want to show.
+			if newlines > lines {
+				return pos + int64(i) + 1, nil
+			}
+		}
+	}
+	// Fewer lines in the file than asked for: start at the beginning.
+	return 0, nil
+}
+
+// followFile reads to EOF, waits, and reads again — starting over when the
+// file is rotated, truncated or rewritten, which are the three ways a log
+// stops being the file we opened.
+func followFile(ctx context.Context, file *os.File, path string, offset int64, writer *io.PipeWriter) {
+	defer writer.Close()
+	defer file.Close()
+
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		writer.CloseWithError(err)
+		return
+	}
+	head := headPrint(file, headPrintBytes)
+	var checkedAt time.Time
+
+	// reopenIfStale starts the file over when it is no longer the one we have
+	// been reading. Three ways that happens:
+	//
+	//   shorter than where we are   truncated
+	//   a different inode           rotated away and recreated
+	//   a different opening         truncated *and* rewritten, which the size
+	//                               alone misses whenever the new content is
+	//                               longer than our position
+	//
+	// Only as many bytes as were captured are compared: appending never
+	// changes the opening of a file, so a growing log stays the same log.
+	//
+	// Called before every read, not only when the file goes quiet: a rewrite
+	// between two reads would otherwise be consumed as if it were more of the
+	// same file, and the panel would show a line starting halfway through.
+	//
+	// `force` is set whenever the last read drained the file, which is the
+	// moment a rewrite can actually slip in. While a backlog is being consumed
+	// there is no such gap, so those reads only pay for a check occasionally.
+	reopenIfStale := func(force bool) {
+		if !force && time.Since(checkedAt) < headCheckInterval {
+			return
+		}
+		checkedAt = time.Now()
+
+		stat, err := os.Stat(path)
+		if err != nil {
+			return // gone for the moment; it may come back
+		}
+
+		stale := stat.Size() < offset ||
+			!sameFile(file, stat) ||
+			(len(head) > 0 && headPrintAt(path, len(head)) != head)
+
+		if !stale {
+			// A log that was shorter than the fingerprint when it was opened
+			// has more of an opening now. Take it, so the next check has
+			// something to compare against.
+			if len(head) < headPrintBytes {
+				head = headPrintAt(path, headPrintBytes)
+			}
+			return
+		}
+
+		replacement, err := os.Open(path)
+		if err != nil {
+			return
+		}
+		file.Close()
+		file = replacement
+		offset = 0
+		head = headPrint(file, headPrintBytes)
+	}
+
+	buf := make([]byte, 32*1024)
+	drained := true
+	lastLine := time.Now()
+
+	for {
+		reopenIfStale(drained)
+
+		n, err := file.Read(buf)
+		if n > 0 {
+			if _, werr := writer.Write(buf[:n]); werr != nil {
+				return // the reader went away
+			}
+			offset += int64(n)
+			lastLine = time.Now()
+			// A full buffer means there is more waiting; anything less means
+			// we are at the end of the file as it stands.
+			drained = n < len(buf)
+			continue
+		}
+		drained = true
+		if err != nil && err != io.EOF {
+			writer.CloseWithError(err)
+			return
+		}
+
+		// A log being written to is worth checking often; one that has gone
+		// quiet is not.
+		wait := followIdleInterval
+		if time.Since(lastLine) < followBusyFor {
+			wait = followBusyInterval
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
+const (
+	// Enough of a file's opening to notice it started over, and cheap enough
+	// to read this often.
+	headPrintBytes = 64
+	// Ceiling on how often the file behind the handle is re-examined. Below
+	// human reaction time, and far above how often it is worth stat'ing a log.
+	headCheckInterval = 200 * time.Millisecond
+)
+
+func headPrint(file *os.File, size int) string {
+	buf := make([]byte, size)
+	n, err := file.ReadAt(buf, 0)
+	if err != nil && err != io.EOF {
+		return ""
+	}
+	return string(buf[:n])
+}
+
+func headPrintAt(path string, size int) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	return headPrint(file, size)
+}
+
+func sameFile(file *os.File, stat os.FileInfo) bool {
+	current, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return os.SameFile(current, stat)
+}
+
+// stream runs a command that keeps writing — logcat, in practice — with stderr
+// folded into stdout by the script itself, so a failure reaches the panel
+// instead of vanishing.
+func (a *Android) stream(ctx context.Context, script string) (io.ReadCloser, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

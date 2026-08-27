@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -89,16 +90,23 @@ func (a *Agent) startLogStream(msg proto.LogStreamStart) {
 	path := msg.Path
 	go func() {
 		defer cancel()
-		err := logs.Stream(ctx, a.Sys, path, func(lines []string, dropped int) {
+		send := func(lines []string, dropped int) {
 			_ = a.send(proto.LogLines{
 				Type:     "log_lines",
 				StreamID: streamID,
 				Lines:    lines,
 				Dropped:  dropped,
 			})
-		})
+		}
+
+		err := logs.Stream(ctx, a.Sys, path, send)
 		if err != nil && ctx.Err() == nil {
 			log.Printf("logs: stream %s ended: %v", streamID, err)
+			// A log that cannot be opened is the common case here — a path
+			// typed wrong, or an app that has not written one yet. Saying so
+			// as a line beats a panel that waits forever for a file that will
+			// never arrive.
+			send([]string{fmt.Sprintf("— cannot follow %s: %v", source(path), err)}, 0)
 		}
 
 		a.logMu.Lock()
@@ -108,6 +116,13 @@ func (a *Agent) startLogStream(msg proto.LogStreamStart) {
 		}
 		a.logMu.Unlock()
 	}()
+}
+
+func source(path string) string {
+	if path == "" {
+		return "logcat"
+	}
+	return path
 }
 
 func (a *Agent) stopLogStream(streamID string) {

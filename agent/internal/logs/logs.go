@@ -163,9 +163,24 @@ func Upload(ctx context.Context, url, deviceToken, path string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("HTTP %d: %s%s", resp.StatusCode, strings.TrimSpace(string(body)), hint(resp.StatusCode))
 	}
 	return nil
+}
+
+// hint turns the two failures that are really deployment problems into
+// something the person reading the dashboard can act on. A box saying "404"
+// tells you nothing; "the edge is not routing this" tells you where to look.
+func hint(status int) string {
+	switch status {
+	case http.StatusNotFound:
+		return " — the reverse proxy in front of the hub is not routing POST /api/logs/*, " +
+			"so the upload never reached it (see the Caddyfile)"
+	case http.StatusUnauthorized:
+		return " — the hub rejected this box's device token"
+	default:
+		return ""
+	}
 }
 
 // Batching for the live stream. A busy box writes thousands of lines a second

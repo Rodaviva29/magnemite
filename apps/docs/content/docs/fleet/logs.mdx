@@ -24,6 +24,14 @@ download starts — usually a few seconds. If nothing arrives within two minutes
 it gives up and says so; the usual cause is an agent older than this feature,
 which does not know the message.
 
+<Callout type="warn" title="could not upload the bundle: HTTP 404">
+  The box built the zip and had nowhere to put it: the edge is not routing `POST /api/logs/*` to the
+  hub. Either the Caddyfile on the server predates that route, or it has it and the running Caddy
+  does not — a bind-mounted Caddyfile changes no Compose config, so `up -d` leaves the old one
+  running. See [when the Caddyfile
+  changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
+</Callout>
+
 <Callout type="info">
   The zip goes to the hub, not through the dashboard: the box uploads it with its own device token,
   the same one it downloads `.apkm` bundles with. The last 3 bundles per box are kept, and nothing
@@ -40,14 +48,23 @@ The source picker offers `logcat`, the agent's own log, the scanner's
 (`/data/local/tmp/aegis.log`), plus whatever `.log` files the box turns out to
 have — the panel asks it on open. **Another file…** takes any absolute path.
 
-| Source   | Followed with           |
-| -------- | ----------------------- |
-| `logcat` | `logcat -v time -T 200` |
-| Any file | `tail -n 200 -F <path>` |
+| Source   | Followed with                                   |
+| -------- | ----------------------------------------------- |
+| `logcat` | `logcat -v time -T 200`                         |
+| Any file | The agent's own follow, starting 200 lines back |
 
-`-T 200` and `-n 200`: both start from the last 200 lines rather than replaying
-everything, and `-F` keeps following a file the app rotates underneath it. A
-path that cannot be opened shows the error in the panel — stderr is folded in.
+Both start from the last 200 lines rather than replaying everything.
+
+Files are **not** followed with `tail -F`. That is toybox on these boxes, its
+follow support varies by ROM, and when it decides not to follow it still prints
+the tail first — which looks exactly like a working stream that then goes quiet.
+The agent does the polling itself instead, and picks the file up again when it
+is rotated, truncated or rewritten. A path it cannot open says so in the panel
+rather than sitting empty.
+
+Lines are coloured by level: the logcat format is taken apart into timestamp,
+tag and message, and a log an app writes itself is coloured on whatever level
+word it used (`ERROR`, `WARN`, `FATAL`, and so on).
 
 ### What it costs
 
@@ -55,7 +72,7 @@ path that cannot be opened shows the error in the panel — stderr is folded in.
   one, and someone watching a file at the same time gets their own.
 - Closing the panel stops it. So does the box disconnecting, and so does a
   five-minute deadline the agent enforces itself, renewed while anyone is
-  watching — a browser that vanished cannot leave `tail` running on someone's
+  watching — a browser that vanished cannot leave a follow running on someone's
   TV box.
 - The panel keeps the last 2000 lines and nothing is stored anywhere. For
   something to keep, use the zip.

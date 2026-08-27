@@ -87,6 +87,10 @@ services:
     image: caddy:2-alpine
     container_name: magnemite-caddy
     restart: unless-stopped
+    # --watch, because the Caddyfile is a bind mount: editing it changes no
+    # Compose config, so `up -d` sees an up-to-date container and leaves the
+    # old routes running. A new route then 404s with nothing obviously wrong.
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile --watch
     depends_on:
       - web
       - hub
