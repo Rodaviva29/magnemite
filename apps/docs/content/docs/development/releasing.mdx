@@ -12,39 +12,46 @@ what each one needs.
 
 ## The one rule that catches everyone
 
-**The agent is versioned by the `VERSION` file at the repo root, and the fleet
-only moves when that string changes.**
+**The agent is versioned by the `agent=` line of the `VERSION` file, and the
+fleet only moves when that string changes.**
 
 The hub compares the version a box reports with the version its own image was
-built from, as plain strings. New code with the same `VERSION` is a hub that
+built from, as plain strings. New code on the same `agent=` is a hub that
 believes the fleet is already where it should be — you deploy, nothing happens,
 and nothing is wrong in the logs either.
 
-```sh
-cat VERSION          # 0.1.2
-echo 0.1.3 > VERSION # this is what makes the fleet move
+```sh title="VERSION"
+agent=0.1.5   # bump this and the boxes update themselves
+hub=0.1.5     # a label: shown on the Status page
+web=0.1.5     # the same, for the dashboard
+docs=0.1.5    # the same, for the documentation site
 ```
 
-Same string, same fleet. It is not semver, so a _lower_ value is a downgrade
+One line per deployable, because they ship on different clocks. Only `agent=`
+changes what the fleet runs; the rest are how you tell, on **Settings →
+Health**, whether a deploy finished — a hub and a dashboard on different
+numbers is a half-applied release.
+
+Same string, same fleet. It is not semver, so a _lower_ `agent=` is a downgrade
 the boxes will happily apply — which is also how you roll the agent back on
 purpose.
 
 <Callout type="warn">
-  `VERSION` is only about the **agent**. Changing hub or dashboard code needs no bump: those ship by
-  being redeployed, and nothing compares their versions.
+  Only `agent=` changes behaviour. Hub and dashboard code ships by being redeployed and nothing
+  compares those numbers — bump them anyway, or the Status page will tell you a stale story.
 </Callout>
 
 ## What each change needs
 
 | You changed                        | Bump `VERSION`? | What to do                                                          |
 | ---------------------------------- | --------------- | ------------------------------------------------------------------- |
-| `apps/web`                         | no              | Redeploy `web`                                                      |
-| `apps/hub`                         | no              | Redeploy `hub` (drops every device socket — see below)              |
-| `agent/`                           | **yes**         | Redeploy `hub`; the fleet updates itself                            |
-| `packages/protocol`                | **yes**         | Both sides implement it — redeploy `hub` **and** bump the agent     |
-| `packages/db/prisma/schema.prisma` | no              | Commit the migration; `hub` applies it on start                     |
-| `magisk-module/`                   | **yes**         | `make module` and reflash — this part is not delivered over the air |
-| `apps/docs`                        | no              | Redeploy `docs`                                                     |
+| `apps/web`                         | `web=`          | Redeploy `web`                                                      |
+| `apps/hub`                         | `hub=`          | Redeploy `hub` (drops every device socket — see below)              |
+| `agent/`                           | **`agent=`**    | Redeploy `hub`; the fleet updates itself                            |
+| `packages/protocol`                | **`agent=`**    | Both sides implement it — redeploy `hub` **and** bump the agent     |
+| `packages/db/prisma/schema.prisma` | `hub=`          | Commit the migration; `hub` applies it on start                     |
+| `magisk-module/`                   | **`agent=`**    | `make module` and reflash — this part is not delivered over the air |
+| `apps/docs`                        | `docs=`         | Redeploy `docs`                                                     |
 
 Adding a **version source** is not a release at all: it is a URL in Settings.
 Only a source publishing something other than the shared index format would
@@ -77,7 +84,8 @@ the protocol.
 ## Shipping the agent
 
 ```sh
-echo 0.1.3 > VERSION
+# bump agent= (and hub=, since the hub image carries the new binary)
+$EDITOR VERSION
 git commit -am "agent: report the LAN address"
 git push
 # redeploy the hub
@@ -120,7 +128,7 @@ so only the dashboard restarts is one setting on
 
 ### If the agent or the protocol changed
 
-Bump `VERSION`. Check that new protocol fields are optional on both sides.
+Bump `agent=`. Check that new protocol fields are optional on both sides.
 
 </Step>
 

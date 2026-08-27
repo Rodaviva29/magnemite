@@ -1,6 +1,8 @@
+import { version as nextVersion } from "next/package.json";
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { hub, type HubHealth } from "@/lib/hub";
+import { WEB_VERSION } from "@/lib/version";
 import { StatusBoard } from "@/components/status-board";
 
 export const dynamic = "force-dynamic";
@@ -58,14 +60,51 @@ async function fallbackHealth(error: string): Promise<HubHealth> {
   };
 }
 
+/**
+ * The dashboard's own card.
+ *
+ * Every other check is a probe the hub runs; this one is the process rendering
+ * the page, so it answers here. It is always OK by definition — if it were
+ * not, there would be no page — and exists for its versions: a dashboard and a
+ * hub left on different releases is a real state to be in, and this is where
+ * you would notice.
+ */
+function dashboardCheck(): HubHealth["checks"][number] {
+  return {
+    key: "web",
+    label: "Dashboard",
+    summary: `Serving this page on Next.js ${nextVersion}`,
+    state: "OK",
+    latencyMs: null,
+    facts: [
+      { label: "Dashboard", value: WEB_VERSION },
+      { label: "Next.js", value: nextVersion },
+      { label: "Node", value: process.version },
+    ],
+    detail: null,
+    link: null,
+  };
+}
+
 export default async function StatusPage() {
   await requireUser();
 
   try {
     const health = await hub.health();
-    return <StatusBoard health={health} error={null} />;
+    return (
+      <StatusBoard
+        health={{ ...health, checks: [dashboardCheck(), ...health.checks] }}
+        error={null}
+      />
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return <StatusBoard health={await fallbackHealth(message)} error={message} />;
+    const health = await fallbackHealth(message);
+    return (
+      <StatusBoard
+        health={{ ...health, checks: [dashboardCheck(), ...health.checks] }}
+        error={message}
+      />
+    );
   }
 }

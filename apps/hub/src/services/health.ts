@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SourceFeed } from "@magnemite/db";
-import { prisma } from "@magnemite/db";
+import { Prisma, prisma } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount } from "../registry.js";
+import { HUB_VERSION } from "../version.js";
 import { agentTargetVersion, agentUpdatesInFlight } from "./agentRelease.js";
 import { listDevices, rotomEnabled } from "./rotom.js";
 import { entriesForTarget, fetchFeedIndex } from "./sources/feed.js";
@@ -87,6 +88,8 @@ function checkHub(): IntegrationCheck {
     state: "OK",
     latencyMs: null,
     facts: [
+      { label: "Hub", value: HUB_VERSION },
+      { label: "Node", value: process.version },
       { label: "Device sockets", value: String(connectionCount()) },
       { label: "Concurrent installs", value: String(env.MAX_CONCURRENT_JOBS) },
       { label: "Source poll", value: `every ${env.SOURCE_POLL_MINUTES} min` },
@@ -103,13 +106,34 @@ function checkHub(): IntegrationCheck {
   };
 }
 
+/**
+ * The server's own version, as it reports it.
+ *
+ * `SHOW server_version` rather than `version()`: the latter is a paragraph of
+ * build flags, and the number is the part anyone reads.
+ */
+async function postgresVersion(): Promise<string> {
+  try {
+    const rows = await prisma.$queryRaw<{ server_version: string }[]>`SHOW server_version`;
+    return rows[0]?.server_version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** The client version, which is what decides the wire protocol it speaks. */
+function prismaVersion(): string {
+  return Prisma.prismaVersion.client;
+}
+
 async function checkDatabase(): Promise<IntegrationCheck> {
   try {
     const { ms } = await timed(() => prisma.$queryRaw`SELECT 1`);
-    const [devices, versions, jobs] = await Promise.all([
+    const [devices, versions, jobs, server] = await Promise.all([
       prisma.device.count(),
       prisma.appVersion.count(),
       prisma.job.count(),
+      postgresVersion(),
     ]);
 
     return {
@@ -119,6 +143,8 @@ async function checkDatabase(): Promise<IntegrationCheck> {
       state: ms > 500 ? "DEGRADED" : "OK",
       latencyMs: ms,
       facts: [
+        { label: "Postgres", value: server },
+        { label: "Prisma", value: prismaVersion() },
         { label: "Devices", value: String(devices) },
         { label: "Versions", value: String(versions) },
         { label: "Jobs", value: String(jobs) },
@@ -316,6 +342,21 @@ async function checkFeed(
   }
 }
 
+/** "1.4.2 ×37, 1.4.1 ×3" — most common first, so the outliers stand out. */
+function workerVersions(devices: { version?: string }[]): string {
+  const counts = new Map<string, number>();
+  for (const device of devices) {
+    const version = device.version?.trim() || "unknown";
+    counts.set(version, (counts.get(version) ?? 0) + 1);
+  }
+  if (counts.size === 0) return "—";
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([version, count]) => `${version} ×${count}`)
+    .join(", ");
+}
+
 async function checkRotom(): Promise<IntegrationCheck> {
   if (!rotomEnabled()) {
     return {
@@ -352,6 +393,10 @@ async function checkRotom(): Promise<IntegrationCheck> {
         { label: "Secret", value: env.ROTOM_SECRET ? "set" : "none" },
         { label: "Devices listed", value: String(devices.length) },
         { label: "Matched to our fleet", value: String(matched) },
+        // The scanner's own version, which Magnemite never installs and so
+        // never otherwise reports. A fleet halfway through a scanner update
+        // shows up here as two numbers.
+        { label: "Worker versions", value: workerVersions(devices) },
       ],
       detail: unmatched
         ? "No Rotom device matches one of ours — check each box's origin against its name or serial."
@@ -389,6 +434,10 @@ async function checkEdge(): Promise<IntegrationCheck> {
       latencyMs: ms,
       facts: [
         { label: "Public URL", value: base },
+        // Whatever is actually answering on that URL. Usually our own Caddy,
+        // but on a deployment fronted by someone else's proxy this is the
+        // quickest way to see whose it is.
+        { label: "Served by", value: res.headers.get("server") ?? "unidentified" },
         { label: "Artifacts", value: `${base}/files/` },
       ],
       detail: null,

@@ -1,13 +1,15 @@
 # Linux/macOS counterpart of scripts/build-agent.ps1. Everything Go-related
 # runs inside the golang image, so no toolchain is needed on the host.
 
-# Single source of truth for the agent version: the VERSION file at the repo
-# root. scripts/build-agent.ps1 reads the same file, and both stamp it into
-# module.prop at package time, so nothing is edited in two places.
-VERSION     ?= $(shell cat VERSION)
+# Single source of truth for versions: the VERSION file at the repo root, which
+# holds one `key=value` line per deployable. Everything here is the agent's,
+# since the agent is all this Makefile builds. scripts/build-agent.ps1 reads the
+# same file, and both stamp it into module.prop at package time, so nothing is
+# edited in two places.
+VERSION     ?= $(shell awk -F= '/^agent=/ { print $$2 }' VERSION)
 # Magisk compares versionCode, not the string. Derived so it always moves with
 # the version: 0.1.2 -> 102.
-VERSIONCODE := $(shell awk -F. '{ print $$1 * 10000 + $$2 * 100 + $$3 }' VERSION)
+VERSIONCODE := $(shell echo "$(VERSION)" | awk -F. '{ print $$1 * 10000 + $$2 * 100 + $$3 }')
 GO_IMAGE    ?= golang:1.23-alpine
 ROOT        := $(shell pwd)
 LDFLAGS     := -s -w -X main.version=$(VERSION)

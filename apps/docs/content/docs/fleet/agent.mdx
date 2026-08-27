@@ -28,9 +28,10 @@ On Windows:
 ```
 
 Everything Go-related runs inside the `golang` image, so no toolchain is needed
-on the host. The version comes from the `VERSION` file at the repo root, and
-both build paths stamp it into `module.prop`.Magisk compares `versionCode`,
-which is derived so it always moves with the version (`0.1.2` → `102`).
+on the host. The version comes from the `agent=` line of the `VERSION` file at
+the repo root, and both build paths stamp it into `module.prop`. Magisk compares
+`versionCode`, which is derived so it always moves with the version (`0.1.5` →
+`105`).
 
 <Callout type="warn">
   `SERVER` is the **hub** URL, never the dashboard's. A box pointed at the dashboard's domain fails

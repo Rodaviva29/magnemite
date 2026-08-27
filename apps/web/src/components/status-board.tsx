@@ -10,6 +10,7 @@ import {
   Globe,
   HardDrive,
   MinusCircle,
+  LayoutDashboard,
   Radar,
   RefreshCw,
   Server,
@@ -24,6 +25,7 @@ import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const ICONS: Record<string, typeof Server> = {
+  web: LayoutDashboard,
   hub: Server,
   database: Database,
   artifacts: HardDrive,

@@ -29,6 +29,9 @@ ENV NODE_ENV=production
 COPY --from=build /app ./
 # `packageManager` in the copied package.json pins the version.
 RUN corepack install
+# The release this image was built from, so the Status page can say which one
+# is running rather than leaving you to guess from the deploy history.
+COPY VERSION /app/VERSION
 
 EXPOSE 3000
 WORKDIR /app/apps/web

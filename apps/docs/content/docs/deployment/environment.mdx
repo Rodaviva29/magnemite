@@ -53,7 +53,7 @@ resource's **Environment** tab; the rest have defaults.
 | `JOB_STALL_TIMEOUT`        | `900`                        | Seconds without a `job_progress` message before a job is treated as stalled and re-queued.                                                |
 | `AGENT_AUTO_UPDATE`        | `true`                       | Tell boxes on an older build to update themselves to the binary this hub image ships. See [updating the agent](/docs/fleet/agent-update). |
 | `AGENT_UPDATE_CONCURRENCY` | `5`                          | How many boxes may be swapping their agent binary at once.                                                                                |
-| `AGENT_BIN_DIR`            | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `VERSION` they were built from.                                                     |
+| `AGENT_BIN_DIR`            | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
 
 ## Version sources
 

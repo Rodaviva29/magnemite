@@ -13,8 +13,10 @@ module does not need reinstalling — it only ever delivered the binary and the
 ## How a release happens
 
 ```sh
-echo 0.1.3 > VERSION
-git commit -am "agent 0.1.3" && git push
+# VERSION holds one key=value line per deployable; this is the one the fleet
+# compares itself against.
+sed -i 's/^agent=.*/agent=0.1.5/' VERSION
+git commit -am "agent 0.1.5" && git push
 # then redeploy the hub
 docker compose up -d --build hub
 ```

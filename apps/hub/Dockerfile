@@ -11,15 +11,20 @@ COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent ./
 COPY VERSION /VERSION
+# VERSION holds one key=value line per deployable; the agent's is the one that
+# gets stamped into the binaries. /out/VERSION is deliberately just the number:
+# it is what the hub hands the fleet as its target, and a box compares it as a
+# plain string.
 RUN set -e; \
-    v=$(cat /VERSION); \
+    v=$(awk -F= '/^agent=/ { print $2 }' /VERSION); \
+    test -n "$v" || { echo "no agent= line in VERSION"; exit 1; }; \
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
       go build -trimpath -ldflags "-s -w -X main.version=$v" \
       -o /out/magnemite-agent-linux-arm64 ./cmd/magnemite-agent; \
     CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
       go build -trimpath -ldflags "-s -w -X main.version=$v" \
       -o /out/magnemite-agent-linux-arm ./cmd/magnemite-agent; \
-    cp /VERSION /out/VERSION
+    printf '%s\n' "$v" > /out/VERSION
 
 FROM node:22-alpine AS build
 # pnpm is baked into the image below with `corepack install`: with only
@@ -54,6 +59,8 @@ RUN corepack install
 # What the hub hands out as the agent's target version, with the VERSION file
 # it was built from next to it. AGENT_BIN_DIR points here.
 COPY --from=agent /out /app/agent-bin
+# The same release, where the hub itself can read it for the Status page.
+COPY VERSION /app/VERSION
 COPY apps/hub/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

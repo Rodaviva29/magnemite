@@ -29,7 +29,15 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 if (-not $Version) {
-    $Version = (Get-Content (Join-Path $root "VERSION") -Raw).Trim()
+    # VERSION holds one key=value line per deployable; this script only ever
+    # builds the agent, so it reads that one.
+    $line = Get-Content (Join-Path $root "VERSION") |
+        Where-Object { $_ -match '^\s*agent\s*=' } |
+        Select-Object -First 1
+    if (-not $line) {
+        throw "No agent= line in VERSION"
+    }
+    $Version = ($line -split "=", 2)[1].Trim()
 }
 
 $goImage = "golang:1.23-alpine"

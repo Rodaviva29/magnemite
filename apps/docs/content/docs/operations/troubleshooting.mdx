@@ -57,6 +57,24 @@ weight — but so does the single-binary cross-compile.
 
 </Callout>
 
+## What version is actually running
+
+**Settings → Health** carries the version of every piece, which is the first
+thing to check when something behaves like an older build:
+
+| Card        | Reports                                                          |
+| ----------- | ---------------------------------------------------------------- |
+| Dashboard   | Its own `web=` version, Next.js and Node                         |
+| Hub         | Its own `hub=` version, Node, and the `agent=` it is handing out |
+| Database    | The Postgres server version and the Prisma client's              |
+| Public edge | Whatever answers on the boxes' URL, from its `Server` header     |
+| Rotom       | The scanner versions across the fleet, counted                   |
+
+Each number comes from the matching line of the repo's `VERSION` file, baked
+into the image at build time. The dashboard and the hub deploy separately, so
+they can end up on different ones — that is exactly the state these make
+visible. A container built before this existed reports `dev`.
+
 ## Reading what the box actually printed
 
 The **⋯** menu on a device page has **Logcat (.zip)** for a snapshot you can
