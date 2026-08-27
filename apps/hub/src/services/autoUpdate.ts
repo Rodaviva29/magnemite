@@ -32,14 +32,8 @@ export async function runAutoUpdate(appTargetId: string) {
   });
   if (candidates.length === 0) return null;
 
-  // Prefer the configured source when both mirror the same version.
-  const sorted = [...candidates].sort((a, b) => {
-    const byVersion = compareVersions(b.version, a.version);
-    if (byVersion !== 0) return byVersion;
-    const aPreferred = a.source === target.preferredSource ? 0 : 1;
-    const bPreferred = b.source === target.preferredSource ? 0 : 1;
-    return aPreferred - bPreferred;
-  });
+  // One row per build, whichever feed listed it, so newest simply wins.
+  const sorted = [...candidates].sort((a, b) => compareVersions(b.version, a.version));
   const latest = sorted[0];
   if (!latest) return null;
 
@@ -55,7 +49,7 @@ export async function runAutoUpdate(appTargetId: string) {
 
   if (latest.status !== "READY") {
     log.info(
-      { version: latest.version, source: latest.source },
+      { version: latest.version, feedId: latest.feedId },
       "auto-update: caching artifact before rollout",
     );
     await cacheVersion(latest.id);

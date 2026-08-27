@@ -19,7 +19,7 @@ import { wrapAsBundle } from "./zip.js";
  * The upload lands here as a raw stream and comes out the far side as an
  * ordinary `AppVersion` in `READY`, which means every part downstream — the
  * scheduler, the agent, the rollout pages, retries — treats it exactly like a
- * version discovered on GitHub. The only thing that marks it out is
+ * version discovered on a source. The only thing that marks it out is
  * `source = MANUAL` and its target's `manual` flag.
  */
 
@@ -143,12 +143,7 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
     // the unique constraint — the operator fixing a bad build expects that.
     const appVersion = await prisma.appVersion.upsert({
       where: {
-        appTargetId_source_version_arch: {
-          appTargetId: target.id,
-          source: "MANUAL",
-          version,
-          arch,
-        },
+        appTargetId_version_arch: { appTargetId: target.id, version, arch },
       },
       update: {
         filename,

@@ -80,10 +80,6 @@ async function doCacheVersion(versionId: string) {
 
     const headers: Record<string, string> = { "User-Agent": "magnemite-hub" };
     if (already > 0) headers.Range = `bytes=${already}-`;
-    if (env.GITHUB_TOKEN && version.remoteUrl.includes("github.com")) {
-      headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-    }
-
     const res = await fetch(version.remoteUrl, { headers, redirect: "follow" });
     if (!res.ok || !res.body) {
       throw new Error(`download failed: HTTP ${res.status} ${res.statusText}`);
@@ -140,8 +136,8 @@ async function doCacheVersion(versionId: string) {
     const md5Hex = md5.digest("hex");
     const finalSize = (await fs.stat(tmpPath)).size;
 
-    // The mirror publishes md5; GitHub publishes nothing, so size is the only
-    // check available there.
+    // Some sources publish an md5 and some do not; where there is none, the
+    // size the index reported is the only check available.
     if (version.md5 && version.md5.toLowerCase() !== md5Hex) {
       throw new Error(`md5 mismatch: expected ${version.md5}, got ${md5Hex}`);
     }

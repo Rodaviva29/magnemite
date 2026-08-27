@@ -57,13 +57,13 @@ resource's **Environment** tab; the rest have defaults.
 
 ## Version sources
 
-| Variable              | Default                                    | What it is                                                      |
-| --------------------- | ------------------------------------------ | --------------------------------------------------------------- |
-| `GITHUB_REPO`         | `The-Treeline-Project/Silva-Releases`      | Releases repository to watch.                                   |
-| `GITHUB_TOKEN`        | —                                          | Optional. Raises the GitHub API rate limit from 60/h to 5000/h. |
-| `MIRROR_INDEX_URL`    | `https://mirror.unownhash.com/index.json`  |                                                                 |
-| `MIRROR_BASE_URL`     | `https://mirror.unownhash.com/apks/`       |                                                                 |
-| `SOURCE_POLL_MINUTES` | `10080` in `.env.example`, `15` in compose | How often both sources are polled.                              |
+| Variable              | Default                                    | What it is                                                                                                       |
+| --------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `SOURCE_POLL_MINUTES` | `10080` in `.env.example`, `15` in compose | How often every enabled source is polled.                                                                        |
+| `MIRROR_INDEX_URL`    | the two defaults                           | Comma-separated index URLs the **seed** starts with. Read once; after that, sources are edited in the dashboard. |
+
+The sources themselves are rows in the database, managed in **Settings → Version
+sources** — see [APKs sources](/docs/operations/sources).
 
 ## Rotom
 

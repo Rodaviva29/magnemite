@@ -11,6 +11,57 @@ import {
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@example.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "change-me-please";
 
+type SeedFeed = { name: string; indexUrl: string; baseUrl: string | null; priority: number };
+
+/**
+ * The sources a fresh install starts with.
+ *
+ * `MIRROR_INDEX_URL` takes a comma-separated list, so a deployment can seed
+ * whichever indexes it wants without editing this file. Known ones keep their
+ * name and, where the index lists bare filenames, the base URL those need;
+ * anything else is named after its host and gets no base URL, which is right
+ * for an index that publishes an absolute `url` per entry. If it does not, set
+ * the base URL in Settings — the Health card says so when entries have nowhere
+ * to download from.
+ */
+const KNOWN_FEEDS: Record<string, Omit<SeedFeed, "priority">> = {
+  "https://mirror.unownhash.com/index.json": {
+    name: "UnownHash mirror",
+    indexUrl: "https://mirror.unownhash.com/index.json",
+    // The index lists filenames only, and the files live under /apks/.
+    baseUrl: "https://mirror.unownhash.com/apks/",
+  },
+  "https://the-treeline-project.github.io/p/silva/index.json": {
+    name: "Silva (The Treeline Project)",
+    indexUrl: "https://the-treeline-project.github.io/p/silva/index.json",
+    baseUrl: null,
+  },
+};
+
+const DEFAULT_INDEX_URLS = Object.keys(KNOWN_FEEDS);
+
+function sourceFeeds(): SeedFeed[] {
+  const configured = (process.env.MIRROR_INDEX_URL ?? "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+  const urls = configured.length > 0 ? configured : DEFAULT_INDEX_URLS;
+
+  return urls.map((indexUrl, index) => {
+    const known = KNOWN_FEEDS[indexUrl];
+    if (known) return { ...known, priority: (index + 1) * 100 };
+
+    let name = indexUrl;
+    try {
+      name = new URL(indexUrl).host;
+    } catch {
+      // Left as the raw string: a bad URL is better shown back than hidden.
+    }
+    return { name, indexUrl, baseUrl: null, priority: (index + 1) * 100 };
+  });
+}
+
 async function main() {
   // Better Auth keeps credentials on the account row, not the user. The auth
   // config points its hasher at bcrypt precisely so this seed can create the
@@ -57,13 +108,6 @@ async function main() {
     create: {
       packageName: "com.nianticlabs.pokemongo",
       displayName: "Pokémon GO",
-      githubRepo: process.env.GITHUB_REPO ?? "The-Treeline-Project/Silva-Releases",
-      // Matches googleplaystore_<build>_<ver>_com.nianticlabs.pokemongo_arm64-v8a.apkm
-      // and skips the loose base.apk / dump.cs / metadata assets in the release.
-      assetPattern: "^googleplaystore_.*_com\\.nianticlabs\\.pokemongo_arm64-v8a\\.apkm$",
-      mirrorIndexUrl: process.env.MIRROR_INDEX_URL ?? "https://mirror.unownhash.com/index.json",
-      mirrorBaseUrl: process.env.MIRROR_BASE_URL ?? "https://mirror.unownhash.com/apks/",
-      preferredSource: "MIRROR",
       // Off until the operator has watched one manual rollout go through.
       autoUpdateEnabled: false,
       autoApprove: false,
@@ -73,6 +117,20 @@ async function main() {
     },
   });
   console.log(`app target: ${appTarget.packageName}`);
+
+  // Where builds are discovered. Every source publishes the same index shape;
+  // more can be added from Settings, and the lowest priority decides whose URL
+  // is downloaded when two of them list the same build.
+  const feeds = sourceFeeds();
+
+  for (const feed of feeds) {
+    await prisma.sourceFeed.upsert({
+      where: { name: feed.name },
+      update: {},
+      create: feed,
+    });
+  }
+  console.log(`source feeds: ${feeds.map((f) => f.name).join(", ")}`);
 
   const group = await prisma.deviceGroup.upsert({
     where: { name: "default" },

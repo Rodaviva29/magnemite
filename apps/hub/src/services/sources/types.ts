@@ -2,13 +2,15 @@ import type { VersionSource } from "@magnemite/db";
 
 export type DiscoveredVersion = {
   source: VersionSource;
+  /** Which feed listed it. Null only for manual uploads. */
+  feedId: string | null;
   version: string;
   buildCode: string | null;
   arch: string;
   filename: string;
   remoteUrl: string;
   sizeBytes: number;
-  /** Only the mirror publishes one. */
+  /** Only some feeds publish one. */
   md5: string | null;
   publishedAt: Date | null;
 };

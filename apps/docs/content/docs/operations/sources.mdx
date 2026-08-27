@@ -1,35 +1,88 @@
 ---
 title: APKs sources
-description: Two upstream sources, one cache, and what each one lets you verify.
+description: Where builds are discovered, how to add another one, and what each publishes.
 icon: Download
 ---
 
-| Source                                | Index               | Notes                                                  |
-| ------------------------------------- | ------------------- | ------------------------------------------------------ |
-| `mirror.unownhash.com`                | `index.json`        | Publishes an md5 per file. Default source.             |
-| `The-Treeline-Project/Silva-Releases` | GitHub releases API | No hash published, so the download is checked by size. |
+A **source** is a URL publishing an index of installable builds. Magnemite has
+no special-cased integrations: every source is a row you can add or remove in
+**Settings → Version sources**, and they all speak the same format.
+
+| Source                         | Index                                                       | Notes                                                        |
+| ------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------ |
+| `UnownHash mirror`             | `https://mirror.unownhash.com/index.json`                   | Bare filenames, so it needs a base URL. Publishes an md5.    |
+| `Silva (The Treeline Project)` | `https://the-treeline-project.github.io/p/silva/index.json` | Absolute `url` per entry, plus `package` and `version_code`. |
 
 Both ship `com.nianticlabs.pokemongo` as an arm64-v8a `.apkm`, a zip holding
 `base.apk` plus `split_config.arm64_v8a.apk`. That is why installs go through a
 `pm install-create` / `install-write` / `install-commit` session rather than a
 plain `pm install`.
 
+## The index format
+
+A flat JSON array. Four fields are required; the rest are read when a source
+publishes them and ignored when it does not.
+
+```json
+[
+  {
+    "filename": "com.nianticlabs.pokemongo_arm64-v8a_0.425.0.apkm",
+    "version": "0.425.0",
+    "arch": "arm64-v8a",
+    "size": 250184385,
+    "package": "com.nianticlabs.pokemongo",
+    "version_code": "2026081202",
+    "md5_hash": "",
+    "last_modified": "2026-08-15T13:55:23.000Z",
+    "url": "https://…/com.nianticlabs.pokemongo_arm64-v8a_0.425.0.apkm"
+  }
+]
+```
+
+| Field                                 | Used for                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------- |
+| `filename`, `version`, `arch`, `size` | Required. Matching the target and knowing what is being downloaded.                 |
+| `url`                                 | The download. Without it, the source needs a **base URL** to prefix `filename`.     |
+| `package`                             | Matching the target exactly. Without it, the filename prefix is used instead.       |
+| `version_code`                        | The Play build code shown next to the version.                                      |
+| `md5_hash`                            | Checked at download time. Empty or absent means the size is the only upfront check. |
+| `last_modified`                       | The published date in the Versions table.                                           |
+
+## Adding one
+
+**Settings → Version sources → Add source**: a name, the index URL, and a base
+URL only if the index lists bare filenames. It is polled on the next cycle, and
+**Settings → Health** gets a card for it showing how many builds it lists and
+when it was last read.
+
+Removing a source stops the polling. Builds it already found stay, cached
+artifacts and rollout history included — they simply no longer name a source.
+
+## Two sources, one build
+
+When several sources list the same build it is stored **once**. The source with
+the lowest **priority** number decides which URL is downloaded; the others only
+fill in metadata it did not publish, such as an md5 or a build code.
+
+That is why adding a source never duplicates the Versions page, and why a new
+source is added last by default: an existing build keeps being downloaded from
+where it already was.
+
 ## What the hub does with them
 
-1. Polls both every `SOURCE_POLL_MINUTES` and records what it finds as
-   **versions**.
+1. Polls every enabled source every `SOURCE_POLL_MINUTES` and records what it
+   finds as **versions**.
 2. Downloads a version **once**, when it is cached (either by you pressing
    _Cache_ or by auto-update).
 3. Computes a **sha256** while writing it to `ARTIFACT_DIR`.
 
-That sha256 is what each agent verifies before it opens an install session. 
-
-The upstream md5, where it exists, is checked at download time against the mirror's
-index; the GitHub path can only compare the size the API reports.
+That sha256 is what each agent verifies before it opens an install session. The
+upstream md5, where a source publishes one, is checked at download time; without
+it the size the index reports is the only upfront check.
 
 <Callout type="info">
-  The two sources are watched independently, so a version that appears on the mirror first is
-  available immediately rather than waiting for a GitHub release to catch up.
+  Sources are polled independently, so a build that appears on one first is available immediately
+  rather than waiting for the others to catch up.
 </Callout>
 
 ## Pruning
@@ -40,11 +93,16 @@ database rows.
 
 ## Configuration
 
+Sources live in the database, not in `.env`. The only variable involved is read
+once, by the seed, to decide which ones a fresh install starts with:
+
 ```sh title=".env"
-GITHUB_REPO=The-Treeline-Project/Silva-Releases
-# Optional. Raises the GitHub API rate limit from 60/h to 5000/h.
-GITHUB_TOKEN=
-MIRROR_INDEX_URL=https://mirror.unownhash.com/index.json
-MIRROR_BASE_URL=https://mirror.unownhash.com/apks/
+# Comma-separated. Unset means the two sources above.
+MIRROR_INDEX_URL=https://mirror.unownhash.com/index.json,https://the-treeline-project.github.io/p/silva/index.json
 SOURCE_POLL_MINUTES=15
 ```
+
+An index URL the seed does not recognise is named after its host and created
+with no base URL — right for an index that publishes an absolute `url` per
+entry. If it lists bare filenames instead, add the base URL in Settings; the
+Health card says so when entries have nowhere to download from.

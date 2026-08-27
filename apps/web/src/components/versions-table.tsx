@@ -30,6 +30,8 @@ export type VersionRow = {
   version: string;
   buildCode: string | null;
   source: VersionSource;
+  /** Name of the feed that listed it. Null for manual uploads. */
+  feedName: string | null;
   /** Where the artifact was fetched from; empty for an upload. */
   remoteUrl: string;
   arch: string;
@@ -47,35 +49,22 @@ export type VersionRow = {
 /**
  * Where a version came from, as somewhere a person can actually go.
  *
- * A GitHub asset URL points straight at the 170 MB download; the release page
- * behind it is what someone clicking "github" wants to read, and the tag is
- * already in the download URL, so it is derived rather than guessed. The
- * mirror has no page — the file *is* the listing entry — so that one stays the
- * file, and the tooltip says so before you click it.
+ * A source is whatever URL its index gave us, so the link is that URL and
+ * nothing is special-cased per host. There is no listing page to send anyone
+ * to — the entry *is* the file — and the tooltip says so before you click a
+ * 170 MB download.
  */
 function sourceLink(row: VersionRow): { href: string; hint: string } | null {
-  if (!row.remoteUrl) return null;
+  if (!row.remoteUrl || row.source === "MANUAL") return null;
 
-  if (row.source === "GITHUB") {
-    // https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>
-    const match = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/releases\/download\/([^/]+)\//.exec(
-      row.remoteUrl,
-    );
-    if (match) {
-      return {
-        href: `${match[1]}/releases/tag/${match[2]}`,
-        hint: `Open the ${match[2]} release on GitHub`,
-      };
-    }
-    return { href: row.remoteUrl, hint: "Open the release asset on GitHub" };
-  }
+  const file = row.remoteUrl.split("/").pop() || "the file";
+  return { href: row.remoteUrl, hint: `Download ${file}` };
+}
 
-  if (row.source === "MIRROR") {
-    const file = row.remoteUrl.split("/").pop() || "the file";
-    return { href: row.remoteUrl, hint: `Download ${file} from the mirror` };
-  }
-
-  return null;
+/** The feed's own name, or what a manual upload is. */
+function sourceLabel(row: VersionRow): string {
+  if (row.source === "MANUAL") return "manual";
+  return row.feedName ?? "unknown feed";
 }
 
 export function VersionsTable({
@@ -94,7 +83,7 @@ export function VersionsTable({
   const { headProps, sort, sortRows } = useTableSort<SortKey, VersionRow>(
     {
       version: (r) => r.version,
-      source: (r) => r.source,
+      source: (r) => sourceLabel(r),
       status: (r) => r.status,
       size: (r) => r.sizeBytes,
       devices: (r) => r.devicesOnThis,
@@ -109,7 +98,7 @@ export function VersionsTable({
       ? rows.filter(
           (row) =>
             row.version.toLowerCase().includes(q) ||
-            row.source.toLowerCase().includes(q) ||
+            sourceLabel(row).toLowerCase().includes(q) ||
             row.arch.toLowerCase().includes(q) ||
             row.status.toLowerCase().includes(q) ||
             (row.buildCode?.toLowerCase().includes(q) ?? false),
@@ -286,7 +275,7 @@ function SourceCell({ row }: { row: VersionRow }) {
   if (!link) {
     return (
       <span title={row.source === "MANUAL" ? "Uploaded here — no upstream" : undefined}>
-        {row.source.toLowerCase()}
+        {sourceLabel(row)}
       </span>
     );
   }
@@ -299,7 +288,7 @@ function SourceCell({ row }: { row: VersionRow }) {
       title={link.hint}
       className="group inline-flex items-center gap-1 hover:text-foreground hover:underline"
     >
-      {row.source.toLowerCase()}
+      {sourceLabel(row)}
       <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
     </a>
   );

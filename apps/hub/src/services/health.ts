@@ -1,21 +1,23 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { SourceFeed } from "@magnemite/db";
 import { prisma } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount } from "../registry.js";
 import { agentTargetVersion, agentUpdatesInFlight } from "./agentRelease.js";
 import { listDevices, rotomEnabled } from "./rotom.js";
-import { getPollStats } from "./sources/poller.js";
+import { entriesForTarget, fetchFeedIndex } from "./sources/feed.js";
+import { getPollStat } from "./sources/poller.js";
 import { compareVersions } from "./sources/types.js";
 
 /**
  * "Is every moving part still talking to us" — one probe per integration,
  * answered live rather than read out of the database.
  *
- * `OFF` is deliberately not a failure: a fleet with no Rotom and no GitHub
- * repo is a perfectly healthy fleet, and painting those cards red would only
- * teach people to ignore the page.
+ * `OFF` is deliberately not a failure: a fleet with no Rotom and a source
+ * left disabled is a perfectly healthy fleet, and painting those cards red
+ * would only teach people to ignore the page.
  */
 export type IntegrationState = "OK" | "DEGRADED" | "DOWN" | "OFF";
 
@@ -45,8 +47,8 @@ export type HubHealth = {
 
 /**
  * Probes are cached. The dashboard re-renders on every fleet event, and
- * GitHub's hourly budget is not something to spend on repaints — the page's
- * own "Check again" button is what forces a fresh round.
+ * every source index is a real network call — not something to spend on
+ * repaints. The page's own "Check again" button forces a fresh round.
  */
 const CACHE_MS = 30_000;
 let cached: { at: number; value: HubHealth } | null = null;
@@ -189,11 +191,11 @@ async function checkArtifacts(): Promise<IntegrationCheck> {
 }
 
 /**
- * What the poller last did with a source, so a card can say when it last
- * actually ran rather than only whether the API is up right now.
+ * What the poller last did with a feed, so a card can say when it last
+ * actually ran rather than only whether the index is up right now.
  */
-function pollFacts(source: "github" | "mirror"): IntegrationFact[] {
-  const stat = getPollStats()[source];
+function pollFacts(feedId: string): IntegrationFact[] {
+  const stat = getPollStat(feedId);
   if (!stat) return [{ label: "Last poll", value: "not since the hub started" }];
 
   return [
@@ -205,117 +207,64 @@ function pollFacts(source: "github" | "mirror"): IntegrationFact[] {
   ];
 }
 
-async function checkGithub(): Promise<IntegrationCheck> {
-  const targets = await prisma.appTarget.findMany({
-    where: { enabled: true, githubRepo: { not: null } },
-    select: { githubRepo: true },
-  });
-  const repos = targets.map((t) => t.githubRepo).filter((r): r is string => Boolean(r));
-  const stat = getPollStats().github;
+/**
+ * One card per configured feed.
+ *
+ * Every feed publishes the same index shape, so the check is the same for all
+ * of them: fetch it, count what matches the target, and report the newest
+ * build listed. A feed that answers but lists nothing for this package is
+ * degraded rather than down — that is usually a wrong URL, not an outage.
+ */
+async function checkFeeds(): Promise<IntegrationCheck[]> {
+  const [feeds, target] = await Promise.all([
+    prisma.sourceFeed.findMany({ orderBy: { priority: "asc" } }),
+    prisma.appTarget.findFirst({
+      where: { enabled: true, manual: false },
+      select: { packageName: true, arch: true },
+    }),
+  ]);
 
-  if (repos.length === 0) {
-    return {
-      key: "github",
-      label: "GitHub releases",
-      summary: "No target is watching a GitHub repo",
-      state: "OFF",
-      latencyMs: null,
-      facts: [],
-      detail: null,
-      link: null,
-    };
+  if (feeds.length === 0) {
+    return [
+      {
+        key: "feeds",
+        label: "Version sources",
+        summary: "No source feed is configured",
+        state: "OFF",
+        latencyMs: null,
+        facts: [],
+        detail: "Add one in Settings → Version sources.",
+        link: null,
+      },
+    ];
   }
 
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "magnemite-hub",
-  };
-  if (env.GITHUB_TOKEN) headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-
-  try {
-    // The rate limit endpoint is free: it reports the budget without spending
-    // any of it, which is what a status page should cost.
-    const { ms, value: res } = await timed(() =>
-      fetch("https://api.github.com/rate_limit", { headers, signal: AbortSignal.timeout(10_000) }),
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const body = (await res.json()) as {
-      rate?: { remaining?: number; limit?: number; reset?: number };
-    };
-    const remaining = body.rate?.remaining ?? null;
-    const limit = body.rate?.limit ?? null;
-    const exhausted = remaining === 0;
-
-    return {
-      key: "github",
-      label: "GitHub releases",
-      summary: exhausted
-        ? "Rate limit spent — polls find nothing until it resets"
-        : `Reachable, ${remaining ?? "?"} of ${limit ?? "?"} calls left this hour`,
-      state: exhausted || (stat && !stat.ok) ? "DEGRADED" : "OK",
-      latencyMs: ms,
-      facts: [
-        { label: "Repositories", value: repos.join(", ") },
-        { label: "Token", value: env.GITHUB_TOKEN ? "set" : "anonymous (60 calls/hour)" },
-        ...(remaining !== null
-          ? [{ label: "Calls left", value: `${remaining}/${limit ?? "?"}` }]
-          : []),
-        ...(body.rate?.reset
-          ? [{ label: "Budget resets", value: new Date(body.rate.reset * 1000).toISOString() }]
-          : []),
-        ...pollFacts("github"),
-      ],
-      detail: stat && !stat.ok ? stat.error : null,
-      link: `https://github.com/${repos[0]}/releases`,
-    };
-  } catch (err) {
-    return {
-      key: "github",
-      label: "GitHub releases",
-      summary: "api.github.com is not reachable from the hub",
-      state: "DOWN",
-      latencyMs: null,
-      facts: [{ label: "Repositories", value: repos.join(", ") }, ...pollFacts("github")],
-      detail: message(err),
-      link: null,
-    };
-  }
+  return Promise.all(feeds.map((feed) => checkFeed(feed, target)));
 }
 
-async function checkMirror(): Promise<IntegrationCheck> {
-  const target = await prisma.appTarget.findFirst({
-    where: { enabled: true, mirrorIndexUrl: { not: null } },
-    select: { mirrorIndexUrl: true, packageName: true, arch: true },
-  });
-  const indexUrl = target?.mirrorIndexUrl ?? null;
+async function checkFeed(
+  feed: SourceFeed,
+  target: { packageName: string; arch: string } | null,
+): Promise<IntegrationCheck> {
+  const key = `feed:${feed.id}`;
+  const stat = getPollStat(feed.id);
 
-  if (!target || !indexUrl) {
+  if (!feed.enabled) {
     return {
-      key: "mirror",
-      label: "UnownHash mirror",
-      summary: "No target is watching a mirror index",
+      key,
+      label: feed.name,
+      summary: "Disabled — not polled",
       state: "OFF",
       latencyMs: null,
-      facts: [],
+      facts: [{ label: "Index", value: feed.indexUrl }],
       detail: null,
-      link: null,
+      link: feed.indexUrl,
     };
   }
 
   try {
-    const { ms, value: res } = await timed(() =>
-      fetch(indexUrl, {
-        headers: { "User-Agent": "magnemite-hub", Accept: "application/json" },
-        signal: AbortSignal.timeout(15_000),
-      }),
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const entries = (await res.json()) as { filename?: string; arch?: string; version?: string }[];
-    const ours = entries.filter(
-      (e) => e.arch === target.arch && (e.filename ?? "").startsWith(target.packageName),
-    );
+    const { ms, value: entries } = await timed(() => fetchFeedIndex(feed.indexUrl, 15_000));
+    const ours = target ? entriesForTarget(entries, target) : entries;
     // The index is in upload order, not version order, so the last line is
     // not the newest build.
     const newest =
@@ -325,34 +274,44 @@ async function checkMirror(): Promise<IntegrationCheck> {
         .sort(compareVersions)
         .at(-1) ?? null;
 
+    const usable = ours.filter((e) => e.url || feed.baseUrl).length;
+    const unusable = ours.length - usable;
+
     return {
-      key: "mirror",
-      label: "UnownHash mirror",
+      key,
+      label: feed.name,
       summary:
         ours.length === 0
-          ? `Index is up but lists nothing for ${target.packageName} on ${target.arch}`
+          ? `Index is up but lists nothing for ${target?.packageName ?? "the watched app"}`
           : `${ours.length} build${ours.length === 1 ? "" : "s"} listed for this target`,
-      state: ours.length === 0 ? "DEGRADED" : "OK",
+      state: ours.length === 0 || unusable > 0 || (stat && !stat.ok) ? "DEGRADED" : "OK",
       latencyMs: ms,
       facts: [
-        { label: "Index", value: indexUrl },
+        { label: "Index", value: feed.indexUrl },
+        { label: "Base URL", value: feed.baseUrl ?? "absolute URLs in the index" },
+        { label: "Priority", value: String(feed.priority) },
         { label: "Entries", value: `${ours.length} of ${entries.length}` },
         ...(newest ? [{ label: "Newest listed", value: newest }] : []),
-        ...pollFacts("mirror"),
+        ...pollFacts(feed.id),
       ],
-      detail: null,
-      link: indexUrl,
+      detail:
+        unusable > 0
+          ? `${unusable} entries have no download URL: this index publishes relative filenames, so the feed needs a base URL.`
+          : stat && !stat.ok
+            ? stat.error
+            : null,
+      link: feed.indexUrl,
     };
   } catch (err) {
     return {
-      key: "mirror",
-      label: "UnownHash mirror",
-      summary: "The mirror index did not answer",
+      key,
+      label: feed.name,
+      summary: "The index did not answer",
       state: "DOWN",
       latencyMs: null,
-      facts: [{ label: "Index", value: indexUrl }, ...pollFacts("mirror")],
+      facts: [{ label: "Index", value: feed.indexUrl }, ...pollFacts(feed.id)],
       detail: message(err),
-      link: indexUrl,
+      link: feed.indexUrl,
     };
   }
 }
@@ -456,15 +415,19 @@ async function checkEdge(): Promise<IntegrationCheck> {
 export async function collectHealth(force = false): Promise<HubHealth> {
   if (!force && cached && Date.now() - cached.at < CACHE_MS) return cached.value;
 
-  const checks = await Promise.all([
-    Promise.resolve(checkHub()),
-    checkDatabase(),
-    checkArtifacts(),
-    checkGithub(),
-    checkMirror(),
-    checkRotom(),
-    checkEdge(),
+  const [core, feeds] = await Promise.all([
+    Promise.all([
+      Promise.resolve(checkHub()),
+      checkDatabase(),
+      checkArtifacts(),
+      checkRotom(),
+      checkEdge(),
+    ]),
+    checkFeeds(),
   ]);
+  // Feeds sit between the local checks and the integrations that depend on
+  // them, which is the order they matter in when something is broken.
+  const checks = [...core.slice(0, 3), ...feeds, ...core.slice(3)];
 
   const overall = checks.reduce<IntegrationState>(
     (worst, check) => (RANK[check.state] > RANK[worst] ? check.state : worst),

@@ -20,8 +20,9 @@ enum DeviceStatus {
 }
 
 enum VersionSource {
-  GITHUB
+  /// Discovered by polling a source feed. Which one is on `feedId`.
   MIRROR
+  /// Uploaded by hand through the dashboard.
   MANUAL
 }
 
@@ -240,32 +241,49 @@ model AppTarget {
   /// the agent still reports their installed version like any other.
   manual Boolean @default(false)
 
-  /// owner/repo — releases are matched against assetPattern.
-  githubRepo     String?
-  /// JS regex matched against release asset names.
-  assetPattern   String?
-  mirrorIndexUrl String?
-  mirrorBaseUrl  String?
   /// Only versions built for this ABI are tracked. Android TV boxes in this
   /// fleet are arm64; add a second target if that ever stops being true.
-  arch           String  @default("arm64-v8a")
+  arch String @default("arm64-v8a")
 
   // --- auto-update policy -------------------------------------------------
-  autoUpdateEnabled Boolean       @default(false)
+  autoUpdateEnabled Boolean @default(false)
   /// New versions are marked approved on discovery instead of waiting for a
   /// human to press approve.
-  autoApprove       Boolean       @default(false)
-  preferredSource   VersionSource @default(MIRROR)
+  autoApprove       Boolean @default(false)
   /// Devices updated first; the rest wait for them to succeed.
-  canaryCount       Int           @default(1)
+  canaryCount       Int     @default(1)
   /// Minutes to wait after the canary succeeds before releasing the fleet.
-  soakMinutes       Int           @default(30)
+  soakMinutes       Int     @default(30)
   maxConcurrency    Int?
-  maxAttempts       Int           @default(3)
+  maxAttempts       Int     @default(3)
   /// "HH:MM" local time. When both are set, auto rollouts only dispatch
   /// inside this window.
   windowStart       String?
   windowEnd         String?
+
+  versions AppVersion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A place that publishes an index of installable builds.
+///
+/// Every feed speaks the same shape — the flat JSON array the UnownHash mirror
+/// serves — so adding one is a URL in Settings rather than code. Entries may
+/// carry an absolute `url`, in which case `baseUrl` is not needed.
+model SourceFeed {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  /// The index.json to poll.
+  indexUrl String
+  /// Prefix for entries whose `filename` is not an absolute URL. Null when the
+  /// index publishes `url` on every entry.
+  baseUrl  String?
+  enabled  Boolean @default(true)
+  /// Lowest wins when two feeds publish the same version of the same build.
+  /// The version is stored once; this decides whose URL is downloaded.
+  priority Int     @default(100)
 
   versions AppVersion[]
 
@@ -286,13 +304,16 @@ model AppVersion {
   versionCode BigInt?
 
   source    VersionSource
+  /// Which feed listed it. Null for manual uploads.
+  feedId    String?
+  feed      SourceFeed?   @relation(fields: [feedId], references: [id], onDelete: SetNull)
   arch      String        @default("arm64-v8a")
   remoteUrl String
   filename  String
   sizeBytes BigInt
 
-  /// From the mirror index. GitHub publishes no hash, so those are verified
-  /// by size on download.
+  /// From the feed index, when it publishes one. Feeds that publish no hash
+  /// leave this null and the download is checked by size.
   md5    String?
   /// Computed by the hub after caching. This is what agents verify against.
   sha256 String?
@@ -309,7 +330,10 @@ model AppVersion {
 
   rollouts Rollout[]
 
-  @@unique([appTargetId, source, version, arch])
+  /// One row per build, whichever feed happened to list it first. Two feeds
+  /// mirroring the same release are the same thing to everyone downstream —
+  /// the fleet, the rollouts, the Versions page — so it is stored once.
+  @@unique([appTargetId, version, arch])
   @@index([status])
 }
 

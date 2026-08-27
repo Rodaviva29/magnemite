@@ -6,7 +6,7 @@ icon: Album
 
 Magnemite watches for new Pokémon GO `.apkm` releases, caches each one **once**
 on your server, and installs it on anywhere from 1 to N boxes from a
-dashboard. 
+dashboard.
 It provides per-device progress, automatic retries, canary rollouts and a
 hands-off mode.
 
@@ -21,9 +21,9 @@ updating two hundred is not.
 
 ## What it actually does?
 
-| Features                   | Description                                                                |
-| ------------------------- | -------------------------------------------------------------------------- |
-| **Watches two sources**   | GitHub releases and `mirror.unownhash.com`, polled on a schedule.           |
+| Features                  | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| **Watches every source**  | Any index in the shared format, added from Settings, polled on a schedule.  |
 | **Caches once**           | The server downloads each `.apkm` a single time and hashes it.              |
 | **Targets what you pick** | One box, a selection, a group, or the whole fleet.                          |
 | **Canary first**          | A few boxes update alone; a failure parks the rollout instead of spreading. |

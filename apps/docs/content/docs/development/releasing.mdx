@@ -1,6 +1,6 @@
 ---
 title: Shipping a change
-description: What to bump, what to rebuild, and in what order — for the hub, the dashboard, the agent and the database.
+description: What to bump, what to rebuild, and in what order.
 icon: PackageCheck
 ---
 
@@ -45,6 +45,10 @@ purpose.
 | `packages/db/prisma/schema.prisma` | no              | Commit the migration; `hub` applies it on start                     |
 | `magisk-module/`                   | **yes**         | `make module` and reflash — this part is not delivered over the air |
 | `apps/docs`                        | no              | Redeploy `docs`                                                     |
+
+Adding a **version source** is not a release at all: it is a URL in Settings.
+Only a source publishing something other than the shared index format would
+need code, and that is the thing this design exists to avoid.
 
 ## The order that matters
 

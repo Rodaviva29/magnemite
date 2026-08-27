@@ -21,6 +21,7 @@ export default async function VersionsPage() {
     prisma.appVersion.findMany({
       where: { appTargetId: target.id },
       orderBy: { discoveredAt: "desc" },
+      include: { feed: { select: { name: true } } },
     }),
     prisma.devicePackage.groupBy({
       by: ["versionName"],
@@ -40,6 +41,7 @@ export default async function VersionsPage() {
       version: v.version,
       buildCode: v.buildCode,
       source: v.source,
+      feedName: v.feed?.name ?? null,
       remoteUrl: v.remoteUrl,
       arch: v.arch,
       status: v.status,

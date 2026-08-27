@@ -2,13 +2,11 @@
 
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import type { VersionSource } from "@magnemite/db";
 import { updateAutoUpdate } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
@@ -18,7 +16,6 @@ export type AutoUpdateTarget = {
   packageName: string;
   autoUpdateEnabled: boolean;
   autoApprove: boolean;
-  preferredSource: VersionSource;
   canaryCount: number;
   soakMinutes: number;
   maxAttempts: number;
@@ -93,21 +90,7 @@ export function AutoUpdateForm({
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor={`source-${target.id}`}>Preferred source</Label>
-              <Select
-                id={`source-${target.id}`}
-                name="preferredSource"
-                defaultValue={target.preferredSource}
-                disabled={disabled}
-                options={[
-                  { value: "MIRROR", label: "mirror.unownhash.com" },
-                  { value: "GITHUB", label: "GitHub releases" },
-                ]}
-              />
-            </div>
-
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor={`canary-${target.id}`}>Canary devices</Label>
               <Input

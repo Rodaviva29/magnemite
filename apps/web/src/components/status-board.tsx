@@ -7,7 +7,6 @@ import {
   Cloud,
   Database,
   ExternalLink,
-  Github,
   Globe,
   HardDrive,
   MinusCircle,
@@ -28,11 +27,16 @@ const ICONS: Record<string, typeof Server> = {
   hub: Server,
   database: Database,
   artifacts: HardDrive,
-  github: Github,
-  mirror: Cloud,
+  feeds: Cloud,
   rotom: Radar,
   edge: Globe,
 };
+
+/** Version sources are one card each, keyed `feed:<id>`. */
+function iconFor(key: string): typeof Server {
+  if (key.startsWith("feed:")) return Cloud;
+  return ICONS[key] ?? Server;
+}
 
 const STATE: Record<
   IntegrationState,
@@ -50,8 +54,7 @@ const STATE: Record<
 
 /**
  * An ISO timestamp read as a person would say it. `formatRelative` only looks
- * backwards, and one of these facts — GitHub's rate-limit reset — is in the
- * future.
+ * backwards, and some of these facts are in the future.
  */
 function when(value: string): string {
   const date = new Date(value);
@@ -128,7 +131,7 @@ export function StatusBoard({ health, error }: { health: HubHealth | null; error
 
       <p className="text-xs text-muted-foreground">
         Probes run on the hub and are cached for 30 seconds, so this page costs nothing to leave
-        open: GitHub&apos;s hourly budget in particular is not spent on repaints.
+        open: every source index is a real request, and repaints do not spend one.
       </p>
     </div>
   );
@@ -136,7 +139,7 @@ export function StatusBoard({ health, error }: { health: HubHealth | null; error
 
 function IntegrationCard({ check }: { check: IntegrationCheck }) {
   const state = STATE[check.state];
-  const Icon = ICONS[check.key] ?? Server;
+  const Icon = iconFor(check.key);
   const StateIcon = state.icon;
   const off = check.state === "OFF";
 

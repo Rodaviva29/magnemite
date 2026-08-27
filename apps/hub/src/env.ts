@@ -44,7 +44,6 @@ const schema = z.object({
   /** Seconds without a heartbeat before a device is marked offline. */
   DEVICE_OFFLINE_TIMEOUT: z.coerce.number().int().positive().default(70),
 
-  GITHUB_TOKEN: z.string().optional(),
   SOURCE_POLL_MINUTES: z.coerce.number().int().positive().default(15),
 
   ROTOM_ENABLED: z

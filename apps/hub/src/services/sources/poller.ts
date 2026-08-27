@@ -3,23 +3,56 @@ import { bus } from "../../bus.js";
 import { env } from "../../env.js";
 import { log } from "../../log.js";
 import { runAutoUpdate } from "../autoUpdate.js";
-import { pollGithub } from "./github.js";
-import { pollMirror } from "./mirror.js";
+import { pollFeed } from "./feed.js";
 import type { DiscoveredVersion } from "./types.js";
 
 let timer: NodeJS.Timeout | null = null;
 let inFlight = false;
 
-/** What each source did the last time it was asked, for the Status page. */
-export type SourcePollStat = { at: string; ok: boolean; found: number; error: string | null };
-
-const pollStats: Record<"github" | "mirror", SourcePollStat | null> = {
-  github: null,
-  mirror: null,
+/** What each feed did the last time it was asked, for the Status page. */
+export type SourcePollStat = {
+  feedId: string;
+  name: string;
+  at: string;
+  ok: boolean;
+  found: number;
+  error: string | null;
 };
 
-export function getPollStats(): Record<"github" | "mirror", SourcePollStat | null> {
-  return pollStats;
+const pollStats = new Map<string, SourcePollStat>();
+
+export function getPollStats(): SourcePollStat[] {
+  return [...pollStats.values()];
+}
+
+export function getPollStat(feedId: string): SourcePollStat | null {
+  return pollStats.get(feedId) ?? null;
+}
+
+/**
+ * Pick one row per build.
+ *
+ * Two feeds mirroring the same release are the same thing to the fleet, so the
+ * version is stored once and the feed with the lowest `priority` decides which
+ * URL is downloaded. Feeds are handed in priority order, so the first sighting
+ * of a build wins and later ones only fill in what it was missing.
+ */
+function dedupe(found: DiscoveredVersion[]): DiscoveredVersion[] {
+  const byBuild = new Map<string, DiscoveredVersion>();
+  for (const item of found) {
+    const key = `${item.version}|${item.arch}`;
+    const seen = byBuild.get(key);
+    if (!seen) {
+      byBuild.set(key, item);
+      continue;
+    }
+    // Same build from a lower-priority feed: keep the winner's URL, take any
+    // metadata it did not publish itself.
+    seen.md5 ??= item.md5;
+    seen.buildCode ??= item.buildCode;
+    seen.publishedAt ??= item.publishedAt;
+  }
+  return [...byBuild.values()];
 }
 
 export async function pollAllSources() {
@@ -28,43 +61,51 @@ export async function pollAllSources() {
   try {
     // Manual targets exist only to hold uploads: nothing to poll, and no
     // auto-update policy to run against them.
-    const targets = await prisma.appTarget.findMany({ where: { enabled: true, manual: false } });
+    const [targets, feeds] = await Promise.all([
+      prisma.appTarget.findMany({ where: { enabled: true, manual: false } }),
+      prisma.sourceFeed.findMany({ where: { enabled: true }, orderBy: { priority: "asc" } }),
+    ]);
+
+    if (feeds.length === 0) {
+      log.warn("no source feeds are enabled — nothing to poll");
+      return;
+    }
 
     for (const target of targets) {
       const found: DiscoveredVersion[] = [];
 
-      for (const [name, poll] of [
-        ["github", pollGithub],
-        ["mirror", pollMirror],
-      ] as const) {
+      for (const feed of feeds) {
         try {
-          const listed = await poll(target);
+          const listed = await pollFeed(feed, target);
           found.push(...listed);
-          pollStats[name] = {
+          pollStats.set(feed.id, {
+            feedId: feed.id,
+            name: feed.name,
             at: new Date().toISOString(),
             ok: true,
             found: listed.length,
             error: null,
-          };
+          });
         } catch (err) {
-          // One source being down must not stop the other from being checked.
-          log.warn({ err, source: name, target: target.packageName }, "source poll failed");
-          pollStats[name] = {
+          // One feed being down must not stop the others from being checked.
+          log.warn({ err, feed: feed.name, target: target.packageName }, "source poll failed");
+          pollStats.set(feed.id, {
+            feedId: feed.id,
+            name: feed.name,
             at: new Date().toISOString(),
             ok: false,
             found: 0,
             error: err instanceof Error ? err.message : String(err),
-          };
+          });
         }
       }
 
       let discovered = 0;
-      for (const item of found) {
+      for (const item of dedupe(found)) {
         const existing = await prisma.appVersion.findUnique({
           where: {
-            appTargetId_source_version_arch: {
+            appTargetId_version_arch: {
               appTargetId: target.id,
-              source: item.source,
               version: item.version,
               arch: item.arch,
             },
@@ -78,6 +119,7 @@ export async function pollAllSources() {
               version: item.version,
               buildCode: item.buildCode,
               source: item.source,
+              feedId: item.feedId,
               arch: item.arch,
               remoteUrl: item.remoteUrl,
               filename: item.filename,
@@ -90,15 +132,18 @@ export async function pollAllSources() {
           discovered += 1;
           bus.publish({ kind: "version", versionId: created.id });
           log.info(
-            { target: target.packageName, version: item.version, source: item.source },
+            { target: target.packageName, version: item.version, feedId: item.feedId },
             "new version discovered",
           );
-        } else if (existing.status !== "READY") {
-          // Refresh metadata while it is still just a pointer — the mirror
-          // occasionally re-uploads a file with a new size or hash.
+        } else if (existing.status !== "READY" && existing.source !== "MANUAL") {
+          // Refresh metadata while it is still just a pointer — a feed
+          // occasionally re-uploads a file with a new size or hash, and a
+          // build first seen on a feed that has since been disabled needs to
+          // move to whichever one still lists it.
           await prisma.appVersion.update({
             where: { id: existing.id },
             data: {
+              feedId: item.feedId,
               remoteUrl: item.remoteUrl,
               filename: item.filename,
               sizeBytes: BigInt(item.sizeBytes),
