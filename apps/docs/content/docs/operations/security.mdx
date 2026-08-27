@@ -30,8 +30,15 @@ agents' domain, anything that is not `/ws/device`, `/api/enroll`, `/files/*` or
 
 ## The agent
 
-It runs as root but **changes no device settings**. It installs, reads package
-versions and free space, and runs the hooks you configured: nothing else.
+It runs as root but **changes no device settings of its own accord**. It
+installs, reads package versions and free space, collects logs when asked, and
+runs the shell you gave it: the pre/post-install hooks, and whatever an operator
+types into [Execute](/docs/fleet/execute).
+
+That last pair is worth being clear about. An operator account can run arbitrary
+commands as root on every box in the fleet — that is what the hooks have always
+been, and Execute only makes it visible. Treat operator accounts accordingly,
+and keep an eye on the audit log, which records both.
 
 ## Integrity of what gets installed
 
@@ -45,6 +52,6 @@ _Success_ is not taken as proof.
 | Secret                | Rotate when                                                                  |
 | --------------------- | ---------------------------------------------------------------------------- |
 | `HUB_INTERNAL_SECRET` | Anyone who had shell on the server leaves. Restart `hub` and `web` together. |
-| `AUTH_SECRET`         | Same, note it signs out every session.                                      |
+| `AUTH_SECRET`         | Same, note it signs out every session.                                       |
 | Enrollment tokens     | A batch is flashed and done, or a laptop with the token on it goes missing.  |
 | A device token        | The box is lost or reimaged: delete the device, let it enroll again.         |

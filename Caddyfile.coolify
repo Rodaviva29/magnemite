@@ -46,6 +46,13 @@
 		reverse_proxy hub:{$HUB_PORT}
 	}
 
+	# --- Log bundles the boxes upload ---------------------------------------
+	# A zip of logcat, pushed by the box when the dashboard asks for it. The
+	# hub authenticates it with the device's own token, same as a download.
+	handle /api/logs/* {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
 	# --- Liveness -----------------------------------------------------------
 	handle /healthz {
 		reverse_proxy hub:{$HUB_PORT}

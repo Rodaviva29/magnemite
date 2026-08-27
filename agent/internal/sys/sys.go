@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -42,6 +43,13 @@ type System interface {
 	// ROM. One `pm` call, no dumpsys per package — see Metrics for why.
 	ThirdPartyPackages(ctx context.Context) ([]proto.PackageInfo, error)
 	DeviceInfo(ctx context.Context) proto.DeviceInfo
+	// LogcatStream starts logcat and hands back its output as it is written.
+	// Exec is no good here: it waits for the process to end, and a live logcat
+	// never does. Cancelling ctx, or closing the reader, kills the process.
+	LogcatStream(ctx context.Context) (io.ReadCloser, error)
+	// FileStream follows a file the same way, for the logs an app writes
+	// itself rather than sending to logcat.
+	FileStream(ctx context.Context, path string) (io.ReadCloser, error)
 }
 
 // Android is the real implementation. The agent is started by the Magisk
@@ -62,6 +70,55 @@ func (a *Android) Exec(ctx context.Context, name string, args ...string) (string
 
 func (a *Android) Shell(ctx context.Context, script string) (string, error) {
 	return a.Exec(ctx, "sh", "-c", script)
+}
+
+func (a *Android) LogcatStream(ctx context.Context) (io.ReadCloser, error) {
+	// -T 200, not a plain follow: logcat with no bound dumps the entire ring
+	// buffer first, which is tens of thousands of lines arriving as fast as
+	// the socket takes them. Two hundred is enough to see what just happened.
+	return a.stream(ctx, "exec logcat -v time -T 200 2>&1")
+}
+
+func (a *Android) FileStream(ctx context.Context, path string) (io.ReadCloser, error) {
+	// -F rather than -f: a log the app rotates under us keeps streaming
+	// instead of following an inode nobody writes to any more.
+	//
+	// The path arrives as "$1" rather than inside the script, so a filename
+	// with a semicolon in it is a filename and never a second command.
+	return a.stream(ctx, `exec tail -n 200 -F "$1" 2>&1`, path)
+}
+
+// stream runs a script that keeps writing, with stderr folded into stdout so a
+// "can't open" reaches the panel instead of vanishing.
+func (a *Android) stream(ctx context.Context, script string, args ...string) (io.ReadCloser, error) {
+	// sh -c <script> sh <args...>: the extra "sh" is $0, so the first real
+	// argument lands on $1.
+	argv := append([]string{"-c", script, "sh"}, args...)
+	cmd := exec.CommandContext(ctx, "sh", argv...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &processReader{ReadCloser: stdout, cmd: cmd}, nil
+}
+
+// processReader ties the pipe's lifetime to the process behind it: closing the
+// reader kills logcat rather than leaving it writing into a pipe nobody reads.
+type processReader struct {
+	io.ReadCloser
+	cmd *exec.Cmd
+}
+
+func (p *processReader) Close() error {
+	err := p.ReadCloser.Close()
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	_ = p.cmd.Wait()
+	return err
 }
 
 func (a *Android) Prop(ctx context.Context, name string) string {

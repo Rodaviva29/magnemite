@@ -1,0 +1,80 @@
+---
+title: Reading a box's logs
+description: Download logcat as a zip, or watch it live, without going to the box.
+icon: ScrollText
+---
+
+Both live in the device page's **⋯** menu, and both need the box online.
+
+## Logcat (.zip)
+
+A snapshot, collected on demand and downloaded through the browser.
+
+| Entry         | What it is                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `logcat.txt`  | `logcat -d -v time`, last 50 000 lines                                                   |
+| `agent.log`   | The agent's own log, from `/data/adb/magnemite/`                                         |
+| `agent.log.1` | The rotated one, when the box has been running long enough                               |
+| `device.txt`  | Serial, model, Android, ABI, LAN address, uptime, disk, memory, load, installed packages |
+
+`config.json` is deliberately **not** in there: it holds the device token.
+
+Picking the item asks the box, waits while it zips and uploads, and then the
+download starts — usually a few seconds. If nothing arrives within two minutes
+it gives up and says so; the usual cause is an agent older than this feature,
+which does not know the message.
+
+<Callout type="info">
+  The zip goes to the hub, not through the dashboard: the box uploads it with its own device token,
+  the same one it downloads `.apkm` bundles with. The last 3 bundles per box are kept, and nothing
+  older than 7 days.
+</Callout>
+
+## Live logs
+
+A log as it is being written, streamed to the panel while it is open.
+
+### Which log
+
+The source picker offers `logcat`, the agent's own log, the scanner's
+(`/data/local/tmp/aegis.log`), plus whatever `.log` files the box turns out to
+have — the panel asks it on open. **Another file…** takes any absolute path.
+
+| Source   | Followed with           |
+| -------- | ----------------------- |
+| `logcat` | `logcat -v time -T 200` |
+| Any file | `tail -n 200 -F <path>` |
+
+`-T 200` and `-n 200`: both start from the last 200 lines rather than replaying
+everything, and `-F` keeps following a file the app rotates underneath it. A
+path that cannot be opened shows the error in the panel — stderr is folded in.
+
+### What it costs
+
+- One follow runs on the box per **source**: everyone watching logcat shares
+  one, and someone watching a file at the same time gets their own.
+- Closing the panel stops it. So does the box disconnecting, and so does a
+  five-minute deadline the agent enforces itself, renewed while anyone is
+  watching — a browser that vanished cannot leave `tail` running on someone's
+  TV box.
+- The panel keeps the last 2000 lines and nothing is stored anywhere. For
+  something to keep, use the zip.
+- Lines are sent in batches, roughly once a second. A box logging faster than
+  the socket drains has lines dropped, and the panel says how many rather than
+  pretending it showed everything.
+- Operators and admins only — following an arbitrary file reads it as root.
+
+## What to look for
+
+| Symptom                           | Where                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| An install that failed            | `agent.log` — the `pm install-create/write/commit` session and its exact error |
+| A self-update that did not happen | `agent.log`, lines starting `self-update:`                                     |
+| The scanner crashing              | `logcat.txt`, around the crash — `FATAL EXCEPTION` and the process name        |
+| A box that will not connect       | `agent.log` — TLS and dial errors, plus the reconnect backoff                  |
+
+## Requirements
+
+The agent collects both, so a box needs an agent from **0.1.4** or later. Boxes
+update themselves — see [updating the agent](/docs/fleet/agent-update) — so this
+arrives on its own; a box that has been powered off catches up when it dials in.

@@ -7,6 +7,8 @@ import { bus } from "../bus.js";
 import { log } from "../log.js";
 import { getConnection, register, unregister } from "../registry.js";
 import { maybeUpdateAgent, recordAgentUpdateFailure } from "../services/agentRelease.js";
+import { resolveExec } from "../services/deviceCommands.js";
+import { dropStreams, failBundle, publishLogLines } from "../services/deviceLogs.js";
 import { applyMetrics, markOffline, markOnline, trackedPackages } from "../services/devices.js";
 import { ACTIVE_STATES, applyProgress, completeJob, logJobEvent } from "../services/jobs.js";
 import { nudge } from "../services/scheduler.js";
@@ -166,6 +168,8 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
 
   ws.on("close", (code, reason) => {
     unregister(deviceId, ws);
+    // Whatever logcat was running went with the socket.
+    dropStreams(deviceId);
     void markOffline(deviceId);
     log.info({ deviceId, code, reason: reason.toString() }, "device disconnected");
   });
@@ -271,6 +275,29 @@ async function handleMessage(ws: WebSocket, deviceId: string, ip: string | null,
         });
       } else {
         log.debug({ deviceId, level: msg.level }, msg.message);
+      }
+      break;
+    }
+
+    case "exec_result": {
+      resolveExec(msg.commandId, {
+        ok: msg.ok,
+        output: msg.output,
+        error: msg.error ?? null,
+      });
+      break;
+    }
+
+    case "log_lines": {
+      publishLogLines(deviceId, msg.streamId, { lines: msg.lines, dropped: msg.dropped });
+      break;
+    }
+
+    case "log_bundle_result": {
+      // Only failures arrive here — a bundle that worked announces itself by
+      // being uploaded.
+      if (!msg.ok) {
+        await failBundle(msg.bundleId, msg.error ?? "the agent could not collect the logs");
       }
       break;
     }

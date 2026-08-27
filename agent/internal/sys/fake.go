@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -293,6 +294,46 @@ func (f *Fake) DeviceInfo(ctx context.Context) proto.DeviceInfo {
 		Density:        320,
 		LocalIp:        LocalIP(),
 	}
+}
+
+// LogcatStream fabricates a log that keeps writing, so the live panel and the
+// batching around it can be exercised without an Android box.
+func (f *Fake) LogcatStream(ctx context.Context) (io.ReadCloser, error) {
+	return f.fakeStream(ctx, "logcat")
+}
+
+// FileStream pretends the file exists and writes to it. A fake fleet has no
+// /data/local/tmp/aegis.log, and failing here would only make the panel
+// untestable.
+func (f *Fake) FileStream(ctx context.Context, path string) (io.ReadCloser, error) {
+	return f.fakeStream(ctx, path)
+}
+
+func (f *Fake) fakeStream(ctx context.Context, source string) (io.ReadCloser, error) {
+	reader, writer := io.Pipe()
+
+	go func() {
+		defer writer.Close()
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+
+		for i := 0; ; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				line := fmt.Sprintf(
+					"%s I/magnemite-fake( 1234): [%s] synthetic log line %d from %s\n",
+					now.Format("01-02 15:04:05.000"), source, i, f.serial,
+				)
+				if _, err := io.WriteString(writer, line); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	return reader, nil
 }
 
 var _ System = (*Fake)(nil)

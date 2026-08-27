@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import fsp from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma, serialize } from "@magnemite/db";
@@ -5,6 +7,8 @@ import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
 import { cacheVersion, pruneArtifacts } from "../services/artifacts.js";
+import { execOnDevice } from "../services/deviceCommands.js";
+import { normaliseLogPath, requestBundle, subscribeToLogs } from "../services/deviceLogs.js";
 import { collectHealth } from "../services/health.js";
 import { cancelJob, retryFailedJobs, retryJob } from "../services/jobs.js";
 import { cancelRollout, createRollout, resumeRollout } from "../services/rollouts.js";
@@ -183,6 +187,119 @@ export async function internalRoutes(app: FastifyInstance) {
       const sent = sendTo(request.params.id, { type: "agent_update", ...body.data });
       if (!sent) return reply.status(409).send({ error: "device is offline" });
       return { ok: true };
+    },
+  );
+
+  /**
+   * Run a command on a box and hand back what it printed.
+   *
+   * The same root shell the install hooks already get. Authorisation is the
+   * dashboard's job — it only offers this to operators, and writes what was
+   * run into the audit log.
+   */
+  app.post<{ Params: { id: string }; Body: { command: string; timeoutSeconds?: number } }>(
+    "/internal/devices/:id/exec",
+    async (request, reply) => {
+      const body = z
+        .object({
+          command: z.string().min(1).max(4096),
+          timeoutSeconds: z.number().int().positive().max(600).optional(),
+        })
+        .safeParse(request.body);
+      if (!body.success) return reply.status(400).send({ error: "invalid body" });
+
+      try {
+        return await execOnDevice(request.params.id, body.data.command, body.data.timeoutSeconds);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.status(message === "device is offline" ? 409 : 500).send({ error: message });
+      }
+    },
+  );
+
+  /**
+   * Ask a box for its logs and wait for the zip to land. The dashboard hands
+   * the browser a download URL straight afterwards, so there is nothing here
+   * to poll — the wait is the point.
+   */
+  app.post<{ Params: { id: string }; Body: { requestedById?: string | null } }>(
+    "/internal/devices/:id/logs",
+    async (request, reply) => {
+      const body = (request.body ?? {}) as { requestedById?: string | null };
+      try {
+        return await requestBundle(request.params.id, body.requestedById ?? null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.status(message === "device is offline" ? 409 : 504).send({ error: message });
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string; bundleId: string } }>(
+    "/internal/devices/:id/logs/:bundleId",
+    async (request, reply) => {
+      const bundle = await prisma.deviceLogBundle.findUnique({
+        where: { id: request.params.bundleId },
+        select: { deviceId: true, state: true, path: true, device: { select: { serial: true } } },
+      });
+      if (!bundle || bundle.deviceId !== request.params.id) {
+        return reply.status(404).send({ error: "no such bundle" });
+      }
+      if (bundle.state !== "READY" || !bundle.path) {
+        return reply.status(409).send({ error: `bundle is ${bundle.state.toLowerCase()}` });
+      }
+
+      const stat = await fsp.stat(bundle.path).catch(() => null);
+      // The row outliving the file means the volume was wiped or the prune ran
+      // between the request and the click.
+      if (!stat?.isFile()) return reply.status(410).send({ error: "the bundle is gone" });
+
+      reply.header("Content-Type", "application/zip");
+      reply.header("Content-Length", String(stat.size));
+      reply.header("X-Magnemite-Serial", bundle.device.serial);
+      return reply.send(createReadStream(bundle.path));
+    },
+  );
+
+  /**
+   * Live logcat, as server-sent events. One logcat runs on the box however
+   * many people are watching, and it stops when the last one closes the tab.
+   */
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    "/internal/devices/:id/logs/live",
+    async (request, reply) => {
+      let unsubscribe: (() => void) | null = null;
+      try {
+        const path = normaliseLogPath(request.query.path);
+
+        reply.raw.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        reply.raw.write(": connected\n\n");
+
+        unsubscribe = subscribeToLogs(request.params.id, path, (chunk) => {
+          reply.raw.write(`event: lines\ndata: ${JSON.stringify(chunk)}\n\n`);
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // The head is already written by the time a subscribe can fail, so the
+        // error travels as an event rather than a status code.
+        reply.raw.write(`event: fatal\ndata: ${JSON.stringify({ error: message })}\n\n`);
+        reply.raw.end();
+        return reply;
+      }
+
+      const keepalive = setInterval(() => reply.raw.write(": ping\n\n"), 25_000);
+      request.raw.on("close", () => {
+        clearInterval(keepalive);
+        unsubscribe?.();
+      });
+
+      // Never resolves; the stream stays open until the browser goes away.
+      return reply;
     },
   );
 

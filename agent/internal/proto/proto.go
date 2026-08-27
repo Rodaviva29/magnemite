@@ -128,6 +128,34 @@ type AgentUpdateResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// LogBundleResult closes out a bundle the agent could not deliver. A bundle
+// that worked needs no frame: the hub learns of it from the upload itself.
+type LogBundleResult struct {
+	Type     string `json:"type"` // "log_bundle_result"
+	BundleID string `json:"bundleId"`
+	OK       bool   `json:"ok"`
+	Error    string `json:"error,omitempty"`
+}
+
+// LogLines is a batch of live logcat lines. Dropped counts what was thrown
+// away to keep up with a noisy box, so the dashboard can say so.
+type LogLines struct {
+	Type     string   `json:"type"` // "log_lines"
+	StreamID string   `json:"streamId"`
+	Lines    []string `json:"lines"`
+	Dropped  int      `json:"dropped"`
+}
+
+// ExecResult is what a one-off command printed. Output is combined stdout and
+// stderr, truncated by the agent before it ever reaches the socket.
+type ExecResult struct {
+	Type      string `json:"type"` // "exec_result"
+	CommandID string `json:"commandId"`
+	OK        bool   `json:"ok"`
+	Output    string `json:"output"`
+	Error     string `json:"error,omitempty"`
+}
+
 // --- hub -> agent ----------------------------------------------------------
 
 // Envelope is decoded first to find out which concrete message arrived.
@@ -169,6 +197,39 @@ type AgentUpdate struct {
 	URL     string `json:"url"`
 	SHA256  string `json:"sha256"`
 	Version string `json:"version"`
+}
+
+// CollectLogs asks for a zip of the box's logs, uploaded to UploadURL with the
+// device token. MaxLines caps the logcat tail: the whole buffer is tens of MB.
+type CollectLogs struct {
+	Type      string `json:"type"`
+	BundleID  string `json:"bundleId"`
+	UploadURL string `json:"uploadUrl"`
+	MaxLines  int    `json:"maxLines"`
+}
+
+// LogStreamStart runs logcat live. DurationSeconds is a hard stop the agent
+// enforces itself, so a browser that vanished never leaves logcat running.
+type LogStreamStart struct {
+	Type     string `json:"type"`
+	StreamID string `json:"streamId"`
+	// Absolute path of a file to follow. Empty means logcat.
+	Path            string `json:"path,omitempty"`
+	DurationSeconds int    `json:"durationSeconds"`
+}
+
+type LogStreamStop struct {
+	Type     string `json:"type"`
+	StreamID string `json:"streamId"`
+}
+
+// ExecCommand runs a shell command as root — the same thing the install hooks
+// do, invoked by hand from the dashboard.
+type ExecCommand struct {
+	Type           string `json:"type"`
+	CommandID      string `json:"commandId"`
+	Command        string `json:"command"`
+	TimeoutSeconds int    `json:"timeoutSeconds"`
 }
 
 // --- enrollment ------------------------------------------------------------

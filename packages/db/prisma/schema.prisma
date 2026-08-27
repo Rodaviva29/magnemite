@@ -149,6 +149,7 @@ model Device {
   packages     DevicePackage[]
   jobs         Job[]
   agentUpdates AgentUpdate[]
+  logBundles   DeviceLogBundle[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -157,7 +158,6 @@ model Device {
   @@index([groupId])
 }
 
-/// Installed version of each package we track, refreshed on every heartbeat.
 /// One attempt at swapping the agent binary on a box.
 ///
 /// The row is written when the hub sends the update and closed when the box
@@ -189,6 +189,39 @@ enum AgentUpdateState {
   FAILED // the agent reported a download, checksum or swap failure
 }
 
+/// One "fetch me this box's logs" request.
+///
+/// The zip itself lives on the artifacts volume, not in here — this row is the
+/// request, so a bundle that never arrived is visible as a failure rather than
+/// as a download that silently does nothing.
+model DeviceLogBundle {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  state DeviceLogBundleState @default(PENDING)
+  /// Path inside ARTIFACT_DIR. Null until the upload lands.
+  path      String?
+  sizeBytes BigInt?
+  /// Why it never arrived. Null unless state is FAILED.
+  error     String?
+
+  /// Who asked. Kept as an id rather than a relation: the bundle outliving the
+  /// account that requested it is not a reason to lose the bundle.
+  requestedById String?
+  requestedAt   DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([deviceId, requestedAt])
+}
+
+enum DeviceLogBundleState {
+  PENDING // asked for, waiting on the box
+  READY // uploaded and downloadable
+  FAILED // the agent could not collect it, or never answered
+}
+
+/// Installed version of each package we track, refreshed on every heartbeat.
 model DevicePackage {
   id          String  @id @default(cuid())
   deviceId    String

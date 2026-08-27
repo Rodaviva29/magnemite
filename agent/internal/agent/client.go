@@ -48,6 +48,11 @@ type Agent struct {
 	jobMu   sync.Mutex
 	jobID   string
 	jobStop context.CancelFunc
+
+	// At most one live logcat, however many dashboards are watching.
+	logMu       sync.Mutex
+	logStreamID string
+	logStop     context.CancelFunc
 }
 
 func New(cfg *config.Config, system sys.System, version, configPath string) *Agent {
@@ -133,6 +138,8 @@ func (a *Agent) session(ctx context.Context) error {
 			a.conn = nil
 		}
 		a.mu.Unlock()
+		// Nobody is reading the lines any more, so stop paying for them.
+		a.stopLogStream("")
 		conn.Close()
 	}()
 
@@ -311,6 +318,34 @@ func (a *Agent) handle(ctx context.Context, data []byte) {
 			return
 		}
 		go a.selfUpdate(msg)
+
+	case "collect_logs":
+		var msg proto.CollectLogs
+		if json.Unmarshal(data, &msg) != nil {
+			return
+		}
+		go a.collectLogs(msg)
+
+	case "log_stream_start":
+		var msg proto.LogStreamStart
+		if json.Unmarshal(data, &msg) != nil {
+			return
+		}
+		a.startLogStream(msg)
+
+	case "log_stream_stop":
+		var msg proto.LogStreamStop
+		if json.Unmarshal(data, &msg) != nil {
+			return
+		}
+		a.stopLogStream(msg.StreamID)
+
+	case "exec_command":
+		var msg proto.ExecCommand
+		if json.Unmarshal(data, &msg) != nil {
+			return
+		}
+		go a.execCommand(msg)
 
 	case "ping":
 		// The frame-level pong is enough; nothing to do.

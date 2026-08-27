@@ -6,12 +6,16 @@ import {
   MoreHorizontal,
   Pencil,
   Power,
+  Radio,
   RotateCw,
+  ScrollText,
   ShieldCheck,
   ShieldOff,
+  Terminal,
   Trash2,
 } from "lucide-react";
 import {
+  collectDeviceLogs,
   deleteDevice,
   renameDevice,
   rebootDevice,
@@ -19,6 +23,8 @@ import {
   setDeviceApproval,
   setDeviceGroup,
 } from "@/actions/devices";
+import { DeviceExec } from "@/components/device-exec";
+import { DeviceLiveLogs } from "@/components/device-live-logs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -63,6 +69,25 @@ export function DeviceControls({
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState(name);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [liveLogs, setLiveLogs] = useState(false);
+  const [executing, setExecuting] = useState(false);
+
+  /**
+   * Collecting takes as long as the box takes to zip and upload, so the menu
+   * item says what it is doing rather than looking broken for ten seconds.
+   */
+  function downloadLogs() {
+    setMessage("Collecting logs from the box…");
+    startTransition(async () => {
+      const result = await collectDeviceLogs(deviceId);
+      if (result.error || !result.bundleId) {
+        setMessage(result.error ?? "The box sent nothing back.");
+        return;
+      }
+      setMessage("Logs ready — downloading.");
+      window.location.href = `/api/devices/${deviceId}/logs/${result.bundleId}`;
+    });
+  }
 
   function run(fn: () => Promise<{ error?: string; message?: string }>, after?: () => void) {
     setMessage(null);
@@ -116,10 +141,22 @@ export function DeviceControls({
               </DropdownMenuItem>
             ) : null}
 
-            <DropdownMenuItem
-              disabled={!online}
-              onSelect={() => run(() => rebootDevice(deviceId))}
-            >
+            <DropdownMenuItem disabled={!online} onSelect={() => setExecuting(true)}>
+              <Terminal />
+              Execute
+            </DropdownMenuItem>
+
+            <DropdownMenuItem disabled={!online} onSelect={() => setLiveLogs(true)}>
+              <Radio />
+              Live logs
+            </DropdownMenuItem>
+
+            <DropdownMenuItem disabled={!online} onSelect={() => downloadLogs()}>
+              <ScrollText />
+              Logcat (.zip)
+            </DropdownMenuItem>
+
+            <DropdownMenuItem disabled={!online} onSelect={() => run(() => rebootDevice(deviceId))}>
               <Power />
               Reboot
             </DropdownMenuItem>
@@ -142,6 +179,10 @@ export function DeviceControls({
       </div>
 
       {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
+
+      <DeviceExec deviceId={deviceId} name={name} open={executing} onOpenChange={setExecuting} />
+
+      <DeviceLiveLogs deviceId={deviceId} name={name} open={liveLogs} onOpenChange={setLiveLogs} />
 
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent className="max-w-sm">

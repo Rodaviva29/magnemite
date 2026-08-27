@@ -45,6 +45,13 @@
 		reverse_proxy hub:{$HUB_PORT}
 	}
 
+	# --- Log bundles the boxes upload ---------------------------------------
+	# A zip of logcat, pushed by the box when the dashboard asks for it. The
+	# hub authenticates it with the device's own token, same as a download.
+	handle /api/logs/* {
+		reverse_proxy hub:{$HUB_PORT}
+	}
+
 	# --- Live job/device updates for the dashboard --------------------------
 	handle /api/events* {
 		reverse_proxy hub:{$HUB_PORT} {

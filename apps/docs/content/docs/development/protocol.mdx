@@ -17,18 +17,25 @@ The message set is small on purpose — it is implemented twice, in
 | `job_progress`        | Download percentage, install phase, log lines                                        |
 | `job_result`          | Success or failure, with the verified version and whether data was wiped             |
 | `agent_update_result` | Only on failure: the self-update did not happen, and why                             |
+| `log_bundle_result`   | Only on failure: the log bundle was not collected or uploaded                        |
+| `log_lines`           | A batch of live logcat lines, and how many were dropped keeping up                   |
+| `exec_result`         | What a one-off command printed, and whether it worked                                |
 | `pong`                | Answering a `ping`                                                                   |
 
 ## Hub → box
 
-| Message        | When                                               |
-| -------------- | -------------------------------------------------- |
-| `welcome`      | Accepting the socket                               |
-| `install_job`  | Artifact URL, sha256, target version, hooks, flags |
-| `cancel_job`   | You cancelled it, or the scheduler re-queued it    |
-| `reboot`       | From the device page                               |
-| `agent_update` | A newer agent build is available                   |
-| `ping`         | Liveness                                           |
+| Message            | When                                                   |
+| ------------------ | ------------------------------------------------------ |
+| `welcome`          | Accepting the socket                                   |
+| `install_job`      | Artifact URL, sha256, target version, hooks, flags     |
+| `cancel_job`       | You cancelled it, or the scheduler re-queued it        |
+| `reboot`           | From the device page                                   |
+| `agent_update`     | A newer agent build is available                       |
+| `collect_logs`     | Zip the logs and upload them to this URL               |
+| `log_stream_start` | Follow logcat, or a file, for this many seconds        |
+| `log_stream_stop`  | Nobody is watching any more                            |
+| `exec_command`     | Run this shell command as root and say what it printed |
+| `ping`             | Liveness                                               |
 
 ## Properties worth knowing
 

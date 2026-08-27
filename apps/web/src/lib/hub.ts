@@ -89,6 +89,19 @@ export const hub = {
   retryJob: (id: string) => call(`/internal/jobs/${id}/retry`),
   cancelJob: (id: string) => call(`/internal/jobs/${id}/cancel`),
   rebootDevice: (id: string) => call(`/internal/devices/${id}/reboot`),
+  /**
+   * Ask a box for its logs. This one waits: the hub holds the request open
+   * until the zip lands, so the caller comes straight back with something to
+   * download. Two minutes at worst, and then it fails.
+   */
+  collectDeviceLogs: (id: string, requestedById: string | null) =>
+    call<{ bundleId: string }>(`/internal/devices/${id}/logs`, { requestedById }),
+  /** Run a command on the box, as root, and get back what it printed. */
+  execOnDevice: (id: string, command: string, timeoutSeconds?: number) =>
+    call<{ ok: boolean; output: string; error: string | null }>(`/internal/devices/${id}/exec`, {
+      command,
+      timeoutSeconds,
+    }),
   /** Rotom-side control: restart the scanner, or take a box in/out of the pool. */
   rotomDeviceAction: (id: string, action: "restart" | "reboot" | "enable" | "disable") =>
     call(`/internal/devices/${id}/rotom/${action}`),

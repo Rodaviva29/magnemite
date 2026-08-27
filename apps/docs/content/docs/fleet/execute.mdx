@@ -1,0 +1,54 @@
+---
+title: Running a command on a box
+description: The root shell the install hooks already have, from the device page.
+icon: Terminal
+---
+
+**Execute** in a device page's **⋯** menu runs a shell command on that box and
+shows what it printed. It is the same `sh -c` as root that the pre/post-install
+hooks run — the boxes are rooted and the agent is started by Magisk — just
+invoked by hand instead of around an install.
+
+## The ones this fleet needs
+
+The dialog has these as buttons, because they are what people were opening adb
+for:
+
+```sh
+# Kill the game. Rotom restarts it if the scanner is running.
+am force-stop com.nianticlabs.pokemongo
+
+# Kill the scanner app itself.
+am force-stop com.pokemod.aegis
+
+# Bring the mapping service back after a stop.
+am startservice com.pokemod.aegis/com.pokemod.aegis.services.MappingService
+```
+
+Anything else can be typed in. `Ctrl`/`Cmd`+`Enter` runs it.
+
+## What to expect
+
+- **Output** is stdout and stderr together, capped at 64 KB — the tail is kept,
+  because the end of a command's output is the part that says what happened.
+- **60 seconds** and the box gives up. A command that needs longer belongs in a
+  script on the box, not here.
+- **Nothing is stored.** It is a question asked and answered while you wait; for
+  something to keep, [collect the logs](/docs/fleet/logs).
+- The box must be **online** — the command rides the socket it already has open.
+
+## Who can do this
+
+Operators and admins; a viewer does not see the item. Every run is written to
+the audit log with the command itself and who ran it.
+
+<Callout type="warn">
+  This is a root shell on hardware in someone's living room, and it is as powerful as it sounds.
+  Nothing validates the command beyond its length — `rm -rf` will do exactly what you would expect
+  it to.
+</Callout>
+
+## Requirements
+
+The agent runs the command, so a box needs an agent from **0.1.4** or later.
+Boxes update themselves — see [updating the agent](/docs/fleet/agent-update).

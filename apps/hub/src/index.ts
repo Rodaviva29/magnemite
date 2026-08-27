@@ -7,6 +7,7 @@ import { enrollRoutes } from "./routes/enroll.js";
 import { eventRoutes } from "./routes/events.js";
 import { fileRoutes } from "./routes/files.js";
 import { internalRoutes } from "./routes/internal.js";
+import { logRoutes } from "./routes/logs.js";
 import { connectionCount } from "./registry.js";
 import {
   loadAgentRelease,
@@ -52,6 +53,7 @@ async function main() {
   await app.register(internalRoutes);
   await app.register(eventRoutes);
   await app.register(fileRoutes);
+  await app.register(logRoutes);
 
   await app.listen({ port: env.HUB_PORT, host: env.HUB_HOST });
   attachDeviceSocket(app.server);

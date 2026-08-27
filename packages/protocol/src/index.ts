@@ -146,6 +146,44 @@ export const agentUpdateResultSchema = z.object({
   error: z.string().nullish(),
 });
 
+/**
+ * Closes out a log bundle the agent could not deliver. The bundle itself goes
+ * up over HTTP, not through here — a socket frame is capped at 1 MB and a
+ * logcat dump is not.
+ */
+export const logBundleResultSchema = z.object({
+  type: z.literal("log_bundle_result"),
+  bundleId: z.string(),
+  ok: z.boolean(),
+  error: z.string().nullish(),
+});
+
+/**
+ * A batch of live logcat lines, while someone has the panel open.
+ *
+ * Batched rather than sent per line: a busy box writes thousands a second and
+ * one frame each would be the socket's whole budget. `dropped` counts what the
+ * agent threw away to keep up, so the panel can say so instead of quietly
+ * lying about what the box printed.
+ */
+export const logLinesSchema = z.object({
+  type: z.literal("log_lines"),
+  streamId: z.string(),
+  lines: z.array(z.string()).default([]),
+  dropped: z.number().int().nonnegative().default(0),
+});
+
+/** What a one-off command printed, and whether it worked. */
+export const execResultSchema = z.object({
+  type: z.literal("exec_result"),
+  commandId: z.string(),
+  ok: z.boolean(),
+  /** Combined stdout and stderr, truncated by the agent. */
+  output: z.string().default(""),
+  /** Set when the shell itself reported a failure. */
+  error: z.string().nullish(),
+});
+
 export const pongSchema = z.object({ type: z.literal("pong") });
 
 export const agentMessageSchema = z.discriminatedUnion("type", [
@@ -155,6 +193,9 @@ export const agentMessageSchema = z.discriminatedUnion("type", [
   jobResultSchema,
   logSchema,
   agentUpdateResultSchema,
+  logBundleResultSchema,
+  logLinesSchema,
+  execResultSchema,
   pongSchema,
 ]);
 export type AgentMessage = z.infer<typeof agentMessageSchema>;
@@ -210,6 +251,55 @@ export const agentUpdateSchema = z.object({
   version: z.string(),
 });
 
+/**
+ * Collect the box's logs and PUT them at `uploadUrl`, which carries the
+ * bundle's own id and is authenticated with the device token.
+ */
+export const collectLogsSchema = z.object({
+  type: z.literal("collect_logs"),
+  bundleId: z.string(),
+  uploadUrl: z.string().url(),
+  /** Tail of logcat to include. A full buffer is tens of MB. */
+  maxLines: z.number().int().positive().default(50_000),
+});
+
+export const logStreamStartSchema = z.object({
+  type: z.literal("log_stream_start"),
+  streamId: z.string(),
+  /**
+   * Absolute path of a log file to follow. Null means logcat, which is what
+   * an agent from before this field understood — and still does, because it
+   * simply ignores what it does not know.
+   */
+  path: z.string().nullish(),
+  /**
+   * The agent stops on its own after this, so a dashboard tab left open (or a
+   * browser that died without closing the stream) never leaves `logcat`
+   * running on the box forever.
+   */
+  durationSeconds: z.number().int().positive().default(300),
+});
+
+export const logStreamStopSchema = z.object({
+  type: z.literal("log_stream_stop"),
+  streamId: z.string(),
+});
+
+/**
+ * Run a shell command on the box, as root, and say what it printed.
+ *
+ * The same power the pre/post-install hooks already have — `sh -c`, root,
+ * whatever the operator typed — just invoked by hand instead of around an
+ * install. It is meant for the scanner-wrangling one-liners (`am force-stop`,
+ * `am startservice`) that otherwise need adb and a trip to the box.
+ */
+export const execCommandSchema = z.object({
+  type: z.literal("exec_command"),
+  commandId: z.string(),
+  command: z.string().min(1),
+  timeoutSeconds: z.number().int().positive().default(60),
+});
+
 export const pingSchema = z.object({ type: z.literal("ping") });
 
 export const serverMessageSchema = z.discriminatedUnion("type", [
@@ -218,6 +308,10 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   cancelJobSchema,
   rebootSchema,
   agentUpdateSchema,
+  collectLogsSchema,
+  logStreamStartSchema,
+  logStreamStopSchema,
+  execCommandSchema,
   pingSchema,
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
