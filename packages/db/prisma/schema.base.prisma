@@ -269,8 +269,8 @@ model DeviceGroup {
   /// scanner and re-applies the mod.
   postInstallHook String?
 
-  /// Overrides the fleet-wide MAX_CONCURRENT_JOBS for boxes in this group,
-  /// e.g. to protect a site on a thin uplink.
+  /// Overrides the fleet-wide max concurrent jobs (Settings → Hub settings)
+  /// for boxes in this group, e.g. to protect a site on a thin uplink.
   maxConcurrency Int?
 
   devices Device[]

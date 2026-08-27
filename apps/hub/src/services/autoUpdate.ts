@@ -1,4 +1,4 @@
-import { prisma } from "@magnemite/db";
+import { getHubSettings, prisma } from "@magnemite/db";
 import { log } from "../log.js";
 import { cacheVersion } from "./artifacts.js";
 import { createRollout } from "./rollouts.js";
@@ -26,6 +26,18 @@ export async function runAutoUpdate(appTargetId: string) {
     },
   });
   if (active > 0) return null;
+
+  const settings = await getHubSettings();
+  if (settings.updateCooldownMinutes > 0) {
+    const lastAuto = await prisma.rollout.findFirst({
+      where: { mode: "AUTO", finishedAt: { not: null }, appVersion: { appTargetId } },
+      orderBy: { finishedAt: "desc" },
+    });
+    if (lastAuto?.finishedAt) {
+      const readyAt = lastAuto.finishedAt.getTime() + settings.updateCooldownMinutes * 60_000;
+      if (readyAt > Date.now()) return null;
+    }
+  }
 
   const candidates = await prisma.appVersion.findMany({
     where: { appTargetId, approved: true, status: { in: ["DISCOVERED", "CACHING", "READY"] } },

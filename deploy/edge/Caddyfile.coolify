@@ -24,7 +24,8 @@
 	}
 
 	# --- Artifact downloads -------------------------------------------------
-	# Up to MAX_CONCURRENT_JOBS devices pulling a ~170 MB .apkm at once.
+	# Up to "Max concurrent jobs" (Settings → Hub settings) devices pulling a
+	# ~170 MB .apkm at once.
 	handle_path /files/* {
 		# Every request carries the device's bearer token; the hub says yes or no.
 		forward_auth hub:{$HUB_PORT} {

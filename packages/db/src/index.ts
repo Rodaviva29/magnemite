@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 
 export * from "@prisma/client";
 export { PrismaClient };
+export { syncAdminFromEnv } from "./adminSync.js";
+export { getHubSettings, updateHubSettings, type HubSettingsValues } from "./hubSettings.js";
 
 // A single client per process. Next.js dev reloads the module graph on every
 // edit, which would otherwise open a new pool each time until Postgres runs

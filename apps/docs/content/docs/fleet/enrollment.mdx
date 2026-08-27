@@ -25,8 +25,9 @@ box receives ◄─ its own deviceToken   ─► and deletes the enrollment
 
 ## Where you get one
 
-- `pnpm db:seed` mints one on a fresh database and prints it **once**.
-- Afterwards: **Settings → Enrollment tokens → New token**, also shown once.
+- **Settings → Enrollment tokens → New token**, shown once.
+- The optional `pnpm db:seed` also mints one on a fresh database and prints
+  it once, if you'd rather skip that first trip to Settings.
 
 Only the sha256 is stored, so a token cannot be recovered, mint another
 instead. 

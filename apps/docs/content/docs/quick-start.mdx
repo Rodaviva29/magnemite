@@ -48,15 +48,18 @@ terminate TLS there.
 
 <Step>
 
-### Seed the database
+### Seed the database (optional)
+
+The admin account is created automatically from `ADMIN_EMAIL` /
+`ADMIN_PASSWORD` the moment the hub boots — nothing to run for that. This
+step is a shortcut for the rest: a starter app target, two version sources, a
+device group, and a first **enrollment token**, printed once so copy it now.
+Skip it and set all of that up by hand from Settings instead, if you'd rather
+start empty.
 
 ```sh
 make seed
 ```
-
-This creates the admin account from `ADMIN_EMAIL` / `ADMIN_PASSWORD`, the app
-target, and one **enrollment token** — printed once, so copy it now. Losing it
-costs nothing: mint another from Settings.
 
 </Step>
 

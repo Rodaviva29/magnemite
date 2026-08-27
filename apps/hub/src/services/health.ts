@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SourceFeed } from "@magnemite/db";
-import { Prisma, prisma } from "@magnemite/db";
+import { getHubSettings, Prisma, prisma } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount } from "../registry.js";
@@ -74,12 +74,13 @@ async function timed<T>(fn: () => Promise<T>): Promise<{ ms: number; value: T }>
 // Probes
 // ---------------------------------------------------------------------------
 
-function checkHub(): IntegrationCheck {
+async function checkHub(): Promise<IntegrationCheck> {
   const uptime = process.uptime();
   const hours = Math.floor(uptime / 3600);
   const minutes = Math.floor((uptime % 3600) / 60);
   const agentTarget = agentTargetVersion();
   const updating = agentUpdatesInFlight();
+  const settings = await getHubSettings();
 
   return {
     key: "hub",
@@ -91,8 +92,8 @@ function checkHub(): IntegrationCheck {
       { label: "Hub", value: HUB_VERSION },
       { label: "Node", value: process.version },
       { label: "Device sockets", value: String(connectionCount()) },
-      { label: "Concurrent installs", value: String(env.MAX_CONCURRENT_JOBS) },
-      { label: "Source poll", value: `every ${env.SOURCE_POLL_MINUTES} min` },
+      { label: "Concurrent installs", value: String(settings.maxConcurrentJobs) },
+      { label: "Source poll", value: `every ${settings.sourcePollMinutes} min` },
       { label: "Artifacts served by", value: env.SERVE_ARTIFACTS ? "hub (Node)" : "edge (Caddy)" },
       {
         label: "Agent target",
@@ -472,13 +473,7 @@ export async function collectHealth(force = false): Promise<HubHealth> {
   if (!force && cached && Date.now() - cached.at < CACHE_MS) return cached.value;
 
   const [core, feeds] = await Promise.all([
-    Promise.all([
-      Promise.resolve(checkHub()),
-      checkDatabase(),
-      checkArtifacts(),
-      checkRotom(),
-      checkEdge(),
-    ]),
+    Promise.all([checkHub(), checkDatabase(), checkArtifacts(), checkRotom(), checkEdge()]),
     checkFeeds(),
   ]);
   // Feeds sit between the local checks and the integrations that depend on

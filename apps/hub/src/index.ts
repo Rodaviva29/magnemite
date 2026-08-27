@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { prisma } from "@magnemite/db";
+import { prisma, syncAdminFromEnv } from "@magnemite/db";
 import { env } from "./env.js";
 import { log } from "./log.js";
 import { authzRoutes } from "./routes/authz.js";
@@ -24,6 +24,10 @@ import { attachDeviceSocket } from "./ws/deviceSocket.js";
 const OFFLINE_SWEEP_MS = 30_000;
 
 async function main() {
+  // Keeps the admin login in sync with ADMIN_EMAIL/ADMIN_PASSWORD on every
+  // boot — restarting the hub is the whole story for changing it or
+  // recovering a lost password, no seed step required.
+  await syncAdminFromEnv();
   await ensureArtifactDir();
   // Publishes the agent binaries this image was built with, so boxes on an
   // older build are updated as they reconnect.

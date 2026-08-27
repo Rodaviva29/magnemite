@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { Plus } from "lucide-react";
-import { createGroup, updateGroup } from "@/actions/settings";
+import { Plus, Trash2 } from "lucide-react";
+import { createGroup, deleteGroup, updateGroup } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +40,13 @@ export function GroupsSection({ groups, disabled }: { groups: GroupRow[]; disabl
       </CardHeader>
 
       <CardContent className="flex flex-col gap-6">
+        {groups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No groups yet. A box enrolling with none configured lands in a group named "default",
+            created automatically.
+          </p>
+        ) : null}
+
         {groups.map((group) => (
           <GroupForm key={group.id} group={group} disabled={disabled} />
         ))}
@@ -52,6 +59,7 @@ export function GroupsSection({ groups, disabled }: { groups: GroupRow[]; disabl
 
 function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) {
   const [state, formAction] = useActionState<ActionState, FormData>(updateGroup, {});
+  const [pending, startTransition] = useTransition();
 
   return (
     <form action={formAction} className="flex flex-col gap-3 rounded-md border border-border p-4">
@@ -59,9 +67,35 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
 
       <div className="flex items-center justify-between">
         <h3 className="font-medium">{group.name}</h3>
-        <span className="text-xs text-muted-foreground">
-          {group.deviceCount} device{group.deviceCount === 1 ? "" : "s"}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {group.deviceCount} device{group.deviceCount === 1 ? "" : "s"}
+          </span>
+          {!disabled ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={pending}
+              onClick={() => {
+                // Devices in the group are not deleted — they just lose their
+                // group and can be reassigned afterward.
+                if (
+                  !confirm(
+                    `Remove "${group.name}"? ${group.deviceCount} device${group.deviceCount === 1 ? "" : "s"} will lose this group.`,
+                  )
+                )
+                  return;
+                startTransition(async () => {
+                  await deleteGroup(group.id);
+                });
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              Remove
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -99,7 +133,8 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
           disabled={disabled}
         />
         <p className="text-xs text-muted-foreground">
-          For a site on a thin uplink: caps how many of its boxes download at once, under this fleet.
+          For a site on a thin uplink: caps how many of its boxes download at once, under this
+          fleet.
         </p>
       </div>
 

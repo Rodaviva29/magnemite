@@ -33,13 +33,14 @@ resource's **Environment** tab; the rest have defaults.
 | Variable         | Default                                                         | What it is                                                                                                                               |
 | ---------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `AUTH_SECRET`    | —                                                               | Signs Better Auth cookies. `openssl rand -base64 32`. Coolify generates `SERVICE_BASE64_64_AUTHSECRET`.                                  |
-| `ADMIN_EMAIL`    | `admin@example.com` (compose) / `admin@magnemite.com` (Coolify) | Login identifier for the seeded admin. Nothing is ever sent to it, but it must be a well-formed address — `admin@localhost` is rejected. |
-| `ADMIN_PASSWORD` | —                                                               | Seeded admin password. Coolify generates `SERVICE_PASSWORD_ADMIN`.                                                                       |
+| `ADMIN_EMAIL`    | `admin@example.com` (compose) / `admin@magnemite.com` (Coolify) | Login identifier for the admin account. Nothing is ever sent to it, but it must be a well-formed address — `admin@localhost` is rejected. |
+| `ADMIN_PASSWORD` | —                                                               | Admin password. Coolify generates `SERVICE_PASSWORD_ADMIN`.                                                                       |
 
 <Callout type="info">
-  `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set on the **hub** service, because the seed runs in that
-  container and there is no `.env` file inside it. Re-running the seed resets that address's
-  password — which is the way back in if you lose the login.
+  `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set on the **hub** service, because the hub syncs the admin
+  account to them on every boot — restart the hub after changing either, and there is no `.env` file
+  inside the container for it to read otherwise. That restart is also the way back in if you lose the
+  login.
 </Callout>
 
 ## Hub
@@ -50,21 +51,21 @@ resource's **Environment** tab; the rest have defaults.
 | `HUB_INTERNAL_SECRET`      | —                            | Shared secret for web → hub internal calls (SSE, dispatch nudges, rollout control). Coolify generates `SERVICE_PASSWORD_HUBSECRET`.       |
 | `ARTIFACT_DIR`             | `/data/artifacts` in compose | Where cached `.apkm` bundles live. Must match the volume mounted into Caddy as `/srv/artifacts`.                                          |
 | `SERVE_ARTIFACTS`          | `false`                      | Serve `/files/*` from Node. Leave `false` in both deployments; `true` only for local development without Caddy.                           |
-| `MAX_CONCURRENT_JOBS`      | `10`                         | Fleet-wide cap on devices downloading or installing at the same time.                                                                     |
-| `JOB_STALL_TIMEOUT`        | `900`                        | Seconds without a `job_progress` message before a job is treated as stalled and re-queued.                                                |
 | `AGENT_AUTO_UPDATE`        | `true`                       | Tell boxes on an older build to update themselves to the binary this hub image ships. See [updating the agent](/docs/fleet/agent-update). |
 | `AGENT_UPDATE_CONCURRENCY` | `5`                          | How many boxes may be swapping their agent binary at once.                                                                                |
 | `AGENT_BIN_DIR`            | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
 
+<Callout type="info">
+  Max concurrent jobs, job stall timeout, source poll interval, and the auto-update cooldown are not
+  env vars — they live in **Settings → Hub settings**, editable at runtime with no restart. See
+  [rollouts](/docs/fleet/rollouts) and [auto-update](/docs/fleet/auto-update).
+</Callout>
+
 ## Version sources
 
-| Variable              | Default                                    | What it is                                                                                                       |
-| --------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `SOURCE_POLL_MINUTES` | `10080` in `.env.example`, `15` in compose | How often every enabled source is polled.                                                                        |
-| `MIRROR_INDEX_URL`    | the two defaults                           | Comma-separated index URLs the **seed** starts with. Read once; after that, sources are edited in the dashboard. |
-
-The sources themselves are rows in the database, managed in **Settings → Version
-sources** — see [APKs sources](/docs/operations/sources).
+Sources themselves are rows in the database, managed entirely in **Settings
+→ Version sources** — see [APKs sources](/docs/operations/sources). The
+optional `pnpm db:seed` adds two starter sources with no env var involved.
 
 ## Rotom
 

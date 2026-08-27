@@ -55,8 +55,8 @@ openssl rand -base64 24   # DB_PASSWORD
 ## Bringing it up
 
 ```sh
-make up      # build and start everything
-make seed    # admin user, app target, first enrollment token
+make up      # build and start everything — admin login works immediately
+make seed    # optional: starter app target, sources, group, first token
 ```
 
 | Target         | Runs                                                  |
@@ -65,7 +65,7 @@ make seed    # admin user, app target, first enrollment token
 | `make down`    | `down`                                                |
 | `make logs`    | `logs -f hub web`                                     |
 | `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub` |
-| `make seed`    | the seed inside `hub`                                 |
+| `make seed`    | the optional seed inside `hub`                        |
 
 Compose directly, if you would rather not use `make`:
 

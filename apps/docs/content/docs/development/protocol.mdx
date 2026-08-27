@@ -43,9 +43,9 @@ The message set is small on purpose — it is implemented twice, in
   which is why no ports are open on the LAN and CGNAT is irrelevant.
 - **Jobs are idempotent by version.** A box already on the target version
   reports success without installing anything.
-- **Progress is advisory, absence is not.** `JOB_STALL_TIMEOUT` seconds with no
-  `job_progress` is what makes the hub re-queue a job — a box unplugged
-  mid-install never sends a failure.
+- **Progress is advisory, absence is not.** The job stall timeout (**Settings
+  → Hub settings**) of silence with no `job_progress` is what makes the hub
+  re-queue a job — a box unplugged mid-install never sends a failure.
 - **Downloads do not use the socket.** The bundle comes over plain HTTPS from
   the edge with a `Range` header, so an interrupted download resumes and the
   socket stays free for control messages.

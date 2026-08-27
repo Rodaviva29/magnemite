@@ -36,13 +36,15 @@ Lives in `agent/internal/sys/fake.go`, driven by environment variables:
 
 ## What this is good for
 
-- **Scheduler behaviour under load.** 200 devices against
-  `MAX_CONCURRENT_JOBS=10` is the only honest way to see the queue drain.
+- **Scheduler behaviour under load.** 200 devices against a max concurrent
+  jobs of 10 (**Settings → Hub settings**) is the only honest way to see the
+  queue drain.
 - **The canary path.** Fail one commit and watch the rollout park at `PAUSED`.
 - **The clean-install fallback.** `..._ONCE` makes the agent take the
   uninstall-and-reinstall branch on demand.
-- **Stall handling.** A long `MAGNEMITE_FAKE_INSTALL_MS` plus a low
-  `JOB_STALL_TIMEOUT` reproduces a re-queue in under a minute.
+- **Stall handling.** A long `MAGNEMITE_FAKE_INSTALL_MS` plus a low job stall
+  timeout (**Settings → Hub settings**) reproduces a re-queue in under a
+  minute.
 
 <Callout type="warn">
   A fake fleet downloads real bundles. 200 fakes pulling a 172 MB `.apkm` is ~35 GB through your own

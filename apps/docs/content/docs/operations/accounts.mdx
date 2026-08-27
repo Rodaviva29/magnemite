@@ -7,19 +7,20 @@ icon: Users
 ## Passwords
 
 - bcrypt, configured through Better Auth's hasher hooks. That is what lets
-  `pnpm db:seed` create the first admin without importing Better Auth into the
+  the hub sync the admin account without importing Better Auth into the
   database package.
 - Changing someone's password deletes their sessions, signing them out
   everywhere.
 - `ADMIN_EMAIL` must be a well-formed address. `admin@localhost` is rejected.
 
 <Callout type="info" title="Locked out?">
-  Re-running the seed resets `ADMIN_EMAIL`'s password to `ADMIN_PASSWORD`.
-  That is the way back in, and it is why both live on the **hub** service's
-  environment rather than in a file inside the container.
+  The hub syncs the admin account to `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every
+  boot. Change `ADMIN_PASSWORD` and restart the hub container — that is the
+  way back in, and it is why both live on the **hub** service's environment
+  rather than in a file inside the container.
 
 ```sh
-docker compose --env-file .env -f deploy/compose.yml exec hub pnpm --filter @magnemite/db run seed
+docker compose --env-file .env -f deploy/compose.yml restart hub
 ```
 
 </Callout>

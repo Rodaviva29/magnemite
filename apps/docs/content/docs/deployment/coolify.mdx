@@ -44,7 +44,11 @@ https://agents.magnemite.example.com:8080
 
 <Step>
 
-### Deploy, then seed once
+### Deploy
+
+The admin account is created automatically the moment the hub boots — nothing
+to run by hand. Optionally, seed a starter app target, two version sources, a
+device group and a first enrollment token:
 
 ```sh
 docker ps --format '{{.Names}}' | grep hub
@@ -73,13 +77,14 @@ address is an identifier, not a mailbox — so it only needs changing if you wan
 your own.
 
 <Callout type="warn">
-  Set `ADMIN_EMAIL` **before the first seed** if you want a different one. Changing it later seeds a
-  *second* admin rather than renaming the first, because the seed upserts on the address.
+  Set `ADMIN_EMAIL` **before the first boot** if you want a different one. Changing it later creates a
+  *second* admin rather than renaming the first, because the sync upserts on the address.
 </Callout>
 
 <Callout type="info">
-  There is no `.env` file inside the container, so the seed reads `ADMIN_EMAIL` and `ADMIN_PASSWORD`
-  from the **hub** service's environment. That is why they are set on `hub` and not only on `web`.
+  There is no `.env` file inside the container, so the hub reads `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+  from the **hub** service's environment, on every boot. That is why they are set on `hub` and not
+  only on `web`.
 </Callout>
 
 ## Things this file does differently

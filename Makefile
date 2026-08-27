@@ -82,7 +82,7 @@ migrate: ## Apply database migrations inside the hub container
 	$(COMPOSE) exec hub pnpm --filter @magnemite/db run deploy
 
 .PHONY: seed
-seed: ## Seed the admin user, app target and first enrollment token
+seed: ## Optional: starter app target, sources, device group, first enrollment token
 	$(COMPOSE) exec hub pnpm --filter @magnemite/db run seed
 
 .PHONY: typecheck

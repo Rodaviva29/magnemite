@@ -1,7 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { generateToken, hashToken, prisma, tokenPrefix } from "@magnemite/db";
+import {
+  generateToken,
+  hashToken,
+  type HubSettingsValues,
+  prisma,
+  tokenPrefix,
+  updateHubSettings as updateHubSettingsInDb,
+} from "@magnemite/db";
 import { requireOperator } from "@/lib/session";
 import { hub } from "@/lib/hub";
 import type { ActionState } from "./rollouts";
@@ -15,6 +22,45 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Fleet-wide operational knobs — max concurrent jobs, stall timeout, and so on. */
+export async function updateHubSettings(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await requireOperator();
+
+  const int = (name: string, min: number) => {
+    const parsed = Number(formData.get(name));
+    if (!Number.isFinite(parsed) || parsed < min) return null;
+    return Math.floor(parsed);
+  };
+
+  const maxConcurrentJobs = int("maxConcurrentJobs", 1);
+  const jobStallTimeoutSeconds = int("jobStallTimeoutSeconds", 1);
+  const sourcePollMinutes = int("sourcePollMinutes", 1);
+  const updateCooldownMinutes = int("updateCooldownMinutes", 0);
+
+  if (
+    maxConcurrentJobs === null ||
+    jobStallTimeoutSeconds === null ||
+    sourcePollMinutes === null ||
+    updateCooldownMinutes === null
+  ) {
+    return { error: "All fields need a valid, non-negative number." };
+  }
+
+  const patch: Partial<HubSettingsValues> = {
+    maxConcurrentJobs,
+    jobStallTimeoutSeconds,
+    sourcePollMinutes,
+    updateCooldownMinutes,
+  };
+  await updateHubSettingsInDb(patch);
+
+  revalidatePath("/settings");
+  return { ok: true, message: "Saved." };
 }
 
 /** Auto-update policy for one app target. */
@@ -107,8 +153,47 @@ export async function createGroup(_prev: ActionState, formData: FormData): Promi
   return { ok: true, message: `Created "${name}".` };
 }
 
+/**
+ * Devices in the group are not deleted — `Device.groupId` just goes back to
+ * null, so they simply have no group until reassigned.
+ */
+export async function deleteGroup(id: string): Promise<ActionState> {
+  await requireOperator();
+  const group = await prisma.deviceGroup.findUnique({ where: { id } });
+  if (!group) return { error: "Group not found." };
+
+  await prisma.deviceGroup.delete({ where: { id } });
+  revalidatePath("/settings");
+  return { ok: true, message: `Removed "${group.name}".` };
+}
+
 /** Same shape the hub validates uploads against. */
 const PACKAGE_NAME = /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/;
+
+/** Creates a new app target with default auto-update policy, off by default. */
+export async function createAppTarget(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await requireOperator();
+  const packageName = String(formData.get("packageName") ?? "").trim();
+  const displayName = String(formData.get("displayName") ?? "").trim();
+
+  if (!packageName || !PACKAGE_NAME.test(packageName)) {
+    return { error: "Package name looks wrong — expected something like com.example.app." };
+  }
+  if (!displayName) return { error: "Give it a display name." };
+
+  const existing = await prisma.appTarget.findUnique({ where: { packageName } });
+  if (existing) return { error: `"${packageName}" is already configured.` };
+
+  await prisma.appTarget.create({ data: { packageName, displayName } });
+
+  revalidatePath("/settings");
+  revalidatePath("/versions");
+  revalidatePath("/");
+  return { ok: true, message: `Created "${displayName}".` };
+}
 
 /**
  * Watch a package's version across the fleet.

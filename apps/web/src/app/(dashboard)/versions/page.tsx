@@ -12,7 +12,7 @@ export default async function VersionsPage() {
   if (!target) {
     return (
       <p className="text-sm text-muted-foreground">
-        No app target configured. Run the database seed to create one.
+        No app target configured. Add one from Settings.
       </p>
     );
   }

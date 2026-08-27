@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import fsp from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { prisma, serialize } from "@magnemite/db";
+import { getHubSettings, prisma, serialize } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
@@ -64,7 +64,7 @@ export async function internalRoutes(app: FastifyInstance) {
   app.get("/internal/status", async () => ({
     online: connectionCount(),
     onlineDeviceIds: onlineDeviceIds(),
-    maxConcurrentJobs: env.MAX_CONCURRENT_JOBS,
+    maxConcurrentJobs: (await getHubSettings()).maxConcurrentJobs,
   }));
 
   /**

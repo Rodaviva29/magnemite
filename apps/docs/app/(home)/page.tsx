@@ -137,7 +137,9 @@ export default function HomePage() {
               <code>
                 <span className="text-fd-muted-foreground"># bring the stack up</span>
                 {"\ndocker compose up -d --build\n\n"}
-                <span className="text-fd-muted-foreground"># mint the first enrollment token</span>
+                <span className="text-fd-muted-foreground">
+                  # optional: starter app target, sources, first token
+                </span>
                 {"\nmake seed\n\n"}
                 <span className="text-fd-muted-foreground">
                   # bake the hub URL into a Magisk module

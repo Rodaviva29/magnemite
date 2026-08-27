@@ -1,13 +1,16 @@
-import { prisma } from "@magnemite/db";
+import { getHubSettings, prisma } from "@magnemite/db";
 import { bus } from "../../bus.js";
-import { env } from "../../env.js";
 import { log } from "../../log.js";
 import { runAutoUpdate } from "../autoUpdate.js";
 import { pollFeed } from "./feed.js";
 import type { DiscoveredVersion } from "./types.js";
 
+/** How often the timer wakes up to check whether a poll is due. */
+const CHECK_INTERVAL_MS = 30_000;
+
 let timer: NodeJS.Timeout | null = null;
 let inFlight = false;
+let lastPolledAt = 0;
 
 /** What each feed did the last time it was asked, for the Status page. */
 export type SourcePollStat = {
@@ -58,6 +61,7 @@ function dedupe(found: DiscoveredVersion[]): DiscoveredVersion[] {
 export async function pollAllSources() {
   if (inFlight) return;
   inFlight = true;
+  lastPolledAt = Date.now();
   try {
     // Manual targets exist only to hold uploads: nothing to poll, and no
     // auto-update policy to run against them.
@@ -168,13 +172,23 @@ export async function pollAllSources() {
   }
 }
 
+/**
+ * Ticks every `CHECK_INTERVAL_MS` and polls once `sourcePollMinutes` (read
+ * live from Settings on every check) has actually elapsed, rather than
+ * setting a fixed interval up front — so changing the interval from the
+ * dashboard takes effect without a hub restart.
+ */
+async function maybeTick() {
+  const settings = await getHubSettings();
+  const intervalMs = settings.sourcePollMinutes * 60_000;
+  if (Date.now() - lastPolledAt < intervalMs) return;
+  await pollAllSources().catch((err) => log.error({ err }, "source poll failed"));
+}
+
 export function startPolling() {
   if (timer) return;
-  const intervalMs = env.SOURCE_POLL_MINUTES * 60_000;
-  timer = setInterval(() => {
-    void pollAllSources().catch((err) => log.error({ err }, "source poll failed"));
-  }, intervalMs);
-  log.info({ everyMinutes: env.SOURCE_POLL_MINUTES }, "source polling started");
+  timer = setInterval(() => void maybeTick(), CHECK_INTERVAL_MS);
+  log.info("source polling started");
   // Give the hub a moment to finish booting before the first network call.
   setTimeout(() => void pollAllSources().catch(() => undefined), 10_000);
 }

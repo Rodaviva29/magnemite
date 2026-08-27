@@ -70,8 +70,9 @@ where it already was.
 
 ## What the hub does with them
 
-1. Polls every enabled source every `SOURCE_POLL_MINUTES` and records what it
-   finds as **versions**.
+1. Polls every enabled source every poll interval (**Settings → Hub
+   settings**, 15 minutes by default) and records what it finds as
+   **versions**.
 2. Downloads a version **once**, when it is cached (either by you pressing
    _Cache_ or by auto-update).
 3. Computes a **sha256** while writing it to `ARTIFACT_DIR`.
@@ -93,16 +94,16 @@ database rows.
 
 ## Configuration
 
-Sources live in the database, not in `.env`. The only variable involved is read
-once, by the seed, to decide which ones a fresh install starts with:
+Sources live in the database, not in `.env`, and are entirely managed from
+**Settings → Version sources** — add, edit, or remove as many as you like
+there, no env var involved. The poll interval itself is in **Settings → Hub
+settings**, alongside the other operational knobs — see [environment
+reference](/docs/deployment/environment).
 
-```sh title=".env"
-# Comma-separated. Unset means the two sources above.
-MIRROR_INDEX_URL=https://mirror.unownhash.com/index.json,https://the-treeline-project.github.io/p/silva/index.json
-SOURCE_POLL_MINUTES=15
-```
+The optional `pnpm db:seed` / `make seed` adds two starter sources (the
+UnownHash mirror and Silva) on a fresh database, as a convenience — skip it
+and add your own from Settings instead if you'd rather start empty.
 
-An index URL the seed does not recognise is named after its host and created
-with no base URL — right for an index that publishes an absolute `url` per
-entry. If it lists bare filenames instead, add the base URL in Settings; the
+Leave **Base URL** empty for an index that publishes an absolute `url` per
+entry. If it lists bare filenames instead, set the base URL in Settings; the
 Health card says so when entries have nowhere to download from.

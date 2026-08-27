@@ -6,7 +6,7 @@ icon: RefreshCw
 
 **Settings → Auto-update.** When it is on, the hub:
 
-1. polls both sources every `SOURCE_POLL_MINUTES`,
+1. polls both sources every poll interval (**Settings → Hub settings**),
 2. caches the newest **approved** version onto the server,
 3. creates a rollout with your canary and soak settings,
 4. dispatches only inside the time window, if you set one.
@@ -17,6 +17,8 @@ icon: RefreshCw
 - **Never runs two rollouts for the same app at once.**
 - **Does nothing at all** if every device is already on the newest version.
 - **Only touches approved versions** (see below).
+- **Waits out the cooldown**, if one is set (see below) — a fresh discovery
+  right after the last auto-update finished does not immediately ship.
 
 ## Approval
 
@@ -41,11 +43,18 @@ dispatches them when it opens.
 
 ## Polling
 
-`SOURCE_POLL_MINUTES` defaults to 15 in the compose files. `.env.example` ships
-a much lazier 10080 (7 days), because we don't need to update that often. 
+**Settings → Hub settings → Source poll interval** defaults to 15 minutes.
+Both sources are polled on the same tick, and a poll can be forced from the
+Versions page. A change takes effect within seconds, no restart needed.
 
-Both
-sources are polled on the same tick, and a poll can be forced from the Versions
-page.
+## Cooldown
 
+**Settings → Hub settings → Auto-update cooldown.** We don't always need to
+update the moment a new build appears — a fresh Pokémon GO release is
+sometimes worth watching for a day or two before it touches your fleet. Set
+this to however many minutes (hours, days — just do the math) should pass
+since an app's **last** auto-update rollout finished before another one is
+allowed to start. Discovery and polling keep happening regardless; only the
+"ship it automatically" step waits. Defaults to 0 — no cooldown, update the
+moment a new approved version is found, the historical behavior.
 

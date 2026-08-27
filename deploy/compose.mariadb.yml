@@ -55,14 +55,11 @@ services:
       # Container path, deliberately not taken from .env — it has to match the
       # volume mounted into caddy as /srv/artifacts.
       ARTIFACT_DIR: /data/artifacts
-      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-10}
       # The hub image carries the agent binaries it was built with and updates
       # the fleet to them as boxes reconnect. Set to "false" to pin the agents
       # and drive updates by hand instead.
       AGENT_AUTO_UPDATE: ${AGENT_AUTO_UPDATE:-true}
       AGENT_UPDATE_CONCURRENCY: ${AGENT_UPDATE_CONCURRENCY:-5}
-      JOB_STALL_TIMEOUT: ${JOB_STALL_TIMEOUT:-900}
-      SOURCE_POLL_MINUTES: ${SOURCE_POLL_MINUTES:-15}
       ROTOM_ENABLED: ${ROTOM_ENABLED:-false}
       ROTOM_URL: ${ROTOM_URL:-}
       ROTOM_SECRET: ${ROTOM_SECRET:-}

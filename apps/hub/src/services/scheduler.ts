@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { InstallJob } from "@magnemite/protocol";
-import { prisma } from "@magnemite/db";
+import { getHubSettings, prisma } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { isOnline, sendTo } from "../registry.js";
@@ -21,7 +21,7 @@ export function artifactUrl(artifactPath: string): string {
 export function startScheduler() {
   if (timer) return;
   timer = setInterval(() => void tick(), TICK_MS);
-  log.info({ maxConcurrent: env.MAX_CONCURRENT_JOBS }, "scheduler started");
+  log.info("scheduler started");
   void tick();
 }
 
@@ -45,12 +45,13 @@ async function tick() {
   }
   running = true;
   try {
+    const settings = await getHubSettings();
     await promoteSoakingRollouts();
-    await requeueStalled(env.JOB_STALL_TIMEOUT);
+    await requeueStalled(settings.jobStallTimeoutSeconds);
     // A hub restart mid-install would otherwise leave a box disabled in Rotom
     // for good.
     await releaseOrphanedDevices();
-    await dispatchQueued();
+    await dispatchQueued(settings.maxConcurrentJobs);
   } catch (err) {
     log.error({ err }, "scheduler tick failed");
   } finally {
@@ -89,9 +90,9 @@ function insideWindow(start: string | null, end: string | null, now = new Date()
   return from <= to ? minutes >= from && minutes < to : minutes >= from || minutes < to;
 }
 
-async function dispatchQueued() {
+async function dispatchQueued(maxConcurrentJobs: number) {
   const activeCount = await prisma.job.count({ where: { state: { in: ACTIVE_STATES } } });
-  let capacity = env.MAX_CONCURRENT_JOBS - activeCount;
+  let capacity = maxConcurrentJobs - activeCount;
   if (capacity <= 0) return;
 
   const candidates = await prisma.job.findMany({

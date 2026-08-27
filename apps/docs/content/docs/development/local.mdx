@@ -8,7 +8,7 @@ icon: SquareTerminal
 pnpm install
 docker compose --env-file .env -f deploy/compose.yml up -d postgres
 pnpm --filter @magnemite/db exec dotenv -e ../../.env -- prisma migrate dev
-pnpm db:seed
+pnpm db:seed   # optional: starter app target, sources, group, first token
 
 pnpm --filter @magnemite/hub dev     # :3001
 pnpm --filter @magnemite/web dev     # :3000
@@ -47,7 +47,7 @@ running `prisma migrate dev` — see [Postgres or MariaDB](/docs/deployment/dock
 | `pnpm db:deploy`   | Apply pending migrations (production)      |
 | `pnpm db:push`     | Push the schema without a migration        |
 | `pnpm db:studio`   | Prisma Studio                              |
-| `pnpm db:seed`     | Admin, app target, first enrollment token  |
+| `pnpm db:seed`     | Optional: starter app target, sources, group, first enrollment token |
 
 ## Checks
 

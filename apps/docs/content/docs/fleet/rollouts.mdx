@@ -29,10 +29,10 @@ press resume.
 
 ## Concurrency
 
-| Setting               | Scope                               |
-| --------------------- | ----------------------------------- |
-| `MAX_CONCURRENT_JOBS` | The whole fleet. Default 10.        |
-| A group's own cap     | Lower, for a site on a thin uplink. |
+| Setting                                       | Scope                               |
+| ---------------------------------------------- | ------------------------------------ |
+| **Settings → Hub settings → Max concurrent jobs** | The whole fleet. Default 10.     |
+| A group's own cap                             | Lower, for a site on a thin uplink. |
 
 The cap counts devices downloading/installing, which is what actually
 consumes your egress and their `/data`.
@@ -44,7 +44,7 @@ consumes your egress and their `/data`.
 | **Device offline**     | The job stays queued and dispatches the moment the agent reconnects. Nothing to retry by hand.                            |
 | **Job failed**         | Re-queued automatically up to the rollout's attempt limit. The bytes already on disk make the retry cheap.                |
 | **Attempts exhausted** | `Retry` and `Retry all failed` are in the UI.                                                                             |
-| **Job stalled**        | A box unplugged mid-install stops sending progress; after `JOB_STALL_TIMEOUT` seconds (default 900) the hub re-queues it. |
+| **Job stalled**        | A box unplugged mid-install stops sending progress; after the job stall timeout (**Settings → Hub settings**, default 900 seconds) the hub re-queues it. |
 | **Hub restarted**      | Jobs survive in Postgres; the scheduler picks them up on the next tick.                                                   |
 
 ## Rollout states
@@ -63,6 +63,6 @@ the sha256 mismatch, or the free-space refusal.
 
 ## Egress
 
-A full rollout to 200 boxes is roughly **35 GB** off your server.
-`MAX_CONCURRENT_JOBS` paces it, but it does not reduce it, check your traffic
+A full rollout to 200 boxes is roughly **35 GB** off your server. Max
+concurrent jobs paces it, but it does not reduce it, check your traffic
 allowance before the first fleet-wide update.

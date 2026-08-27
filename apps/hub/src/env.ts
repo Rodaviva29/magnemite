@@ -39,14 +39,8 @@ const schema = z.object({
    */
   AGENT_UPDATE_CONCURRENCY: z.coerce.number().int().positive().default(5),
 
-  /** Fleet-wide cap on how many devices download + install at once. */
-  MAX_CONCURRENT_JOBS: z.coerce.number().int().positive().default(10),
-  /** Seconds of silence from an agent mid-job before the job is re-queued. */
-  JOB_STALL_TIMEOUT: z.coerce.number().int().positive().default(900),
   /** Seconds without a heartbeat before a device is marked offline. */
   DEVICE_OFFLINE_TIMEOUT: z.coerce.number().int().positive().default(70),
-
-  SOURCE_POLL_MINUTES: z.coerce.number().int().positive().default(15),
 
   ROTOM_ENABLED: z
     .string()
