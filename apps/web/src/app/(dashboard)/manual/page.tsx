@@ -69,6 +69,10 @@ export default async function ManualPage() {
     online: device.status === "ONLINE",
     groupId: device.group?.id ?? null,
     groupName: device.group?.name ?? null,
+    model: [device.manufacturer, device.model].filter(Boolean).join(" ") || null,
+    androidVersion: device.androidVersion,
+    freeBytes: device.freeBytes === null ? null : Number(device.freeBytes),
+    lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
     installed: Object.fromEntries(
       device.packages
         .filter((p) => p.versionName)

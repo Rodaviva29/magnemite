@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { generateToken, hashToken, prisma, tokenPrefix } from "@magnemite/db";
 import { requireOperator } from "@/lib/session";
+import { hub } from "@/lib/hub";
 import type { ActionState } from "./rollouts";
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -104,6 +105,94 @@ export async function createGroup(_prev: ActionState, formData: FormData): Promi
   await prisma.deviceGroup.create({ data: { name } });
   revalidatePath("/settings");
   return { ok: true, message: `Created "${name}".` };
+}
+
+/** Same shape the hub validates uploads against. */
+const PACKAGE_NAME = /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/;
+
+/**
+ * Watch a package's version across the fleet.
+ *
+ * Magnemite does not update these — it only asks each box what it has — so
+ * this is a column in the fleet table, not an app target. Adding one puts it
+ * in the list the agents report on every heartbeat, and the hub pushes that
+ * list out immediately so the column fills in without waiting for reconnects.
+ */
+export async function createWatchedPackage(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireOperator();
+  const packageName = String(formData.get("packageName") ?? "").trim();
+  const label = String(formData.get("label") ?? "").trim();
+
+  if (!PACKAGE_NAME.test(packageName)) {
+    return { error: "That is not a package name — try com.example.app." };
+  }
+
+  const existing = await prisma.watchedPackage.findUnique({ where: { packageName } });
+  if (existing) return { error: `${packageName} is already watched.` };
+
+  const last = await prisma.watchedPackage.findFirst({ orderBy: { position: "desc" } });
+  const watched = await prisma.watchedPackage.create({
+    data: { packageName, label: label || null, position: (last?.position ?? 0) + 1 },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "watchedPackage.create",
+      targetType: "WatchedPackage",
+      targetId: watched.id,
+      meta: { packageName },
+    },
+  });
+
+  // Best effort: a hub that is down does not stop the column existing, and
+  // every box picks the list up when it next connects anyway.
+  const pushed = await hub
+    .refreshTrackedPackages()
+    .then((result) => result.sent)
+    .catch(() => null);
+
+  revalidatePath("/settings");
+  revalidatePath("/");
+  return {
+    ok: true,
+    message:
+      pushed === null
+        ? `Watching ${packageName}. Boxes will report it as they reconnect.`
+        : `Watching ${packageName} — ${pushed} box${pushed === 1 ? "" : "es"} told to report it.`,
+  };
+}
+
+export async function deleteWatchedPackage(id: string): Promise<ActionState> {
+  const user = await requireOperator();
+  const watched = await prisma.watchedPackage.findUnique({
+    where: { id },
+    select: { packageName: true },
+  });
+  if (!watched) return { error: "That package is already gone." };
+
+  await prisma.watchedPackage.delete({ where: { id } });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "watchedPackage.delete",
+      targetType: "WatchedPackage",
+      targetId: id,
+      meta: { packageName: watched.packageName },
+    },
+  });
+
+  await hub.refreshTrackedPackages().catch(() => undefined);
+
+  revalidatePath("/settings");
+  revalidatePath("/");
+  return { ok: true, message: `Stopped watching ${watched.packageName}.` };
 }
 
 /**

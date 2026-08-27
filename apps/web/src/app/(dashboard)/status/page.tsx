@@ -9,10 +9,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * When the hub is the thing that is down, its own probes are unavailable —
- * but the dashboard talks to Postgres directly, so it can still answer the
- * next question an operator asks: is this the hub, or is it everything?
+ * but the dashboard talks to the database directly, so it can still answer
+ * the next question an operator asks: is this the hub, or is it everything?
  */
 async function fallbackHealth(error: string): Promise<HubHealth> {
+  const engine = process.env.DB_PROVIDER === "mysql" ? "MariaDB/MySQL" : "Postgres";
   const started = Date.now();
   let database: HubHealth["checks"][number];
 
@@ -21,7 +22,7 @@ async function fallbackHealth(error: string): Promise<HubHealth> {
     database = {
       key: "database",
       label: "Database",
-      summary: `Postgres answering in ${Date.now() - started} ms (checked from the dashboard)`,
+      summary: `${engine} answering in ${Date.now() - started} ms (checked from the dashboard)`,
       state: "OK",
       latencyMs: Date.now() - started,
       facts: [{ label: "Devices", value: String(devices) }],
@@ -32,7 +33,7 @@ async function fallbackHealth(error: string): Promise<HubHealth> {
     database = {
       key: "database",
       label: "Database",
-      summary: "Postgres is not answering the dashboard either",
+      summary: `${engine} is not answering the dashboard either`,
       state: "DOWN",
       latencyMs: null,
       facts: [],

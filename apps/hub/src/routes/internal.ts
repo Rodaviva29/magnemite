@@ -8,6 +8,7 @@ import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
 import { cacheVersion, pruneArtifacts } from "../services/artifacts.js";
 import { execOnDevice } from "../services/deviceCommands.js";
+import { broadcastTrackedPackages } from "../services/devices.js";
 import { normaliseLogPath, requestBundle, subscribeToLogs } from "../services/deviceLogs.js";
 import { collectHealth } from "../services/health.js";
 import { cancelJob, retryFailedJobs, retryJob } from "../services/jobs.js";
@@ -34,8 +35,8 @@ const createRolloutBody = z.object({
 
 /**
  * Everything the dashboard needs the hub to actually do — anything that
- * touches a live socket or the scheduler. Plain reads go straight to Postgres
- * from the Next server instead of through here.
+ * touches a live socket or the scheduler. Plain reads go straight to the
+ * database from the Next server instead of through here.
  */
 export async function internalRoutes(app: FastifyInstance) {
   // An upload is a few hundred MB of binary. The app-wide parser buffers a
@@ -90,11 +91,9 @@ export async function internalRoutes(app: FastifyInstance) {
     };
   }>("/internal/uploads", async (request, reply) => {
     const { packageName, version, filename, displayName, arch } = request.query;
-    if (!packageName || !version) {
-      return reply.status(400).send({ error: "packageName and version are required" });
-    }
 
     try {
+      // Both optional: what the file's own manifest says stands in for either.
       const result = await storeUpload({
         stream: request.raw,
         filename: filename ?? "upload.apk",
@@ -168,6 +167,15 @@ export async function internalRoutes(app: FastifyInstance) {
     nudge();
     return { ok: true };
   });
+
+  /**
+   * Tell every connected box what to report versions for. Called by the
+   * dashboard when the watched package list changes, so a new column fills in
+   * on the next heartbeat rather than whenever each box next reconnects.
+   */
+  app.post("/internal/tracked-packages/refresh", async () => ({
+    sent: await broadcastTrackedPackages(),
+  }));
 
   // --- devices -------------------------------------------------------------
 

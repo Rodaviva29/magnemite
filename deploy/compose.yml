@@ -1,0 +1,114 @@
+name: magnemite
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: magnemite-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Host-only, so you can point Prisma Studio or psql at it.
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  hub:
+    build:
+      context: ..
+      dockerfile: apps/hub/Dockerfile
+    container_name: magnemite-hub
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Built from the POSTGRES_* vars rather than taken from .env, whose
+      # DATABASE_URL points at the host-mapped port for local development.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      HUB_PORT: ${HUB_PORT:-3001}
+      HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
+      MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
+      # Container path, deliberately not taken from .env — it has to match the
+      # volume mounted into caddy as /srv/artifacts.
+      ARTIFACT_DIR: /data/artifacts
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-10}
+      # The hub image carries the agent binaries it was built with and updates
+      # the fleet to them as boxes reconnect. Set to "false" to pin the agents
+      # and drive updates by hand instead.
+      AGENT_AUTO_UPDATE: ${AGENT_AUTO_UPDATE:-true}
+      AGENT_UPDATE_CONCURRENCY: ${AGENT_UPDATE_CONCURRENCY:-5}
+      JOB_STALL_TIMEOUT: ${JOB_STALL_TIMEOUT:-900}
+      SOURCE_POLL_MINUTES: ${SOURCE_POLL_MINUTES:-15}
+      ROTOM_ENABLED: ${ROTOM_ENABLED:-false}
+      ROTOM_URL: ${ROTOM_URL:-}
+      ROTOM_SECRET: ${ROTOM_SECRET:-}
+    volumes:
+      - artifacts:/data/artifacts
+    expose:
+      - "3001"
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    container_name: magnemite-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hub:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      # Built from the POSTGRES_* vars rather than taken from .env, whose
+      # DATABASE_URL points at the host-mapped port for local development.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET}
+      # Behind Caddy the dashboard and the agents share one origin, so Better
+      # Auth's origin check uses the same URL. The Coolify setup splits them.
+      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_PUBLIC_URL}
+      BETTER_AUTH_URL: ${MAGNEMITE_PUBLIC_URL}
+      MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
+      HUB_URL: http://hub:${HUB_PORT:-3001}
+      HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
+    expose:
+      - "3000"
+
+  caddy:
+    build:
+      # Built rather than pulled, so the Caddyfile travels inside the image:
+      # a bind-mounted config is one more thing that has to be in the right
+      # state on the server, and a stale one 404s a new route with nothing
+      # obviously wrong.
+      context: ./edge
+    container_name: magnemite-caddy
+    restart: unless-stopped
+    depends_on:
+      - web
+      - hub
+    environment:
+      HUB_PORT: ${HUB_PORT:-3001}
+    ports:
+      # Plain HTTP: your own reverse proxy terminates TLS and forwards here.
+      - "${EDGE_PORT:-8080}:8080"
+    volumes:
+      # Caddy streams the cached .apkm files straight off this volume, so the
+      # ~35 GB of a full rollout never touches Node.
+      - artifacts:/srv/artifacts:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  artifacts:
+  caddy_data:
+  caddy_config:

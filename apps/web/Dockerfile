@@ -8,6 +8,13 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable && apk add --no-cache openssl
 WORKDIR /app
 
+# Which Prisma connector to generate the client for: "postgresql" (default) or
+# "mysql", which also covers MariaDB. The Prisma Client baked in here has to
+# match the DATABASE_URL the container gets at runtime, so
+# deploy/compose.mariadb.yml passes this as a build arg.
+ARG DB_PROVIDER=postgresql
+ENV DB_PROVIDER=${DB_PROVIDER}
+
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 # `packageManager` in package.json pins the version.
 RUN corepack install

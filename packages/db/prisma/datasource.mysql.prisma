@@ -1,0 +1,6 @@
+// MySQL and MariaDB speak the same wire protocol, so Prisma's "mysql"
+// connector covers both — there is no separate "mariadb" provider string.
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}

@@ -37,7 +37,7 @@ cp .env.example .env
 #   openssl rand -base64 32
 $EDITOR .env
 
-docker compose up -d --build
+make up   # docker compose --env-file .env -f deploy/compose.yml up -d --build
 ```
 
 The stack publishes plain HTTP on `EDGE_PORT` (8080) and never binds 80 or 443:
@@ -51,7 +51,7 @@ terminate TLS there.
 ### Seed the database
 
 ```sh
-docker compose exec hub pnpm --filter @magnemite/db run seed
+make seed
 ```
 
 This creates the admin account from `ADMIN_EMAIL` / `ADMIN_PASSWORD`, the app
@@ -103,7 +103,7 @@ Or in bulk over the LAN: `./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f 
 ### Watch it appear
 
 The box enrolls itself on first boot and shows up in the fleet table with its
-serial, model, current Pokémon GO version and free space. 
+serial, model, current Pokémon GO version and free space.
 
 That is the only time it needs hands-on work. Every later update rides the socket it opened itself.
 

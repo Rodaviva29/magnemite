@@ -1,3 +1,28 @@
+# Magnemite on Coolify, with the documentation site.
+#
+# This is `docker-compose.coolify.yml` plus one service: `docs`, the Fumadocs
+# site under apps/docs. Coolify deploys a Compose resource as a single file, so
+# the whole stack is repeated here rather than layered -- use *either* this file
+# *or* the plain one, never both against the same resource.
+#
+# The docs site shares nothing with the stack: no database, no secrets, no
+# volume. It is here so it deploys from the same repository and gets a domain
+# from the same place, and it can be rebuilt at any time without touching the
+# fleet (see the Custom Build/Start Command note below).
+#
+# It needs a third domain:
+#
+#   SERVICE_FQDN_DOCS  -> the docs people read, e.g. docs.<your-domain>
+#
+# Give it the `:3002` suffix in the Domains tab so Coolify's proxy hits Next's
+# port.
+#
+# Deploying only the docs, once the stack is up (General tab):
+#   Custom Build Command:  docker compose build docs
+#   Custom Start Command:  docker compose up -d --no-deps docs
+#
+# ---------------------------------------------------------------------------
+#
 # Magnemite on Coolify.
 #
 # Coolify's proxy terminates TLS and routes to the containers, so there is no
@@ -49,7 +74,7 @@ services:
 
   hub:
     build:
-      context: .
+      context: ..
       dockerfile: apps/hub/Dockerfile
     restart: unless-stopped
     depends_on:
@@ -99,12 +124,16 @@ services:
   # The piece Coolify's proxy cannot be: a file server with the artifacts
   # volume mounted. Everything the boxes touch goes through here.
   edge:
-    image: caddy:2-alpine
+    build:
+      # Built rather than pulled, so the Caddyfile travels inside the image.
+      # Coolify turns a file bind mount into a mount of its own, which means
+      # the config in the container is the copy on the server rather than the
+      # one in this repository — and a stale one 404s a new route with nothing
+      # obviously wrong.
+      context: ./edge
+      args:
+        CADDYFILE: Caddyfile.coolify
     restart: unless-stopped
-    # --watch, because the Caddyfile is a bind mount: editing it changes no
-    # Compose config, so `up -d` sees an up-to-date container and leaves the
-    # old routes running. A new route then 404s with nothing obviously wrong.
-    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile --watch
     depends_on:
       hub:
         condition: service_started
@@ -117,7 +146,6 @@ services:
       - SERVICE_FQDN_EDGE
       - HUB_PORT=3001
     volumes:
-      - ./Caddyfile.coolify:/etc/caddy/Caddyfile:ro
       # Read-only: Caddy streams the cached .apkm files straight off here, so
       # the ~35 GB of a full rollout never passes through Node.
       - artifacts:/srv/artifacts:ro
@@ -132,7 +160,7 @@ services:
 
   web:
     build:
-      context: .
+      context: ..
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     depends_on:
@@ -165,6 +193,27 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+
+  # The documentation site. Static Fumadocs pages built at image build time --
+  # nothing to configure, nothing to back up, and no dependency on the rest of
+  # the stack, so `up -d --no-deps docs` is always safe.
+  docs:
+    build:
+      context: ..
+      dockerfile: apps/docs/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Declared bare on purpose, like the two above: Coolify fills this from
+      # the Domains tab. Use a subdomain such as docs.<your-domain>, and give
+      # the domain the `:3002` suffix there so the proxy hits Next's port.
+      - SERVICE_FQDN_DOCS
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3002/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
 volumes:
   pgdata:

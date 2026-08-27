@@ -1,39 +1,54 @@
+# Same stack as compose.yml, with MariaDB instead of Postgres. Prisma's
+# "mysql" connector speaks MariaDB's wire protocol too, so DB_PROVIDER=mysql
+# is all the hub and web images need to point at it instead — see
+# packages/db/prisma.config.ts.
+#
+# Use it exactly like the default file:
+#   docker compose --env-file .env -f deploy/compose.mariadb.yml up -d --build
+
 name: magnemite
 
 services:
-  postgres:
-    image: postgres:17-alpine
-    container_name: magnemite-postgres
+  mariadb:
+    image: mariadb:11
+    container_name: magnemite-mariadb
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      # Nothing here ever connects as root; a random one it is.
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mariadbdata:/var/lib/mysql
     ports:
-      # Host-only, so you can point Prisma Studio or psql at it.
-      - "127.0.0.1:5433:5432"
+      # Host-only, so you can point Prisma Studio or a mysql client at it.
+      - "127.0.0.1:3307:3306"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   hub:
     build:
-      context: .
+      context: ..
       dockerfile: apps/hub/Dockerfile
+      # The Prisma Client baked into the image at build time has to match the
+      # DATABASE_URL below, so this is a build arg, not just a runtime one.
+      args:
+        DB_PROVIDER: mysql
     container_name: magnemite-hub
     restart: unless-stopped
     depends_on:
-      postgres:
+      mariadb:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      # Built from the POSTGRES_* vars rather than taken from .env, whose
+      DB_PROVIDER: mysql
+      # Built from the DB_* vars rather than taken from .env, whose
       # DATABASE_URL points at the host-mapped port for local development.
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
       HUB_PORT: ${HUB_PORT:-3001}
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
@@ -58,20 +73,25 @@ services:
 
   web:
     build:
-      context: .
+      context: ..
       dockerfile: apps/web/Dockerfile
+      # The Prisma Client baked into the image at build time has to match the
+      # DATABASE_URL below, so this is a build arg, not just a runtime one.
+      args:
+        DB_PROVIDER: mysql
     container_name: magnemite-web
     restart: unless-stopped
     depends_on:
-      postgres:
+      mariadb:
         condition: service_healthy
       hub:
         condition: service_started
     environment:
       NODE_ENV: production
-      # Built from the POSTGRES_* vars rather than taken from .env, whose
+      DB_PROVIDER: mysql
+      # Built from the DB_* vars rather than taken from .env, whose
       # DATABASE_URL points at the host-mapped port for local development.
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
       AUTH_SECRET: ${AUTH_SECRET}
       # Behind Caddy the dashboard and the agents share one origin, so Better
       # Auth's origin check uses the same URL. The Coolify setup splits them.
@@ -84,13 +104,14 @@ services:
       - "3000"
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      # Built rather than pulled, so the Caddyfile travels inside the image:
+      # a bind-mounted config is one more thing that has to be in the right
+      # state on the server, and a stale one 404s a new route with nothing
+      # obviously wrong.
+      context: ./edge
     container_name: magnemite-caddy
     restart: unless-stopped
-    # --watch, because the Caddyfile is a bind mount: editing it changes no
-    # Compose config, so `up -d` sees an up-to-date container and leaves the
-    # old routes running. A new route then 404s with nothing obviously wrong.
-    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile --watch
     depends_on:
       - web
       - hub
@@ -100,7 +121,6 @@ services:
       # Plain HTTP: your own reverse proxy terminates TLS and forwards here.
       - "${EDGE_PORT:-8080}:8080"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Caddy streams the cached .apkm files straight off this volume, so the
       # ~35 GB of a full rollout never touches Node.
       - artifacts:/srv/artifacts:ro
@@ -108,7 +128,7 @@ services:
       - caddy_config:/config
 
 volumes:
-  pgdata:
+  mariadbdata:
   artifacts:
   caddy_data:
   caddy_config:

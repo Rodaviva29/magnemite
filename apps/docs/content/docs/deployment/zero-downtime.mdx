@@ -29,7 +29,7 @@ docker compose up -d --no-deps web
 ## Hub and edge, when the hub itself changed
 
 ```sh title="Custom Build Command"
-docker compose build hub
+docker compose build hub edge
 ```
 
 ```sh title="Custom Start Command"
@@ -41,23 +41,27 @@ deploy has to be.
 
 ## When the Caddyfile changed
 
-`up -d` decides what to recreate from the Compose config, and the Caddyfile is a
-**bind mount** — editing it changes no config at all, so the edge is considered
-up to date and keeps serving the routes it was started with. A route added in
-that file then 404s, with nothing in any log to say why.
+The edge is **built**, not pulled: `deploy/edge/Dockerfile` copies the Caddyfile
+into the image and runs `caddy validate` on it, so a config that does not parse
+fails the build instead of the deploy. Changing routes therefore means building
+the edge, exactly like changing code:
 
-The edge runs `caddy run … --watch` for exactly this: it reloads the file when
-it changes on disk, so a deploy that pulls a new Caddyfile takes effect without
-recreating anything.
-
-If your edge predates that (its command has no `--watch`), pick it up once:
-
-```sh
-docker compose up -d --no-deps --force-recreate edge
+```sh title="Custom Build Command"
+docker compose build hub edge
 ```
 
-That recreates only the edge, which drops the device sockets passing through it
-for a second or two; the agents reconnect on their own.
+```sh title="Custom Start Command"
+docker compose up -d --no-deps hub edge
+```
+
+<Callout type="warn" title="Why it is not a bind mount">
+  It used to be, and on Coolify that quietly stops working: a file bind mount becomes a mount
+  Coolify manages itself, so the container gets the copy stored on the server rather than the one in
+  the repository — and editing the Caddyfile here changed nothing until someone edited it there too.
+  Baking it into the image makes the repository the only place it is written. If you would rather
+  keep a bind mount, Coolify needs **Configuration → General → Preserve Repository During
+  Deployment** for the file to survive a deploy.
+</Callout>
 
 <Callout type="error" title="--no-deps is not optional">
   Without it, Compose starts what `web` declares in `depends_on`. Service `postgres`

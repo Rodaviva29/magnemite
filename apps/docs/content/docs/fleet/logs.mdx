@@ -26,10 +26,8 @@ which does not know the message.
 
 <Callout type="warn" title="could not upload the bundle: HTTP 404">
   The box built the zip and had nowhere to put it: the edge is not routing `POST /api/logs/*` to the
-  hub. Either the Caddyfile on the server predates that route, or it has it and the running Caddy
-  does not — a bind-mounted Caddyfile changes no Compose config, so `up -d` leaves the old one
-  running. See [when the Caddyfile
-  changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
+  hub, which means it is running an image built before that route existed. Rebuild it — see [when
+  the Caddyfile changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
 </Callout>
 
 <Callout type="info">

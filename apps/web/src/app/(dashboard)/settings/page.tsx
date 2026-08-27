@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { AutoUpdateForm } from "@/components/settings/auto-update-form";
 import { GroupsSection } from "@/components/settings/groups-section";
 import { SourcesSection } from "@/components/settings/sources-section";
+import { WatchedPackagesSection } from "@/components/settings/watched-packages-section";
 import { EnrollmentSection } from "@/components/settings/enrollment-section";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +12,20 @@ export default async function SettingsPage() {
   const user = await requireUser();
   const canOperate = user.role !== "VIEWER";
 
-  const [targets, feeds, groups, tokens] = await Promise.all([
+  const [targets, feeds, watched, deviceCount, reporting, groups, tokens] = await Promise.all([
     prisma.appTarget.findMany({ orderBy: { displayName: "asc" } }),
     prisma.sourceFeed.findMany({
       orderBy: { priority: "asc" },
       include: { _count: { select: { versions: true } } },
+    }),
+    prisma.watchedPackage.findMany({ orderBy: { position: "asc" } }),
+    prisma.device.count({ where: { approved: true } }),
+    // How many boxes have answered for each watched package, in one pass
+    // rather than a count per package.
+    prisma.devicePackage.groupBy({
+      by: ["packageName"],
+      where: { installed: true },
+      _count: { _all: true },
     }),
     prisma.deviceGroup.findMany({
       orderBy: { name: "asc" },
@@ -25,6 +35,7 @@ export default async function SettingsPage() {
   ]);
 
   const publicUrl = process.env.MAGNEMITE_PUBLIC_URL ?? "https://your.host";
+  const reportingCounts = new Map(reporting.map((row) => [row.packageName, row._count._all]));
 
   return (
     <div className="flex flex-col gap-8">
@@ -65,6 +76,19 @@ export default async function SettingsPage() {
           priority: feed.priority,
           versionCount: feed._count.versions,
         }))}
+        disabled={!canOperate}
+      />
+
+      <WatchedPackagesSection
+        packages={watched.map((row) => ({
+          id: row.id,
+          packageName: row.packageName,
+          label: row.label,
+          // How many boxes have answered for it, which is the difference
+          // between "nothing has it installed" and "nobody has reported yet".
+          reporting: reportingCounts.get(row.packageName) ?? 0,
+        }))}
+        deviceCount={deviceCount}
         disabled={!canOperate}
       />
 

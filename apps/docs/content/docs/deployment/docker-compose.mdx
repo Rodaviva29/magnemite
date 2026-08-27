@@ -4,7 +4,7 @@ description: One virtual host, TLS from your own reverse proxy, four containers.
 icon: Container
 ---
 
-`docker-compose.yml` is the self-contained deployment: our own Caddy publishes
+`deploy/compose.yml` is the self-contained deployment: our own Caddy publishes
 one plain-HTTP port, serves the dashboard and the artifacts, and proxies what
 belongs to the hub. TLS is not ours, nothing here binds 80 or 443, and
 whatever reverse proxy already fronts the server terminates it and forwards to
@@ -24,6 +24,9 @@ Traefik, a tunnel) to put in front.
 
 Postgres is published on `127.0.0.1:5433` on purpose: it is enough for Prisma
 Studio or `psql` from the host, and reachable from nowhere else.
+`deploy/compose.mariadb.yml` swaps that service for `mariadb:11`, published
+the same way on `127.0.0.1:3307` — see [Postgres or MariaDB](#postgres-or-mariadb)
+below.
 
 ## Configuration
 
@@ -52,19 +55,28 @@ openssl rand -base64 24   # POSTGRES_PASSWORD
 ## Bringing it up
 
 ```sh
-docker compose up -d --build
-docker compose exec hub pnpm --filter @magnemite/db run seed
+make up      # build and start everything
+make seed    # admin user, app target, first enrollment token
 ```
-
-The Makefile wraps the same commands:
 
 | Target         | Runs                                                  |
 | -------------- | ----------------------------------------------------- |
-| `make up`      | `docker compose up -d --build`                        |
-| `make down`    | `docker compose down`                                 |
-| `make logs`    | `docker compose logs -f hub web`                      |
+| `make up`      | `up -d --build`                                       |
+| `make down`    | `down`                                                |
+| `make logs`    | `logs -f hub web`                                     |
 | `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub` |
 | `make seed`    | the seed inside `hub`                                 |
+
+Compose directly, if you would rather not use `make`:
+
+```sh
+docker compose --env-file .env -f deploy/compose.yml up -d --build
+```
+
+Both flags are needed: the compose files live under `deploy/`, and `.env` lives
+at the repo root where everything else reads it from — Compose would otherwise
+look for it next to the compose file and quietly start with every variable
+blank.
 
 ## What your proxy needs to do
 
@@ -98,7 +110,7 @@ network, and nothing outside can.
 
 ```sh
 git pull
-docker compose up -d --build
+docker compose --env-file .env -f deploy/compose.yml up -d --build
 make migrate
 ```
 
@@ -106,5 +118,34 @@ Rebuilding restarts `hub`, which drops every device socket. The agents
 reconnect on their own with backoff, and queued jobs resume — but on a large
 fleet, do it in a window where a few minutes of reconnects are acceptable. If
 you want dashboard deploys that leave the sockets alone, that property comes
-free here (`docker compose up -d --build web` touches only the dashboard) and
+free here (`docker compose --env-file .env -f deploy/compose.yml up -d --build web` touches only the dashboard) and
 takes one setting on [Coolify](/docs/deployment/zero-downtime).
+
+## Postgres or MariaDB
+
+`deploy/compose.yml` runs Postgres. `deploy/compose.mariadb.yml` is the same
+four services with `mariadb` in place of `postgres` — pick one, not both:
+
+```sh
+docker compose --env-file .env -f deploy/compose.mariadb.yml up -d --build
+# or with make:
+make up COMPOSE_FILE=deploy/compose.mariadb.yml
+```
+
+Prisma has no separate "mariadb" provider — MariaDB speaks the same wire
+protocol as MySQL, so it uses Prisma's `mysql` connector. The compose file sets
+`DB_PROVIDER=mysql` on `hub` and `web` for you; it only matters by hand when
+running Prisma or the apps outside Docker (see the
+[environment reference](/docs/deployment/environment)).
+
+The two engines keep separate migration histories —
+`packages/db/prisma/migrations` for Postgres, `migrations-mysql` for MariaDB —
+because the DDL Prisma generates differs enough between them (types, enum
+handling, quoting) that one history can't serve both. `make migrate` and
+`make seed` work the same either way; `prisma.config.ts` picks the right
+history from `DB_PROVIDER`.
+
+<Callout type="warn">
+  Switching an existing deployment from one engine to the other is not a supported migration path —
+  there is no data copy between them. Decide once, before the first `make seed`.
+</Callout>

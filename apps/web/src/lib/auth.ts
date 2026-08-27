@@ -51,7 +51,9 @@ function resolveDashboardOrigin(): string | undefined {
 }
 
 /**
- * Better Auth, wired to the same Postgres the rest of the app uses.
+ * Better Auth, wired to whichever database DB_PROVIDER points Prisma at
+ * (`postgresql` by default; `mysql` covers MariaDB too — see
+ * `@magnemite/db`'s prisma.config.ts).
  *
  * Two deliberate choices:
  *
@@ -64,10 +66,13 @@ function resolveDashboardOrigin(): string | undefined {
  */
 function createAuth() {
   const dashboardOrigin = resolveDashboardOrigin();
+  // Better Auth's adapter provider names match Prisma's, so DB_PROVIDER
+  // passes straight through.
+  const dbProvider = process.env.DB_PROVIDER === "mysql" ? "mysql" : "postgresql";
 
   return betterAuth({
     appName: "Magnemite",
-    database: prismaAdapter(prisma, { provider: "postgresql" }),
+    database: prismaAdapter(prisma, { provider: dbProvider }),
     secret: required("AUTH_SECRET"),
     baseURL: dashboardOrigin,
     trustedOrigins: dashboardOrigin ? [dashboardOrigin] : [],

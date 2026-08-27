@@ -64,6 +64,8 @@ export type DeviceRow = {
   agentVersion: string | null;
   groupName: string | null;
   installedVersion: string | null;
+  /** Installed version of each watched package, keyed by package name. */
+  watchedVersions: Record<string, string | null>;
   freeBytes: number | null;
   lastSeenAt: string | null;
   /** Only present when the Rotom integration is on and this box was matched. */
@@ -87,8 +89,18 @@ export type VersionOption = {
 
 type Filter = "all" | "online" | "offline" | "outdated" | "pending";
 
-type FleetSortKey =
-  "device" | "group" | "version" | "scanner" | "status" | "free" | "agent" | "lastSeen";
+/**
+ * An extra version column, configured in Settings.
+ *
+ * Magnemite does not update these packages — the boxes just report what they
+ * have — so the column is a plain version with none of the up-to-date badging
+ * the target app's column carries.
+ */
+export type WatchedColumn = { packageName: string; label: string };
+
+// Plus one `pkg:<name>` per watched column, which is why this is not a closed
+// union.
+type FleetSortKey = string;
 
 export function FleetTable({
   rows,
@@ -96,6 +108,7 @@ export function FleetTable({
   versions,
   latestVersion,
   packageName,
+  watchedColumns,
   canOperate,
 }: {
   rows: DeviceRow[];
@@ -103,6 +116,7 @@ export function FleetTable({
   versions: VersionOption[];
   latestVersion: string | null;
   packageName: string;
+  watchedColumns: WatchedColumn[];
   canOperate: boolean;
 }) {
   // The scanner column only earns its space once Rotom has matched something.
@@ -112,8 +126,8 @@ export function FleetTable({
   const [group, setGroup] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const { headProps, sort, sortRows } = useTableSort<FleetSortKey, DeviceRow>(
-    {
+  const accessors = useMemo(() => {
+    const map: Record<FleetSortKey, (row: DeviceRow) => string | number | null> = {
       device: (r) => r.name,
       group: (r) => r.groupName,
       version: (r) => r.installedVersion,
@@ -123,9 +137,17 @@ export function FleetTable({
       free: (r) => r.freeBytes,
       agent: (r) => r.agentVersion,
       lastSeen: (r) => r.lastSeenAt,
-    },
-    { key: "device", direction: "asc" },
-  );
+    };
+    for (const column of watchedColumns) {
+      map[`pkg:${column.packageName}`] = (r) => r.watchedVersions[column.packageName] ?? null;
+    }
+    return map;
+  }, [watchedColumns]);
+
+  const { headProps, sort, sortRows } = useTableSort<FleetSortKey, DeviceRow>(accessors, {
+    key: "device",
+    direction: "asc",
+  });
 
   const stats = useMemo(() => {
     const online = rows.filter((r) => r.online).length;
@@ -152,7 +174,10 @@ export function FleetTable({
         row.name.toLowerCase().includes(q) ||
         row.serial.toLowerCase().includes(q) ||
         (row.model?.toLowerCase().includes(q) ?? false) ||
-        (row.installedVersion?.toLowerCase().includes(q) ?? false)
+        (row.installedVersion?.toLowerCase().includes(q) ?? false) ||
+        Object.values(row.watchedVersions).some(
+          (version) => version?.toLowerCase().includes(q) ?? false,
+        )
       );
     });
     return sortRows(filtered);
@@ -278,6 +303,11 @@ export function FleetTable({
               <TableSortHead {...headProps("version")}>
                 {packageName.split(".").pop()}
               </TableSortHead>
+              {watchedColumns.map((column) => (
+                <TableSortHead key={column.packageName} {...headProps(`pkg:${column.packageName}`)}>
+                  {column.label}
+                </TableSortHead>
+              ))}
               {showRotom ? <TableSortHead {...headProps("scanner")}>Scanner</TableSortHead> : null}
               <TableSortHead {...headProps("status")}>Status</TableSortHead>
               <TableSortHead {...headProps("free")} align="right">
@@ -292,7 +322,7 @@ export function FleetTable({
             {visible.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={showRotom ? 10 : 9}
+                  colSpan={(showRotom ? 10 : 9) + watchedColumns.length}
                   className="py-10 text-center text-muted-foreground"
                 >
                   {rows.length === 0
@@ -310,6 +340,7 @@ export function FleetTable({
                   onToggle={() => toggleOne(row.id)}
                   canOperate={canOperate}
                   showRotom={showRotom}
+                  watchedColumns={watchedColumns}
                 />
               ))
             )}
@@ -328,12 +359,14 @@ function DeviceRowView({
   onToggle,
   canOperate,
   showRotom,
+  watchedColumns,
 }: {
   row: DeviceRow;
   latestVersion: string | null;
   selected: boolean;
   onToggle: () => void;
   canOperate: boolean;
+  watchedColumns: WatchedColumn[];
   showRotom: boolean;
 }) {
   const [pending, startTransition] = useTransition();
@@ -382,6 +415,15 @@ function DeviceRowView({
           <span className="text-muted-foreground">not installed</span>
         )}
       </TableCell>
+
+      {watchedColumns.map((column) => {
+        const version = row.watchedVersions[column.packageName] ?? null;
+        return (
+          <TableCell key={column.packageName} className="font-mono text-xs">
+            {version ?? <span className="font-sans text-muted-foreground">—</span>}
+          </TableCell>
+        );
+      })}
 
       {showRotom ? (
         <TableCell>
@@ -593,7 +635,8 @@ function RolloutDialog({
               <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                 <span>
-                  WARNING: This wipes the app data on every targeted device: logins and settings included.
+                  WARNING: This wipes the app data on every targeted device: logins and settings
+                  included.
                 </span>
               </div>
             ) : null}

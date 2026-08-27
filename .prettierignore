@@ -7,5 +7,6 @@ data
 agent/bin
 pnpm-lock.yaml
 packages/db/prisma/migrations
+packages/db/prisma/migrations-mysql
 # Caddy has its own format; prettier has no parser for it.
-Caddyfile
+deploy/edge/Caddyfile*

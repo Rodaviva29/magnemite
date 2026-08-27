@@ -1,13 +1,14 @@
+// Everything except the datasource block, which lives in
+// datasource.postgresql.prisma or datasource.mysql.prisma and is picked by
+// DB_PROVIDER. prisma.config.ts concatenates the two into schema.prisma
+// (generated, gitignored) before every Prisma command — edit this file, not
+// schema.prisma directly.
+
 generator client {
   provider      = "prisma-client-js"
   // "native" covers local development on Windows/macOS; the musl target is
   // what the alpine-based hub and web images actually load.
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
-}
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,26 @@ enum DeviceLogBundleState {
   PENDING // asked for, waiting on the box
   READY // uploaded and downloadable
   FAILED // the agent could not collect it, or never answered
+}
+
+/// An app whose installed version is worth seeing across the fleet, without
+/// Magnemite updating it.
+///
+/// The scanner is the case this exists for: nothing here installs it, but
+/// "which boxes are on which build of it" is the same question the fleet table
+/// already answers for Pokémon GO. Adding one puts it in the agent's tracked
+/// list — so every box reports its version on each heartbeat — and adds a
+/// column.
+model WatchedPackage {
+  id          String  @id @default(cuid())
+  packageName String  @unique
+  /// Column header. Falls back to the last dotted segment of the package name.
+  label       String?
+  /// Left-to-right order of the columns, lowest first.
+  position    Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// Installed version of each package we track, refreshed on every heartbeat.

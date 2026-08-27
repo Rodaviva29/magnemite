@@ -13,6 +13,9 @@ apps/docs/.source/
 
 # Prisma generated client
 packages/db/generated/
+# Generated from schema.base.prisma + datasource.<provider>.prisma by
+# prisma.config.ts — do not edit or commit directly.
+packages/db/prisma/schema.prisma
 
 # Go agent build output
 agent/bin/

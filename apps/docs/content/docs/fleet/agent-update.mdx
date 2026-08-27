@@ -18,7 +18,7 @@ module does not need reinstalling — it only ever delivered the binary and the
 sed -i 's/^agent=.*/agent=0.1.5/' VERSION
 git commit -am "agent 0.1.5" && git push
 # then redeploy the hub
-docker compose up -d --build hub
+docker compose --env-file .env -f deploy/compose.yml up -d --build hub
 ```
 
 That is the whole release. The hub's image cross-compiles the agent for arm64
@@ -107,7 +107,8 @@ curl -X POST http://hub:3001/internal/devices/<deviceId>/agent-update \
 
 <Callout type="warn">
   `/internal/*` is never routed by the edge — it is reachable only over the compose network, so run
-  this from inside the stack (`docker compose exec hub …`), not from the internet.
+  this from inside the stack (`docker compose --env-file .env -f deploy/compose.yml exec hub …`),
+  not from the internet.
 </Callout>
 
 ## When you do need the module again

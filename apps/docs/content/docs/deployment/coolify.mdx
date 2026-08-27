@@ -6,7 +6,7 @@ icon: Cloud
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-`docker-compose.coolify.yml` lets Coolify's proxy terminate TLS and keeps a
+`deploy/compose.coolify.yml` lets Coolify's proxy terminate TLS and keeps a
 small Caddy of our own (`edge`) in front of the hub. It uses **two domains**
 rather than path routing, because the agents and the dashboard are separate
 audiences.
@@ -24,7 +24,7 @@ audiences.
 
 ### Create the resource
 
-**New Resource → Docker Compose**, pointed at `docker-compose.coolify.yml`.
+**New Resource → Docker Compose**, pointed at `deploy/compose.coolify.yml`.
 
 </Step>
 

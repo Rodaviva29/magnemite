@@ -109,11 +109,17 @@ function checkHub(): IntegrationCheck {
 /**
  * The server's own version, as it reports it.
  *
- * `SHOW server_version` rather than `version()`: the latter is a paragraph of
- * build flags, and the number is the part anyone reads.
+ * Postgres: `SHOW server_version` rather than `version()` — the latter is a
+ * paragraph of build flags, and the number is the part anyone reads. MySQL
+ * and MariaDB have no `SHOW server_version`, but `SELECT VERSION()` already
+ * returns just the short string (MariaDB's even says so: `10.11.6-MariaDB`).
  */
-async function postgresVersion(): Promise<string> {
+async function databaseVersion(): Promise<string> {
   try {
+    if (env.DB_PROVIDER === "mysql") {
+      const rows = await prisma.$queryRaw<{ version: string }[]>`SELECT VERSION() as version`;
+      return rows[0]?.version ?? "unknown";
+    }
     const rows = await prisma.$queryRaw<{ server_version: string }[]>`SHOW server_version`;
     return rows[0]?.server_version ?? "unknown";
   } catch {
@@ -127,23 +133,24 @@ function prismaVersion(): string {
 }
 
 async function checkDatabase(): Promise<IntegrationCheck> {
+  const engine = env.DB_PROVIDER === "mysql" ? "MariaDB/MySQL" : "Postgres";
   try {
     const { ms } = await timed(() => prisma.$queryRaw`SELECT 1`);
     const [devices, versions, jobs, server] = await Promise.all([
       prisma.device.count(),
       prisma.appVersion.count(),
       prisma.job.count(),
-      postgresVersion(),
+      databaseVersion(),
     ]);
 
     return {
       key: "database",
       label: "Database",
-      summary: `Postgres answering in ${ms} ms`,
+      summary: `${engine} answering in ${ms} ms`,
       state: ms > 500 ? "DEGRADED" : "OK",
       latencyMs: ms,
       facts: [
-        { label: "Postgres", value: server },
+        { label: engine, value: server },
         { label: "Prisma", value: prismaVersion() },
         { label: "Devices", value: String(devices) },
         { label: "Versions", value: String(versions) },
@@ -156,7 +163,7 @@ async function checkDatabase(): Promise<IntegrationCheck> {
     return {
       key: "database",
       label: "Database",
-      summary: "Postgres is not answering",
+      summary: `${engine} is not answering`,
       state: "DOWN",
       latencyMs: null,
       facts: [],

@@ -1,8 +1,8 @@
 import "server-only";
 
 /**
- * Client for the hub's /internal API. Reads go straight to Postgres from the
- * server components; this is only for the things that need a live socket or
+ * Client for the hub's /internal API. Reads go straight to the database from
+ * the server components; this is only for the things that need a live socket or
  * the scheduler — starting a rollout, cancelling a job, rebooting a box.
  */
 const HUB_URL = process.env.HUB_URL ?? "http://localhost:3001";
@@ -106,6 +106,8 @@ export const hub = {
   rotomDeviceAction: (id: string, action: "restart" | "reboot" | "enable" | "disable") =>
     call(`/internal/devices/${id}/rotom/${action}`),
   rotomSync: () => call<{ seen: number; matched: number }>("/internal/rotom/sync"),
+  /** Push a changed watched-package list to every connected box. */
+  refreshTrackedPackages: () => call<{ sent: number }>("/internal/tracked-packages/refresh"),
   cacheVersion: (id: string) => call(`/internal/versions/${id}/cache`),
   pruneVersions: (keepLatest?: number) =>
     call<{ removed: number }>("/internal/versions/prune", { keepLatest }),

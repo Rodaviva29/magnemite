@@ -19,7 +19,7 @@ icon: Users
   environment rather than in a file inside the container.
 
 ```sh
-docker compose exec hub pnpm --filter @magnemite/db run seed
+docker compose --env-file .env -f deploy/compose.yml exec hub pnpm --filter @magnemite/db run seed
 ```
 
 </Callout>

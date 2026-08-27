@@ -1,0 +1,54 @@
+---
+title: Watching another app's version
+description: An extra column in the fleet table for any package on the boxes.
+icon: Columns3
+---
+
+The fleet table shows the installed version of the app Magnemite updates. Any
+other package can have a column too — the scanner being the obvious one.
+
+**Settings → Fleet columns → Add column**: a package name, and optionally a
+shorter header.
+
+```
+com.pokemod.aegis    →  header "aegis"
+```
+
+The column sorts and searches like every other: typing a version into the fleet
+search finds the boxes on it, and clicking the header groups the fleet by which
+build it is running.
+
+## What it does and does not do
+
+Magnemite **does not update these**. It only asks each box what it has, which
+is the whole difference between this and an [app
+target](/docs/operations/sources): no rollouts, no versions page, no
+auto-update policy. Adding one is free — it is a name in a list the agents
+already report against.
+
+|                                  | Watched package | App target |
+| -------------------------------- | --------------- | ---------- |
+| Version shown in the fleet table | yes             | yes        |
+| Rolled out by Magnemite          | no              | yes        |
+| Needs a source feed              | no              | yes        |
+
+## How the value gets there
+
+The hub keeps one list of packages worth reporting — the app targets plus
+these — and hands it to each agent in its `welcome`. Every heartbeat then
+carries the installed version of each.
+
+Adding a column pushes that list to every box that is connected right now, so
+the column fills in on the next heartbeat rather than whenever each box happens
+to reconnect. A box that is offline picks it up when it comes back.
+
+An empty cell means the box has not reported that package: either it is not
+installed, or that box has not been heard from since the column was added.
+**Settings → Fleet columns** shows how many boxes have answered for each one,
+which tells the two apart.
+
+## Removing one
+
+Removing the column stops the agents reporting that package. The versions
+already recorded stay in the database, and the device page keeps listing every
+package a box reported — the column is a view, not the record.

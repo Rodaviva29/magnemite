@@ -8,6 +8,7 @@ import { prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
+import { readApkInfo } from "./apkInfo.js";
 import { artifactFilename, ensureArtifactDir } from "./artifacts.js";
 import { wrapAsBundle } from "./zip.js";
 
@@ -32,9 +33,13 @@ export type UploadInput = {
   stream: Readable;
   /** Name the browser sent, used only to decide whether to wrap it. */
   filename: string;
-  packageName: string;
-  /** What the operator calls this build, e.g. "1.4.2" or "2026-08-26 hotfix". */
-  version: string;
+  /** Left empty, the package name is read out of the file's own manifest. */
+  packageName?: string | null;
+  /**
+   * What the operator calls this build, e.g. "1.4.2" or "2026-08-26 hotfix".
+   * Left empty, the manifest's versionName is used.
+   */
+  version?: string | null;
   displayName?: string | null;
   arch?: string | null;
   note?: string | null;
@@ -50,6 +55,8 @@ export type UploadResult = {
   sizeBytes: number;
   sha256: string;
   wrapped: boolean;
+  /** True when the package name or version came from the file, not the form. */
+  detected: boolean;
 };
 
 /**
@@ -75,13 +82,12 @@ function needsWrapping(filename: string): boolean {
 }
 
 export async function storeUpload(input: UploadInput): Promise<UploadResult> {
-  const packageName = input.packageName.trim();
-  const version = input.version.trim();
+  const typedPackage = (input.packageName ?? "").trim();
+  const typedVersion = (input.version ?? "").trim();
 
-  if (!PACKAGE_NAME.test(packageName)) {
-    throw new Error(`"${packageName}" is not an Android package name`);
+  if (typedPackage && !PACKAGE_NAME.test(typedPackage)) {
+    throw new Error(`"${typedPackage}" is not an Android package name`);
   }
-  if (!version) throw new Error("a version label is required");
 
   const arch = (input.arch ?? "").trim() || "arm64-v8a";
   const wrapped = needsWrapping(input.filename);
@@ -106,6 +112,35 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
   if (received === 0) {
     await fs.rm(incoming, { force: true });
     throw new Error("the upload was empty");
+  }
+
+  // --- ask the file what it is --------------------------------------------
+  // An APK carries its package and version in its manifest, so an operator
+  // typing them again is an operator with a chance to get them wrong. What
+  // they did type still wins: a label like "2026-08-26 hotfix" is a deliberate
+  // choice the file cannot express.
+  const manifest = await readApkInfo(incoming);
+
+  const packageName = typedPackage || (manifest.packageName ?? "");
+  // versionName is what people call a version, but it is optional in the
+  // manifest — a build that only declares versionCode is still a build, and
+  // the number it does have beats making the operator go and find one.
+  const version = typedVersion || manifest.versionName || (manifest.versionCode ?? "");
+  const detected =
+    (!typedPackage && Boolean(manifest.packageName)) ||
+    (!typedVersion && Boolean(manifest.versionName ?? manifest.versionCode));
+
+  if (!PACKAGE_NAME.test(packageName)) {
+    await fs.rm(incoming, { force: true });
+    throw new Error(
+      packageName
+        ? `"${packageName}" is not an Android package name`
+        : "could not read a package name out of this file — type one in",
+    );
+  }
+  if (!version) {
+    await fs.rm(incoming, { force: true });
+    throw new Error("could not read a version out of this file — type a label in");
   }
 
   // --- shape it like every other artifact ---------------------------------
@@ -150,6 +185,7 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
         artifactPath: finalPath,
         sizeBytes: BigInt(size),
         sha256,
+        buildCode: manifest.versionCode,
         status: "READY",
         cacheProgress: 100,
         error: null,
@@ -159,6 +195,9 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
       create: {
         appTargetId: target.id,
         version,
+        // Android compares this, not the marketing string, and the sources
+        // record it too — so a manual upload should not be the one hole.
+        buildCode: manifest.versionCode,
         source: "MANUAL",
         arch,
         // There is no upstream to re-fetch from: the artifact is the upload.
@@ -189,6 +228,7 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
       sizeBytes: size,
       sha256,
       wrapped,
+      detected,
     };
   } catch (err) {
     await fs.rm(incoming, { force: true });

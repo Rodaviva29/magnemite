@@ -11,6 +11,15 @@ VERSION     ?= $(shell awk -F= '/^agent=/ { print $$2 }' VERSION)
 # the version: 0.1.2 -> 102.
 VERSIONCODE := $(shell echo "$(VERSION)" | awk -F. '{ print $$1 * 10000 + $$2 * 100 + $$3 }')
 GO_IMAGE    ?= golang:1.23-alpine
+# The compose files live under deploy/, so every target names one rather than
+# relying on a docker-compose.yml in the working directory. --env-file too:
+# Compose looks for .env next to the compose file, and this project's lives at
+# the repo root, where everything else reads it from.
+#
+# COMPOSE_FILE picks the datasource: deploy/compose.yml (Postgres, default) or
+# deploy/compose.mariadb.yml (MariaDB) -- e.g. `make up COMPOSE_FILE=deploy/compose.mariadb.yml`.
+COMPOSE_FILE ?= deploy/compose.yml
+COMPOSE     := docker compose --env-file .env -f $(COMPOSE_FILE)
 ROOT        := $(shell pwd)
 LDFLAGS     := -s -w -X main.version=$(VERSION)
 DOCKER_GO   := docker run --rm -v "$(ROOT)/agent":/src -w /src $(GO_IMAGE)
@@ -58,23 +67,23 @@ module: agent ## Package the Magisk module zip into dist/
 
 .PHONY: up
 up: ## Start the whole stack
-	docker compose up -d --build
+	$(COMPOSE) up -d --build
 
 .PHONY: down
 down: ## Stop the stack
-	docker compose down
+	$(COMPOSE) down
 
 .PHONY: logs
 logs: ## Follow hub and web logs
-	docker compose logs -f hub web
+	$(COMPOSE) logs -f hub web
 
 .PHONY: migrate
 migrate: ## Apply database migrations inside the hub container
-	docker compose exec hub pnpm --filter @magnemite/db run deploy
+	$(COMPOSE) exec hub pnpm --filter @magnemite/db run deploy
 
 .PHONY: seed
 seed: ## Seed the admin user, app target and first enrollment token
-	docker compose exec hub pnpm --filter @magnemite/db run seed
+	$(COMPOSE) exec hub pnpm --filter @magnemite/db run seed
 
 .PHONY: typecheck
 typecheck: ## Typecheck hub and web

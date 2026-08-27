@@ -14,8 +14,18 @@ import { Progress } from "@/components/ui/progress";
 import { SearchInput } from "@/components/ui/search-input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableSortHead,
+} from "@/components/ui/table";
 import { OnlineDot } from "@/components/status";
 import { formatBytes, formatRelative } from "@/lib/format";
+import { useTableSort } from "@/lib/table-sort";
 import { cn } from "@/lib/utils";
 
 export type FleetPackage = {
@@ -31,6 +41,10 @@ export type ManualDevice = {
   online: boolean;
   groupId: string | null;
   groupName: string | null;
+  model: string | null;
+  androidVersion: string | null;
+  freeBytes: number | null;
+  lastSeenAt: string | null;
   /** Reported version per package, for the "currently on" column. */
   installed: Record<string, string>;
 };
@@ -112,18 +126,37 @@ export function ManualInstall({
     [builds, packageName],
   );
 
+  // Sorted like the fleet table, because this is the fleet — the question
+  // "which boxes" is the same one, asked while holding a file.
+  const { headProps, sortRows } = useTableSort<
+    "device" | "group" | "version" | "free" | "lastSeen",
+    ManualDevice
+  >(
+    {
+      device: (d) => d.name,
+      group: (d) => d.groupName,
+      version: (d) => (packageName ? (d.installed[packageName] ?? null) : null),
+      free: (d) => d.freeBytes,
+      lastSeen: (d) => d.lastSeenAt,
+    },
+    { key: "device", direction: "asc" },
+  );
+
   const visibleDevices = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return devices.filter((device) => {
+    const filtered = devices.filter((device) => {
       if (groupFilter && device.groupId !== groupFilter) return false;
       if (!q) return true;
       return (
         device.name.toLowerCase().includes(q) ||
         device.serial.toLowerCase().includes(q) ||
-        (device.groupName?.toLowerCase().includes(q) ?? false)
+        (device.model?.toLowerCase().includes(q) ?? false) ||
+        (device.groupName?.toLowerCase().includes(q) ?? false) ||
+        (packageName ? (device.installed[packageName]?.toLowerCase().includes(q) ?? false) : false)
       );
     });
-  }, [devices, query, groupFilter]);
+    return sortRows(filtered);
+  }, [devices, query, groupFilter, packageName, sortRows]);
 
   const allVisiblePicked =
     visibleDevices.length > 0 && visibleDevices.every((d) => picked.has(d.id));
@@ -161,15 +194,15 @@ export function ManualInstall({
    * upload progress.
    */
   function upload() {
-    if (!file || !packageName || !versionLabel.trim()) return;
+    if (!file) return;
     setUploadError(null);
     setUploadPct(0);
 
-    const query = new URLSearchParams({
-      packageName,
-      version: versionLabel.trim(),
-      filename: file.name,
-    });
+    // Both are optional: the hub reads the package name and version out of the
+    // file's own manifest, and only falls back to these when they are given.
+    const query = new URLSearchParams({ filename: file.name });
+    if (packageName) query.set("packageName", packageName);
+    if (versionLabel.trim()) query.set("version", versionLabel.trim());
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/manual/upload?${query.toString()}`);
@@ -252,7 +285,7 @@ export function ManualInstall({
   }
 
   const uploading = uploadPct !== null;
-  const canUpload = Boolean(file && packageName && versionLabel.trim()) && !uploading && canOperate;
+  const canUpload = Boolean(file) && !uploading && canOperate;
 
   return (
     <div className="flex flex-col gap-5">
@@ -312,15 +345,16 @@ export function ManualInstall({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="version">Version label</Label>
+            <Label htmlFor="version">Version label (optional)</Label>
             <Input
               id="version"
               value={versionLabel}
               onChange={(e) => setVersionLabel(e.target.value)}
-              placeholder="1.4.2"
+              placeholder="read from the file"
             />
             <p className="text-xs text-muted-foreground">
-              How this build is listed and what the job reports. Re-using a label replaces that
+              Left empty, the version inside the APK is used. Fill it in to name a build something
+              the file cannot say — &ldquo;2026-08-27 hotfix&rdquo;. Re-using a label replaces that
               build.
             </p>
           </div>
@@ -514,39 +548,87 @@ export function ManualInstall({
             </span>
           </div>
 
-          <ul className="flex max-h-80 flex-col overflow-y-auto rounded-lg border border-border">
-            {visibleDevices.length === 0 ? (
-              <li className="px-3 py-6 text-center text-sm text-muted-foreground">
-                No approved device matches this filter.
-              </li>
-            ) : null}
-            {visibleDevices.map((device) => {
-              const current = packageName ? device.installed[packageName] : undefined;
-              return (
-                <li
-                  key={device.id}
-                  className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-0"
-                >
-                  <Checkbox
-                    checked={picked.has(device.id)}
-                    onCheckedChange={() => toggleDevice(device.id)}
-                    aria-label={`Select ${device.name}`}
-                    disabled={!canOperate}
-                  />
-                  <OnlineDot online={device.online} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{device.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {device.groupName ?? "no group"} · {device.serial}
-                    </p>
-                  </div>
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                    {current ?? "not installed"}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="rounded-lg border border-border">
+            <Table containerClassName="max-h-80">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableSortHead {...headProps("device")}>Device</TableSortHead>
+                  <TableSortHead {...headProps("group")}>Group</TableSortHead>
+                  <TableSortHead {...headProps("version")}>
+                    {packageName ? packageName.split(".").pop() : "Installed"}
+                  </TableSortHead>
+                  <TableSortHead {...headProps("free")} align="right">
+                    Free
+                  </TableSortHead>
+                  <TableSortHead {...headProps("lastSeen")}>Last seen</TableSortHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibleDevices.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      No approved device matches this filter.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                {visibleDevices.map((device) => {
+                  const current = packageName ? device.installed[packageName] : undefined;
+                  return (
+                    <TableRow
+                      key={device.id}
+                      // The whole row is the hit target: picking twenty boxes
+                      // should not mean twenty small checkboxes.
+                      className="cursor-pointer"
+                      onClick={() => {
+                        if (canOperate) toggleDevice(device.id);
+                      }}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={picked.has(device.id)}
+                          onCheckedChange={() => toggleDevice(device.id)}
+                          aria-label={`Select ${device.name}`}
+                          disabled={!canOperate}
+                        />
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <OnlineDot online={device.online} />
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{device.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {device.model ?? device.serial}
+                              {device.androidVersion ? ` · Android ${device.androidVersion}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="text-muted-foreground">
+                        {device.groupName ?? "—"}
+                      </TableCell>
+
+                      <TableCell className="font-mono text-xs">
+                        {current ?? (
+                          <span className="font-sans text-muted-foreground">not installed</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
+                        {device.freeBytes === null ? "—" : formatBytes(device.freeBytes)}
+                      </TableCell>
+
+                      <TableCell className="text-xs text-muted-foreground">
+                        {device.lastSeenAt ? formatRelative(device.lastSeenAt) : "never"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 

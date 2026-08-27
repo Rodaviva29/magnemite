@@ -1,7 +1,12 @@
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { compareVersions } from "@/lib/format";
-import { FleetTable, type DeviceRow, type VersionOption } from "@/components/fleet-table";
+import {
+  FleetTable,
+  type DeviceRow,
+  type VersionOption,
+  type WatchedColumn,
+} from "@/components/fleet-table";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +25,16 @@ export default async function FleetPage() {
   const target = await prisma.appTarget.findFirst({ where: { enabled: true, manual: false } });
   const packageName = target?.packageName ?? "com.nianticlabs.pokemongo";
 
+  // Extra version columns, configured in Settings. Their packages are fetched
+  // alongside the target's, so a device row is still one query.
+  const watched = await prisma.watchedPackage.findMany({ orderBy: { position: "asc" } });
+  const watchedNames = watched.map((row) => row.packageName);
+
   const [devices, groups, versions] = await Promise.all([
     prisma.device.findMany({
       include: {
         group: { select: { id: true, name: true } },
-        packages: { where: { packageName } },
+        packages: { where: { packageName: { in: [packageName, ...watchedNames] } } },
         jobs: {
           where: { state: { in: [...ACTIVE_OR_QUEUED] } },
           orderBy: { queuedAt: "desc" },
@@ -43,6 +53,7 @@ export default async function FleetPage() {
 
   const rows: DeviceRow[] = devices.map((device) => {
     const job = device.jobs[0];
+    const installed = new Map(device.packages.map((pkg) => [pkg.packageName, pkg]));
     return {
       id: device.id,
       name: device.name,
@@ -53,7 +64,15 @@ export default async function FleetPage() {
       androidVersion: device.androidVersion,
       agentVersion: device.agentVersion,
       groupName: device.group?.name ?? null,
-      installedVersion: device.packages[0]?.versionName ?? null,
+      installedVersion: installed.get(packageName)?.versionName ?? null,
+      watchedVersions: Object.fromEntries(
+        watchedNames.map((name) => {
+          const pkg = installed.get(name);
+          // Uninstalled is not the same as never reported, and both read as an
+          // empty cell — the count in Settings is where that distinction lives.
+          return [name, pkg?.installed ? (pkg.versionName ?? null) : null];
+        }),
+      ),
       freeBytes: device.freeBytes === null ? null : Number(device.freeBytes),
       lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
       rotom: device.rotomDeviceId
@@ -83,6 +102,11 @@ export default async function FleetPage() {
 
   const latestVersion = versionOptions[0]?.version ?? null;
 
+  const watchedColumns: WatchedColumn[] = watched.map((row) => ({
+    packageName: row.packageName,
+    label: row.label || (row.packageName.split(".").pop() ?? row.packageName),
+  }));
+
   return (
     <FleetTable
       rows={rows}
@@ -90,6 +114,7 @@ export default async function FleetPage() {
       versions={versionOptions}
       latestVersion={latestVersion}
       packageName={packageName}
+      watchedColumns={watchedColumns}
       canOperate={user.role !== "VIEWER"}
     />
   );

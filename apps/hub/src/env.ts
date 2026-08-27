@@ -3,6 +3,8 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   DATABASE_URL: z.string().min(1),
+  /** Which Prisma connector the database speaks. "mysql" also covers MariaDB. */
+  DB_PROVIDER: z.enum(["postgresql", "mysql"]).default("postgresql"),
   HUB_PORT: z.coerce.number().int().positive().default(3001),
   HUB_HOST: z.string().default("0.0.0.0"),
   /** Shared secret the dashboard uses on /internal/* calls. */

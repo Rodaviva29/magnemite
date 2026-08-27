@@ -3,6 +3,7 @@ import type { z } from "zod";
 import { prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
+import { onlineDeviceIds, sendTo } from "../registry.js";
 
 type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 type DeviceMetrics = z.infer<typeof deviceMetricsSchema>;
@@ -151,11 +152,49 @@ export async function sweepOffline(timeoutSeconds: number) {
   return stale.length;
 }
 
-/** Packages the agent should report on every heartbeat. */
+/**
+ * Packages the agent should report on every heartbeat.
+ *
+ * Two sources: the apps Magnemite updates, and the ones it only watches — the
+ * scanner and friends, which nothing here installs but whose version is worth
+ * seeing across the fleet.
+ */
 export async function trackedPackages(): Promise<string[]> {
-  const targets = await prisma.appTarget.findMany({
-    where: { enabled: true },
-    select: { packageName: true },
+  const [targets, watched] = await Promise.all([
+    prisma.appTarget.findMany({ where: { enabled: true }, select: { packageName: true } }),
+    prisma.watchedPackage.findMany({ select: { packageName: true } }),
+  ]);
+  return [...new Set([...targets, ...watched].map((row) => row.packageName))];
+}
+
+/**
+ * Push a changed tracked list to every box that is connected.
+ *
+ * The list rides in `welcome`, which an agent otherwise only sees when it
+ * connects — so without this, a package added in Settings would stay empty in
+ * the fleet table until each box happened to reconnect. The agent takes a
+ * `welcome` at any point and replaces its list with it.
+ */
+export async function broadcastTrackedPackages(): Promise<number> {
+  const packages = await trackedPackages();
+  const devices = await prisma.device.findMany({
+    where: { id: { in: onlineDeviceIds() } },
+    select: { id: true, name: true, approved: true },
   });
-  return targets.map((t) => t.packageName);
+
+  let sent = 0;
+  for (const device of devices) {
+    const ok = sendTo(device.id, {
+      type: "welcome",
+      deviceId: device.id,
+      name: device.name,
+      approved: device.approved,
+      heartbeatSeconds: 20,
+      trackedPackages: packages,
+    });
+    if (ok) sent += 1;
+  }
+
+  log.info({ sent, packages }, "tracked packages pushed to the fleet");
+  return sent;
 }
