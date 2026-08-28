@@ -16,6 +16,11 @@ FROM caddy:2-alpine
 ARG CADDYFILE=Caddyfile
 COPY ${CADDYFILE} /etc/caddy/Caddyfile
 
+# Metadata, not a binding: what it fixes is the inherited claim. caddy:2-alpine
+# exposes 80, 443 and 2019, and both Caddyfiles here listen on 8080 and nothing
+# else, so without this line the image advertises three ports it never opens.
+EXPOSE 8080
+
 # Fail the build rather than the deploy: a Caddyfile that does not parse should
 # never reach a running container.
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
