@@ -16,10 +16,18 @@ FROM caddy:2-alpine
 ARG CADDYFILE=Caddyfile
 COPY ${CADDYFILE} /etc/caddy/Caddyfile
 
-# Both Caddyfiles listen on :{$PORT} and nothing else. caddy:2-alpine inherits
-# EXPOSE 80, 443 and 2019, so without these two lines the image advertises
-# three ports it never opens and none of the one it does -- and Coolify picks
-# the routed port off exactly this metadata when it generates a domain.
+# Metadata only: both Caddyfiles hardcode :8080, and Caddy reads neither of
+# these. They are here for whoever inspects the image -- Coolify among them,
+# which guesses a service's port off exactly this when it generates a domain.
+#
+# EXPOSE adds to the inherited claim rather than replacing it: caddy:2-alpine
+# already exposes 80, 443 and 2019, none of which anything here opens, and a
+# child image cannot take those back.
+#
+# PORT is deliberately not wired into the Caddyfile. Hanging the listener off
+# an environment variable means anything that sets PORT in this container --
+# Coolify does, for some resource types -- moves Caddy while the healthcheck
+# and the proxy still say 8080, which is a 502 for the whole fleet.
 ENV PORT=8080
 EXPOSE 8080
 
