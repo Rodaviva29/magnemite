@@ -29,8 +29,14 @@ services:
       #   MAGNEMITE_DASHBOARD_URL -- what a *person* reaches. Only the links in
       #                              Discord alerts are built from it; on the
       #                              edge's domain those would 404.
-      MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
-      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL}
+      #
+      # Each falls back to the domain Coolify generates from the service's
+      # SERVICE_URL_* declaration. Setting either by hand in the Environment
+      # tab overrides it -- and is worth doing after editing a domain in the
+      # UI, because the generic SERVICE_URL_* is not always refreshed with the
+      # port-carrying one: https://github.com/coollabsio/coolify/issues/8912
+      MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL:-${SERVICE_URL_EDGE}}
+      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL:-${SERVICE_URL_WEB}}
       ARTIFACT_DIR: /data/artifacts
       # The edge serves /files/* off the shared volume, so Node never does.
       SERVE_ARTIFACTS: "false"
@@ -66,6 +72,19 @@ services:
       hub:
         condition: service_started
     environment:
+      # Declared with no value on purpose: Coolify fills it from the Domains
+      # tab. Writing `${SERVICE_URL_EDGE_8080}` here would interpolate a
+      # variable that does not exist yet and blank it out. Map form, not a
+      # list item -- Coolify's compose preview turns `- SERVICE_URL_EDGE_8080`
+      # into a numeric key and the deploy fails with "non-string key in
+      # services.edge.environment: 0".
+      #
+      # The port goes in the *name*: `_8080` is what tells the proxy which
+      # container port the domain routes to, so no `:8080` is typed into the
+      # Domains tab. One declaration yields four variables -- the two carrying
+      # the port, for routing, and the generic SERVICE_URL_EDGE /
+      # SERVICE_FQDN_EDGE, which is what the apps below read.
+      SERVICE_URL_EDGE_8080:
       HUB_PORT: 3001
     volumes:
       # Read-only: Caddy streams the cached .apkm files straight off here, so
@@ -91,12 +110,14 @@ services:
       hub:
         condition: service_started
     environment:
+      # Same shape as the edge above: no value, port in the name.
+      SERVICE_URL_WEB_3000:
       NODE_ENV: production
       DB_PROVIDER: ${DB_PROVIDER:-mysql}
       DATABASE_URL: ${DATABASE_URL:-mysql://<user>:<password>@<host>:3306/<database>}
       AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
-      MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
-      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL}
+      MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL:-${SERVICE_URL_EDGE}}
+      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL:-${SERVICE_URL_WEB}}
       HUB_URL: http://hub:3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
     healthcheck:
@@ -115,6 +136,9 @@ services:
       dockerfile: apps/docs/Dockerfile
     restart: unless-stopped
     environment:
+      # Same shape again. Nothing reads the value -- the site's own links are
+      # relative -- it exists only so Coolify routes the domain to 3002.
+      SERVICE_URL_DOCS_3002:
       NODE_ENV: production
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3002/ || exit 1"]

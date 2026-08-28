@@ -15,13 +15,13 @@ resource's **Environment** tab.
 
 ## URLs
 
-| Variable                  | Default                   | What it is                                                                                                                           |
-| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, plain HTTP. Your proxy terminates TLS and forwards here. Compose only.                                 |
-| `MAGNEMITE_PUBLIC_URL`    | —                         | Base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can reach. On Coolify, the edge domain. |
-| `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin — auth callbacks and alert links. **Required on Coolify**, which splits the two domains.                  |
-| `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Only when neither of the above is the right origin for auth callbacks. A bare host with no scheme is accepted.                       |
-| `HUB_URL`                 | `http://hub:3001`         | Where the dashboard reaches the hub's internal API, over the compose network.                                                        |
+| Variable                  | Default                   | What it is                                                                                                                                                                                                          |
+| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, plain HTTP. Your proxy terminates TLS and forwards here. Compose only.                                                                                                                |
+| `MAGNEMITE_PUBLIC_URL`    | —                         | Base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can reach. On Coolify it defaults to the edge's generated domain (`SERVICE_URL_EDGE`); set it to override a stale one. |
+| `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin — auth callbacks and alert links. On Coolify it defaults to the web service's generated domain (`SERVICE_URL_WEB`), which is a different host from the agents' one.                      |
+| `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Only when neither of the above is the right origin for auth callbacks. A bare host with no scheme is accepted.                                                                                                      |
+| `HUB_URL`                 | `http://hub:3001`         | Where the dashboard reaches the hub's internal API, over the compose network.                                                                                                                                       |
 
 ## Database
 
