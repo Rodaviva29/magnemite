@@ -191,6 +191,7 @@ export function DeviceHistory({
         />
         <Select
           aria-label="Filter by state"
+          placeholder="Select state…"
           value={state}
           onValueChange={setState}
           className="w-40"

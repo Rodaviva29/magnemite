@@ -105,6 +105,7 @@ export function DeviceControls({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Select
           aria-label="Group"
+          placeholder="Select group…"
           value={groupId ?? ""}
           disabled={pending}
           className="w-40"

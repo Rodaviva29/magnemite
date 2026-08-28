@@ -281,6 +281,7 @@ export function FleetTable({
 
         <Select
           aria-label="Filter by group"
+          placeholder="Select group…"
           value={group}
           onValueChange={setGroup}
           className="w-40"
@@ -608,6 +609,7 @@ function RolloutDialog({
               <Select
                 id="rolloutAppTarget"
                 aria-label="App to roll out"
+                placeholder="Select target…"
                 value={activeAppId}
                 onValueChange={setAppTargetId}
                 options={apps.map((app) => ({ value: app.id, label: app.name }))}
@@ -625,6 +627,7 @@ function RolloutDialog({
                 key={activeAppId}
                 id="appVersionId"
                 name="appVersionId"
+                placeholder="Select version…"
                 required
                 defaultValue={appVersions[0]?.id}
                 options={appVersions.map((v) => ({

@@ -349,6 +349,7 @@ export function ManualInstall({
             <Label htmlFor="package">Package</Label>
             <Select
               id="package"
+              placeholder="Select package…"
               value={choice}
               onValueChange={setChoice}
               options={[
@@ -568,6 +569,7 @@ export function ManualInstall({
             <SearchInput value={query} onChange={setQuery} placeholder="Search name, serial…" />
             <Select
               aria-label="Filter by group"
+              placeholder="Select group…"
               value={groupFilter}
               onValueChange={setGroupFilter}
               className="w-44"

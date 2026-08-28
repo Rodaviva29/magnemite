@@ -52,6 +52,7 @@ const OPEN_STATUSES: RolloutStatus[] = ["PENDING", "CANARY", "SOAKING", "RUNNING
 export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [target, setTarget] = useState("");
 
   const { headProps, sort, sortRows } = useTableSort<SortKey, RolloutRow>(
     {
@@ -68,9 +69,20 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
     { key: "startedAt", direction: "desc" },
   );
 
+  // Derived from the rows rather than passed in: the filter should only ever
+  // offer apps that actually have a rollout here.
+  const targets = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const row of rows) names.set(row.targetPackage, row.targetName);
+    return [...names.entries()]
+      .map(([packageName, name]) => ({ packageName, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = rows.filter((row) => {
+      if (target && row.targetPackage !== target) return false;
       if (status === "open" && !OPEN_STATUSES.includes(row.status)) return false;
       if (status && status !== "open" && row.status !== status) return false;
       if (!q) return true;
@@ -84,10 +96,10 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
       );
     });
     return sortRows(filtered);
-  }, [rows, query, status, sortRows]);
+  }, [rows, query, status, target, sortRows]);
 
   const pagination = useTablePagination(matching, {
-    resetKey: `${query}|${status}|${sort.key}|${sort.direction}`,
+    resetKey: `${query}|${status}|${target}|${sort.key}|${sort.direction}`,
   });
   const visible = pagination.rows;
 
@@ -114,6 +126,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
         />
         <Select
           aria-label="Filter by status"
+          placeholder="Select status…"
           value={status}
           onValueChange={setStatus}
           className="w-44"
@@ -125,6 +138,22 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
             { value: "CANCELLED", label: "Cancelled" },
           ]}
         />
+        {/* Shown whenever there is anything to filter, not only once a second
+            app exists — a control that appears the day a target is added is a
+            control nobody knows is there. */}
+        {targets.length > 0 ? (
+          <Select
+            aria-label="Filter by app target"
+            placeholder="Select target…"
+            value={target}
+            onValueChange={setTarget}
+            className="w-52"
+            options={[
+              { value: "", label: "All apps" },
+              ...targets.map((t) => ({ value: t.packageName, label: t.name })),
+            ]}
+          />
+        ) : null}
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">

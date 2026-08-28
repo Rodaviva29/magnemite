@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { SearchInput } from "@/components/ui/search-input";
+import { Select } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -87,6 +88,7 @@ export function VersionsTable({
   // every action on this page, including the per-row Cache and Approve.
   const [running, setRunning] = useState<"poll" | "prune" | null>(null);
   const [query, setQuery] = useState("");
+  const [target, setTarget] = useState("");
 
   const { headProps, sort, sortRows } = useTableSort<SortKey, VersionRow>(
     {
@@ -103,10 +105,21 @@ export function VersionsTable({
     { key: "published", direction: "desc" },
   );
 
+  // Derived from the rows rather than passed in: the filter should only ever
+  // offer apps that actually have a version here.
+  const targets = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const row of rows) names.set(row.targetPackage, row.targetName);
+    return [...names.entries()]
+      .map(([packageName, name]) => ({ packageName, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const byTarget = target ? rows.filter((row) => row.targetPackage === target) : rows;
     const filtered = q
-      ? rows.filter(
+      ? byTarget.filter(
           (row) =>
             row.version.toLowerCase().includes(q) ||
             row.targetName.toLowerCase().includes(q) ||
@@ -116,14 +129,14 @@ export function VersionsTable({
             row.status.toLowerCase().includes(q) ||
             (row.buildCode?.toLowerCase().includes(q) ?? false),
         )
-      : rows;
+      : byTarget;
     return sortRows(filtered);
-  }, [rows, query, sortRows]);
+  }, [rows, query, target, sortRows]);
 
   const pagination = useTablePagination(matching, {
     // Anything that reshuffles the list starts the reader at the top again;
     // a background refresh of the same list does not.
-    resetKey: `${query}|${sort.key}|${sort.direction}`,
+    resetKey: `${query}|${target}|${sort.key}|${sort.direction}`,
   });
   const visible = pagination.rows;
   const cached = rows.filter((r) => r.status === "READY").length;
@@ -180,12 +193,30 @@ export function VersionsTable({
         <p className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm">{message}</p>
       ) : null}
 
-      <SearchInput
-        value={query}
-        onChange={setQuery}
-        placeholder="Search version, app, build, source, arch…"
-        className="max-w-md"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search version, app, build, source, arch…"
+          className="max-w-md"
+        />
+        {/* Shown whenever there is anything to filter, not only once a second
+            app exists — a control that appears the day a target is added is a
+            control nobody knows is there. */}
+        {targets.length > 0 ? (
+          <Select
+            aria-label="Filter by app target"
+            placeholder="Select target…"
+            value={target}
+            onValueChange={setTarget}
+            className="w-52"
+            options={[
+              { value: "", label: "All apps" },
+              ...targets.map((t) => ({ value: t.packageName, label: t.name })),
+            ]}
+          />
+        ) : null}
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <Table containerClassName="max-h-[62vh]">
