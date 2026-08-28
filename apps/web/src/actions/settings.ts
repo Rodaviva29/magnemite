@@ -325,7 +325,7 @@ export async function updateAppTarget(
   if (sent("soakMinutes")) data.soakMinutes = int("soakMinutes", 30);
   if (sent("maxAttempts")) data.maxAttempts = Math.max(1, int("maxAttempts", 3));
   if (sent("retryBackoffSeconds")) data.retryBackoffSeconds = int("retryBackoffSeconds", 60);
-  // Used to be one number for the whole fleet in Settings → Hub. 0 is a real
+  // Used to be one number for the whole fleet in Settings → Tuning. 0 is a real
   // value here — it means ship as soon as a build is discovered — which is why
   // it goes through the same `sent` guard as the rest of the policy.
   if (sent("updateCooldownMinutes")) data.updateCooldownMinutes = int("updateCooldownMinutes", 0);

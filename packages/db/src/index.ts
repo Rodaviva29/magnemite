@@ -267,13 +267,6 @@ export type MonitorSettingsValues = {
   /** The master switch. Off, so upgrading a fleet changes nothing by itself. */
   enabled: boolean;
   /**
-   * Seconds a box may be unreachable before it is worth saying so. Distinct
-   * from `deviceOfflineTimeoutSeconds`, which only decides when a box is
-   * *marked* offline — a box can be offline for a minute during its own
-   * reboot without anyone needing to hear about it.
-   */
-  unreachableAlertSeconds: number;
-  /**
    * Seconds between asking Rotom what it thinks of every box.
    *
    * Ignored entirely when the Rotom integration is off. When it is on, this is
@@ -319,7 +312,6 @@ export type MonitorSettingsValues = {
 
 const MONITOR_SETTINGS_DEFAULTS: MonitorSettingsValues = {
   enabled: false,
-  unreachableAlertSeconds: 300,
   rotomSyncSeconds: 60,
   rotomStaleSeconds: 600,
   rebootGraceSeconds: 600,

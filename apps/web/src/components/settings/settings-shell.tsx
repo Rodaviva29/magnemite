@@ -17,7 +17,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { cn } from "@/lib/utils";
 
 export type SettingsSectionId =
-  "hub" | "monitoring" | "apps" | "sources" | "columns" | "groups" | "enrollment";
+  "tuning" | "monitoring" | "apps" | "sources" | "columns" | "groups" | "enrollment";
 
 export type SettingsSection = {
   id: SettingsSectionId;
@@ -39,31 +39,49 @@ type Category = {
   terms: string[];
 };
 
-/** Ordered the way the fleet is set up: the hub first, then what it ships, then who joins. */
+/**
+ * Ordered the way the fleet is set up: the numbers first, then what it ships,
+ * then who joins.
+ *
+ * The first category is called Tuning rather than Hub because that is what it
+ * is: everything changed while the thing runs, as opposed to `.env`, which is
+ * what it needs to boot. It stopped being about the hub in particular the
+ * moment the monitoring ceilings moved onto it.
+ */
 const CATEGORIES: Category[] = [
   {
-    id: "hub",
-    label: "Hub",
+    id: "tuning",
+    label: "Tuning",
     icon: SlidersHorizontal,
-    summary: "Fleet-wide limits, polling and how long health history is kept.",
+    summary: "Fleet-wide limits, polling, and the ceilings monitoring acts inside.",
     terms: [
       "max concurrent jobs",
       "job stall timeout",
       "health sample interval",
       "history retention",
       "metrics",
+      "heartbeat",
+      "offline timeout",
+      // The monitoring knobs live on this tab now, so the words somebody
+      // would search for have to point here rather than at the rules.
+      "discord webhook",
+      "alerts",
+      "notifications",
+      "actions per hour",
+      "reboots per day",
+      "reboot grace",
+      "hub restart grace",
+      "rotom sync interval",
+      "rotom stale",
     ],
   },
   {
     id: "monitoring",
     label: "Monitoring",
     icon: Binoculars,
-    summary: "What counts as a box gone wrong, what to do about it, and who to tell.",
+    summary: "What counts as a box gone wrong, and what to do about it.",
     terms: [
       "automations",
-      "discord webhook",
-      "alerts",
-      "notifications",
       "rules",
       "escalation",
       "restart the scanner",
@@ -74,11 +92,10 @@ const CATEGORIES: Category[] = [
       "loop stalled",
       "unreachable",
       "rotom disconnected",
-      "rotom sync interval",
+      "threshold",
       "cooldown",
       "quiet hours",
-      "actions per hour",
-      "reboots per day",
+      "probe",
     ],
   },
   {
@@ -157,7 +174,7 @@ const CATEGORIES: Category[] = [
  * labels, not just the six headings.
  */
 export function SettingsShell({ sections }: { sections: SettingsSection[] }) {
-  const [active, setActive] = useState<SettingsSectionId>("hub");
+  const [active, setActive] = useState<SettingsSectionId>("tuning");
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLElement>(null);

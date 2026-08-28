@@ -101,7 +101,7 @@ export const SIGNALS: SignalMeta[] = [
   {
     value: "AGENT_OFFLINE",
     label: "Box is unreachable",
-    hint: "The box stopped answering the hub for longer than the unreachable delay. Nothing can be run on it, so the ladder can only tell you.",
+    hint: "The box stopped answering the hub for longer than the offline timeout. Nothing can be run on it, so the ladder can only tell you — raise the threshold to wait longer first.",
     icon: WifiOff,
     needsPackage: false,
     probe: "none",

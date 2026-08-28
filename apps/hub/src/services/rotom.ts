@@ -19,7 +19,7 @@ import { getMonitorSettings } from "./hubSettings.js";
  * three things, all read-only or operator-driven:
  *
  *  - `syncDevices` keeps each box's scanning state current, on the interval
- *    set in Settings → Hub;
+ *    set in Settings → Tuning;
  *  - monitoring reads that state as the `ROTOM_DISCONNECTED` signal, and can
  *    `restart` a scanner as a remediation;
  *  - the device page offers the same actions by hand.

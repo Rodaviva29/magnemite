@@ -45,7 +45,7 @@ press resume.
 
 | Setting                                           | Scope                               |
 | ------------------------------------------------- | ----------------------------------- |
-| **Settings → Hub settings → Max concurrent jobs** | The whole fleet. Default 10.        |
+| **Settings → Tuning → Max concurrent jobs** | The whole fleet. Default 10.        |
 | A group's own cap                                 | Lower, for a site on a thin uplink. |
 
 The cap counts devices downloading/installing, which is what actually
@@ -58,7 +58,7 @@ consumes your egress and their `/data`.
 | **Device offline**     | The job stays queued and dispatches the moment the agent reconnects. Nothing to retry by hand.                                                           |
 | **Job failed**         | Re-queued automatically up to the rollout's attempt limit, held for the retry backoff first. The bytes already on disk make the retry cheap.             |
 | **Attempts exhausted** | `Retry` and `Retry all failed` are in the UI.                                                                                                            |
-| **Job stalled**        | A box unplugged mid-install stops sending progress; after the job stall timeout (**Settings → Hub settings**, default 900 seconds) the hub re-queues it. |
+| **Job stalled**        | A box unplugged mid-install stops sending progress; after the job stall timeout (**Settings → Tuning**, default 900 seconds) the hub re-queues it. |
 | **Hub restarted**      | Jobs survive in Postgres; the scheduler picks them up on the next tick.                                                                                  |
 
 ## Rollout states

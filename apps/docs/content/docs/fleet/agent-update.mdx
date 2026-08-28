@@ -64,14 +64,14 @@ update.
 </Steps>
 
 Updates roll out in batches, capped by **concurrent agent updates** in
-**Settings → Hub** (5 by default). A box that was powered off for a month
+**Settings → Tuning** (5 by default). A box that was powered off for a month
 catches up the moment it dials in.
 
 ## Settings
 
 | Setting                  | Where          | Default          | What it does                                                                             |
 | ------------------------ | -------------- | ---------------- | ---------------------------------------------------------------------------------------- |
-| Concurrent agent updates | Settings → Hub | `5`              | How many boxes may be swapping their binary at once.                                     |
+| Concurrent agent updates | Settings → Tuning | `5`              | How many boxes may be swapping their binary at once.                                     |
 | `AGENT_AUTO_UPDATE`      | env            | `true`           | Set to `false` to pin the fleet and drive updates by hand.                               |
 | `AGENT_BIN_DIR`          | env            | `/app/agent-bin` | Where the image keeps the binaries. Only worth changing if you build the image yourself. |
 

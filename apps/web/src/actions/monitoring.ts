@@ -9,7 +9,6 @@ import {
   type Prisma,
   prisma,
   updateMonitorSettings as updateMonitorSettingsInDb,
-  getHubSettings,
 } from "@magnemite/db";
 import { requireOperator } from "@/lib/session";
 import { hub } from "@/lib/hub";
@@ -84,7 +83,6 @@ export async function updateMonitorSettings(
     return Math.floor(parsed);
   };
 
-  const unreachableAlertSeconds = int("unreachableAlertSeconds", 30);
   // One HTTP request for the whole fleet at once, against somebody else's
   // service. 10s is as tight as is polite.
   const rotomSyncSeconds = int("rotomSyncSeconds", 10);
@@ -100,7 +98,6 @@ export async function updateMonitorSettings(
   const eventRetentionDays = int("eventRetentionDays", 0);
 
   if (
-    unreachableAlertSeconds === null ||
     rotomSyncSeconds === null ||
     rotomStaleSeconds === null ||
     rebootGraceSeconds === null ||
@@ -127,16 +124,6 @@ export async function updateMonitorSettings(
   const level = String(formData.get("discordMinLevel") ?? "WARN");
   if (!LEVELS.has(level)) return { error: "Pick a minimum severity." };
 
-  // The same kind of coupling the hub settings already enforce, and for the
-  // same reason: these numbers only mean anything against each other, and
-  // letting a nonsense combination through produces a fleet that looks broken
-  // when it is the form that allowed it.
-  const hubSettings = await getHubSettings();
-  if (unreachableAlertSeconds < hubSettings.deviceOfflineTimeoutSeconds) {
-    return {
-      error: `The unreachable delay has to be at least the ${hubSettings.deviceOfflineTimeoutSeconds}s offline timeout — otherwise a box is alerted about before it is even marked offline.`,
-    };
-  }
   // Two sync intervals, because a box can never be fresher than the last time
   // anyone asked Rotom about it. Anything tighter alerts on the sync's own lag.
   // Both numbers come out of this one form now, so the check is against what
@@ -149,7 +136,6 @@ export async function updateMonitorSettings(
 
   const patch: Partial<MonitorSettingsValues> = {
     enabled: formData.get("enabled") === "on",
-    unreachableAlertSeconds,
     rotomSyncSeconds,
     rotomStaleSeconds,
     rebootGraceSeconds,

@@ -6,6 +6,7 @@ import { MonitoringSection, type MonitorRuleRow } from "@/components/settings/mo
 import { CreateAppTargetForm } from "@/components/settings/create-app-target-form";
 import { GroupsSection } from "@/components/settings/groups-section";
 import { HubSettingsForm } from "@/components/settings/hub-settings-form";
+import { MonitorDiscordCard, MonitorTuningCard } from "@/components/settings/monitor-tuning-cards";
 import { SettingsShell, type SettingsSection } from "@/components/settings/settings-shell";
 import { SourcesSection } from "@/components/settings/sources-section";
 import { WatchedPackagesSection } from "@/components/settings/watched-packages-section";
@@ -128,8 +129,18 @@ export default async function SettingsPage() {
   // which of these is on screen, so switching category costs no round trip.
   const sections: SettingsSection[] = [
     {
-      id: "hub",
-      content: <HubSettingsForm key="hub" settings={hubSettings} disabled={!canOperate} />,
+      id: "tuning",
+      content: (
+        <Fragment key="tuning">
+          <HubSettingsForm settings={hubSettings} disabled={!canOperate} />
+          {/* The monitoring knobs sit here rather than beside the rules: every
+              one of them is measured against the heartbeat or the offline
+              timeout in the card above, and a tab away each coupling had to be
+              restated in a hint instead of being visible. */}
+          <MonitorTuningCard settings={monitorSettings} disabled={!canOperate} />
+          <MonitorDiscordCard settings={monitorSettings} disabled={!canOperate} />
+        </Fragment>
+      ),
     },
     {
       id: "monitoring",
@@ -138,9 +149,6 @@ export default async function SettingsPage() {
         <MonitoringSection
           key="monitoring"
           settings={monitorSettings}
-          // Read-only here: the pass runs once per heartbeat, which is the
-          // boxes' own beat and lives in the Hub tab.
-          heartbeatSeconds={hubSettings.heartbeatSeconds}
           rules={monitorRules.map((rule) => ({
             id: rule.id,
             name: rule.name,

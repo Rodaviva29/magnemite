@@ -1,42 +1,22 @@
 "use client";
 
-import { useActionState, useMemo, useState, useTransition, type ReactNode } from "react";
-import {
-  Bell,
-  BellOff,
-  Binoculars,
-  MessageSquare,
-  Pencil,
-  Plus,
-  Send,
-  Trash2,
-  TriangleAlert,
-} from "lucide-react";
-import {
-  deleteMonitorRule,
-  sendTestAlert,
-  setMonitorEnabled,
-  setMonitorRuleEnabled,
-  updateMonitorSettings,
-} from "@/actions/monitoring";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { Bell, BellOff, Binoculars, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { deleteMonitorRule, setMonitorEnabled, setMonitorRuleEnabled } from "@/actions/monitoring";
 import type { ActionState } from "@/actions/rollouts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SaveButton } from "@/components/ui/save-button";
 import { SearchInput } from "@/components/ui/search-input";
-import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
   MonitorRuleDialog,
   type GroupChoice,
   type MonitorRuleRow,
 } from "@/components/settings/monitor-rule-dialog";
-import { NumberField, SettingGroup, Suffixed } from "@/components/settings/setting-fields";
-import { actionMeta, LEVEL_OPTIONS, signalMeta } from "@/lib/monitor-vocabulary";
+import { actionMeta, signalMeta } from "@/lib/monitor-vocabulary";
 import { cn } from "@/lib/utils";
 
 export type {
@@ -47,7 +27,6 @@ export type {
 
 export type MonitorSettingsRow = {
   enabled: boolean;
-  unreachableAlertSeconds: number;
   rotomSyncSeconds: number;
   rotomStaleSeconds: number;
   rebootGraceSeconds: number;
@@ -66,16 +45,17 @@ export type MonitorSettingsRow = {
 // ---------------------------------------------------------------------------
 
 /**
- * The rules and the knobs behind them.
+ * The switch and the rules.
  *
- * What this tab deliberately does *not* hold is the record of what the rules
- * did — that lives on the Monitoring page in the main nav, because it answers
- * an operational question rather than a configuration one, and because a feed
- * that grows all day does not belong in Settings.
+ * Two things this tab deliberately does *not* hold. The record of what the
+ * rules did lives on the Monitoring page in the main nav, because it answers
+ * an operational question rather than a configuration one, and a feed that
+ * grows all day does not belong in Settings. The ceilings, graces and
+ * intervals live on the Hub tab, because every one of them is measured
+ * against a number that was already there.
  */
 export function MonitoringSection({
   settings,
-  heartbeatSeconds,
   rules,
   groups,
   deviceCount,
@@ -83,8 +63,6 @@ export function MonitoringSection({
   disabled,
 }: {
   settings: MonitorSettingsRow;
-  /** From Settings → Hub. Shown here, not set here — see the readout below. */
-  heartbeatSeconds: number;
   rules: MonitorRuleRow[];
   groups: GroupChoice[];
   deviceCount: number;
@@ -96,8 +74,10 @@ export function MonitoringSection({
     <>
       {/* The master switch first, on its own: it is the one control here that
           decides whether any of the rest happens, and reading a page of rules
-          without knowing that answer is reading it twice. Then the rules —
-          what this tab is for — and only then the numbers around them. */}
+          without knowing that answer is reading it twice. Then the rules,
+          which are the whole of this tab now — the ceilings and graces around
+          them moved to Settings → Tuning, next to the heartbeat and the offline
+          timeout they are measured against. */}
       <MasterSwitch enabled={settings.enabled} disabled={disabled} />
       <RulesCard
         rules={rules}
@@ -107,8 +87,6 @@ export function MonitoringSection({
         capableCount={capableCount}
         disabled={disabled}
       />
-      <SettingsCard settings={settings} heartbeatSeconds={heartbeatSeconds} disabled={disabled} />
-      <DiscordCard settings={settings} disabled={disabled} />
     </>
   );
 }
@@ -512,303 +490,5 @@ function EmptyRules({ disabled, onCreate }: { disabled: boolean; onCreate: () =>
         </Button>
       ) : null}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The switch and the ceilings
-// ---------------------------------------------------------------------------
-
-function SettingsCard({
-  settings,
-  heartbeatSeconds,
-  disabled,
-}: {
-  settings: MonitorSettingsRow;
-  heartbeatSeconds: number;
-  disabled: boolean;
-}) {
-  const [state, formAction] = useActionState<ActionState, FormData>(updateMonitorSettings, {});
-  // Mirrored out of its own input so the delay below can name its floor while
-  // it is being typed, rather than after a save that the server rejects.
-  const [rotomSync, setRotomSync] = useState(settings.rotomSyncSeconds);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Binoculars className="h-4 w-4 text-muted-foreground" />
-          How it watches
-        </CardTitle>
-        <CardDescription>
-          When a reading counts, and the ceilings that keep a rule which turns out to be wrong from
-          restarting a fleet all night.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent>
-        <form action={formAction} className="flex flex-col gap-6">
-          {/* The action takes the whole group, and the master switch now lives
-              at the top of the tab. Without this, saving a number down here
-              would post no `enabled` at all and read as switching monitoring
-              off. */}
-          <input type="hidden" name="enabled" value={settings.enabled ? "on" : ""} />
-
-          <SettingGroup title="Timing">
-            {/* Shown, not set. A pass reads what the boxes last said and they
-                say it once per beat, so the heartbeat is the only cadence that
-                makes sense — faster re-reads the same reading, slower is just
-                lag. Here so the number is visible next to the ones measured
-                against it, without pretending it belongs to this form. */}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="heartbeat-readout">Pass interval</Label>
-              <Suffixed suffix="seconds">
-                <Input
-                  id="heartbeat-readout"
-                  type="number"
-                  value={heartbeatSeconds}
-                  disabled
-                  readOnly
-                />
-              </Suffixed>
-              <p className="text-xs text-muted-foreground">
-                Every box is looked at once per heartbeat. Set in{" "}
-                <a href="#hub" className="underline underline-offset-2">
-                  Settings → Hub
-                </a>
-                , because it is the boxes&rsquo; own beat.
-              </p>
-            </div>
-            <NumberField
-              name="unreachableAlertSeconds"
-              label="Unreachable after"
-              value={settings.unreachableAlertSeconds}
-              min={30}
-              disabled={disabled}
-              hint="How long a box may be gone before that is worth saying. Longer than the offline timeout, which only decides when it is marked offline."
-            />
-            <NumberField
-              name="rotomSyncSeconds"
-              label="Ask Rotom every"
-              value={settings.rotomSyncSeconds}
-              min={10}
-              disabled={disabled}
-              onValueChange={setRotomSync}
-              hint="One request for the whole fleet, and only with the integration switched on in .env. Everything Rotom-shaped is this fresh at best — the Scanner column included."
-            />
-            <NumberField
-              name="rotomStaleSeconds"
-              label="Rotom stale after"
-              value={settings.rotomStaleSeconds}
-              // Two sync intervals: a box can never be known to be fresher
-              // than the last time anyone asked Rotom about it.
-              min={rotomSync * 2}
-              disabled={disabled}
-              hint={`How long since Rotom last saw a box before that counts as disconnected. Asking every ${rotomSync}s means anything under ${rotomSync * 2}s alerts on the sync's own lag rather than on a box.`}
-            />
-          </SettingGroup>
-
-          <SettingGroup title="Grace">
-            <NumberField
-              name="rebootGraceSeconds"
-              label="After a reboot"
-              value={settings.rebootGraceSeconds}
-              min={60}
-              disabled={disabled}
-              hint="Nothing touches a box for this long after Magnemite rebooted it. Without it, the box coming back slowly reads as a fault and it is rebooted again."
-            />
-            <NumberField
-              name="startupGraceSeconds"
-              label="After a hub restart"
-              value={settings.startupGraceSeconds}
-              min={0}
-              disabled={disabled}
-              hint="A restart drops every device socket at once and the fleet reconnects over the next few seconds. Nothing acts until that has settled."
-            />
-          </SettingGroup>
-
-          <SettingGroup title="Ceilings">
-            <NumberField
-              name="maxActionsPerDeviceHour"
-              label="Actions per box per hour"
-              value={settings.maxActionsPerDeviceHour}
-              min={1}
-              unit="at most"
-              disabled={disabled}
-              hint="The circuit breaker. Past it, the box gets one critical alert."
-            />
-            <NumberField
-              name="maxRebootsPerDeviceDay"
-              label="Reboots per box per day"
-              value={settings.maxRebootsPerDeviceDay}
-              min={1}
-              unit="at most"
-              disabled={disabled}
-              hint="The same, for the expensive half of the ladder."
-            />
-          </SettingGroup>
-
-          <SettingGroup title="Noise and history">
-            <NumberField
-              name="alertDedupeMinutes"
-              label="Repeat an alert after"
-              value={settings.alertDedupeMinutes}
-              min={0}
-              unit="minutes"
-              disabled={disabled}
-              hint="The same signal on the same box is not announced again inside this. The action still happens; only the message is held."
-            />
-            <NumberField
-              name="eventRetentionDays"
-              label="Keep history for"
-              value={settings.eventRetentionDays}
-              min={0}
-              unit="days"
-              disabled={disabled}
-              hint="How long the Monitoring page can look back. 0 keeps it forever."
-            />
-          </SettingGroup>
-
-          <Outcome state={state} />
-          {!disabled ? (
-            <div className="flex justify-end">
-              <SaveButton state={state} />
-            </div>
-          ) : null}
-        </form>
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * The one outcome a save button cannot show: saved, but the hub could not be
- * told, so it is still running on the old values.
- */
-function Outcome({ state }: { state: ActionState }) {
-  if (state.error) return <p className="text-sm text-destructive">{state.error}</p>;
-  if (state.ok && state.message && state.message !== "Saved.") {
-    return <p className="text-sm text-warning">{state.message}</p>;
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Discord
-// ---------------------------------------------------------------------------
-
-function DiscordCard({ settings, disabled }: { settings: MonitorSettingsRow; disabled: boolean }) {
-  const [state, formAction] = useActionState<ActionState, FormData>(updateMonitorSettings, {});
-  const [test, setTest] = useState<ActionState>({});
-  const [pending, startTransition] = useTransition();
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-muted-foreground" />
-          Discord
-        </CardTitle>
-        <CardDescription>
-          Where alerts go, configured in the channel&rsquo;s Integrations settings. Empty turns
-          notifications off and leaves the rules running.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent>
-        {/* The settings action takes the whole group, so this form carries the
-            other card's values as hidden fields rather than clearing them. */}
-        <form action={formAction} className="flex flex-col gap-4">
-          <input type="hidden" name="enabled" value={settings.enabled ? "on" : ""} />
-          <input
-            type="hidden"
-            name="unreachableAlertSeconds"
-            value={settings.unreachableAlertSeconds}
-          />
-          <input type="hidden" name="rotomStaleSeconds" value={settings.rotomStaleSeconds} />
-          <input type="hidden" name="rebootGraceSeconds" value={settings.rebootGraceSeconds} />
-          <input type="hidden" name="startupGraceSeconds" value={settings.startupGraceSeconds} />
-          <input
-            type="hidden"
-            name="maxActionsPerDeviceHour"
-            value={settings.maxActionsPerDeviceHour}
-          />
-          <input
-            type="hidden"
-            name="maxRebootsPerDeviceDay"
-            value={settings.maxRebootsPerDeviceDay}
-          />
-          <input type="hidden" name="alertDedupeMinutes" value={settings.alertDedupeMinutes} />
-          <input type="hidden" name="eventRetentionDays" value={settings.eventRetentionDays} />
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="discordWebhookUrl">Webhook URL</Label>
-            <Input
-              id="discordWebhookUrl"
-              name="discordWebhookUrl"
-              type="url"
-              placeholder="https://discord.com/api/webhooks/…"
-              defaultValue={settings.discordWebhookUrl}
-              disabled={disabled}
-              className="font-mono text-xs"
-            />
-            <p className="text-xs text-muted-foreground">
-              From the channel&rsquo;s Integrations settings. Empty turns notifications off and
-              leaves the rules running.
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="discordMinLevel">Announce at least</Label>
-              <Select
-                id="discordMinLevel"
-                name="discordMinLevel"
-                options={LEVEL_OPTIONS}
-                defaultValue={settings.discordMinLevel}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                Anything below this is acted on quietly and recorded, but not sent.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="discordMentionRoleId">Role to ping (optional)</Label>
-              <Input
-                id="discordMentionRoleId"
-                name="discordMentionRoleId"
-                placeholder="123456789012345678"
-                defaultValue={settings.discordMentionRoleId}
-                disabled={disabled}
-                className="font-mono text-xs"
-              />
-              <p className="text-xs text-muted-foreground">Pinged on critical alerts only.</p>
-            </div>
-          </div>
-
-          <Outcome state={state} />
-          {test.error ? <p className="text-sm text-destructive">{test.error}</p> : null}
-          {test.ok ? <p className="text-sm text-success">{test.message}</p> : null}
-
-          {!disabled ? (
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={pending}
-                onClick={() => {
-                  startTransition(async () => setTest(await sendTestAlert()));
-                }}
-              >
-                <Send className="h-4 w-4" />
-                Send test alert
-              </Button>
-              <SaveButton state={state} />
-            </div>
-          ) : null}
-        </form>
-      </CardContent>
-    </Card>
   );
 }

@@ -86,7 +86,7 @@ Two homes, and the split matters:
 
 - **`.env`** — what is needed to boot and connect: database, secrets, ports,
   URLs. Changes per environment.
-- **Settings → Hub** — what is tuned while running: concurrency, intervals,
+- **Settings → Tuning** — what is tuned while running: concurrency, intervals,
   retention, heartbeat. Same everywhere, wants changing without a deploy.
 
 Several values moved from the first to the second, and the old variables are
@@ -103,10 +103,12 @@ defaults.
 
 Three of them are coupled and the form enforces it:
 `deviceOfflineTimeout ≥ 3 × heartbeat`, `metricsSampleSeconds ≥ heartbeat`.
-Monitoring adds one more: `monitor.unreachableAlertSeconds ≥
-deviceOfflineTimeout`. The monitor pass itself is **not** a setting — it runs
-once per heartbeat, because a pass reads what the boxes last said and they say
-it once per beat. There is one right answer, so there is nothing to configure.
+Monitoring adds none — it used to, and `monitor.unreachableAlertSeconds` is
+gone: `AGENT_OFFLINE` fires on `deviceOfflineTimeout` itself, and a rule that
+wants to wait longer says so in its own `threshold`, which is per group. The
+monitor pass is **not** a setting either — it runs once per heartbeat, because
+a pass reads what the boxes last said and they say it once per beat. There is
+one right answer, so there is nothing to configure.
 
 The heartbeat is **not** the only setting that lives on the boxes any more. The
 monitor spec — what to probe — rides the same `welcome`, so it too reaches a box

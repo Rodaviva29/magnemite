@@ -8,7 +8,7 @@ Set `ROTOM_ENABLED=true`, `ROTOM_URL` (RotomNG's HTTP listener, usually
 `:7072`) and `ROTOM_SECRET` — plus `ROTOM_BASIC_USERNAME` and
 `ROTOM_BASIC_PASSWORD` if a reverse proxy sits in front of it — and Magnemite
 starts asking Rotom what it thinks of each box — every 60 seconds by default,
-on **Settings → Monitoring → Ask Rotom every**.
+on **Settings → Tuning → Ask Rotom every**.
 
 That matters because it is the one question Magnemite cannot answer for itself.
 A box can be online, heartbeating every twenty seconds, with the scanner
@@ -48,7 +48,7 @@ it simply has no Scanner column and no Rotom-based rule.
 
 ## How often it asks
 
-One request for the whole fleet, on **Settings → Monitoring → Ask Rotom
+One request for the whole fleet, on **Settings → Tuning → Ask Rotom
 every** — 60 seconds by default, and the resolution of everything Rotom-shaped:
 the Scanner column and the `ROTOM_DISCONNECTED` signal are both only ever as
 fresh as the last sync.

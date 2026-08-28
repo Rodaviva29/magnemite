@@ -241,7 +241,7 @@ function readSignal(
   rule: RuleRow,
   device: DeviceRow,
   reading: Reading | null,
-  unreachableAfterMs: number,
+  offlineAfterMs: number,
   rotomStaleMs: number,
 ): boolean | null {
   switch (rule.signal) {
@@ -249,9 +249,14 @@ function readSignal(
       if (device.status === "ONLINE") return false;
       if (!device.lastSeenAt) return null;
       const gone = Date.now() - device.lastSeenAt.getTime();
-      // Inside the delay nothing is known yet — a box is allowed to be away
-      // for a moment without that being either a fault or a recovery.
-      return gone >= unreachableAfterMs ? true : null;
+      // The same timeout that decided the box is offline, rather than a second
+      // delay of its own. Two numbers for one silence only ever differed by
+      // how patient the alert was, and that is what a rule's `threshold`
+      // already says — in beats, per rule, and per group.
+      //
+      // Below it nothing is known yet: a box is allowed to be away for a
+      // moment without that being either a fault or a recovery.
+      return gone >= offlineAfterMs ? true : null;
     }
 
     case "ROTOM_DISCONNECTED": {
@@ -361,7 +366,7 @@ export async function evaluate(): Promise<void> {
   const settings = await getMonitorSettings();
   if (!settings.enabled) return;
 
-  const { heartbeatSeconds } = await getHubSettings();
+  const { heartbeatSeconds, deviceOfflineTimeoutSeconds } = await getHubSettings();
   const now = Date.now();
   if (now - startedAt < settings.startupGraceSeconds * 1000) return;
   if (now - lastTickAt < heartbeatSeconds * 1000) return;
@@ -382,7 +387,7 @@ export async function evaluate(): Promise<void> {
   for (const device of devices) {
     if (busy.has(device.id)) continue;
     try {
-      await evaluateDevice(device, rules, settings, budgets);
+      await evaluateDevice(device, rules, settings, deviceOfflineTimeoutSeconds * 1000, budgets);
     } catch (err) {
       // One box's failure is not the fleet's. A rule with a broken command
       // must not stop every other box being looked at.
@@ -450,6 +455,7 @@ async function evaluateDevice(
   device: DeviceRow,
   rules: RuleRow[],
   settings: Settings,
+  offlineAfterMs: number,
   budgets: Budgets,
 ): Promise<void> {
   const reading = freshReading(device.id);
@@ -459,7 +465,7 @@ async function evaluateDevice(
       rule,
       device,
       reading,
-      settings.unreachableAlertSeconds * 1000,
+      offlineAfterMs,
       settings.rotomStaleSeconds * 1000,
     );
     if (bad === null) continue;

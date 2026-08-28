@@ -69,7 +69,7 @@ export function HubSettingsForm({
               value={settings.deviceOfflineTimeoutSeconds}
               min={30}
               disabled={disabled}
-              hint="Silence from a box before it is marked offline, really how many missed beats you will tolerate. Raise it for a site on a flaky uplink."
+              hint="Silence from a box before it is marked offline, really how many missed beats you will tolerate."
             />
           </SettingGroup>
 
@@ -118,7 +118,7 @@ export function HubSettingsForm({
               min={0}
               unit="days"
               disabled={disabled}
-              hint="How long those samples live before the hub prunes them. 0 turns recording off and drops what is already stored. What the monitoring rules write is kept separately, in Settings → Monitoring."
+              hint="How long those samples live before the hub prunes them. 0 turns recording off and drops what is already stored. What the monitoring rules write is kept separately, in the card below."
             />
           </SettingGroup>
 

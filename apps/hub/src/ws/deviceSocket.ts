@@ -149,7 +149,7 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
     deviceId,
     name: device.name,
     approved: device.approved,
-    // Set from Settings → Hub. A box adopts it here, on connect, so a change
+    // Set from Settings → Tuning. A box adopts it here, on connect, so a change
     // reaches the fleet as boxes reconnect rather than in seconds like the
     // settings that never leave the server.
     heartbeatSeconds: (await getHubSettings()).heartbeatSeconds,
