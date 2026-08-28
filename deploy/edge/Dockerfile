@@ -16,6 +16,13 @@ FROM caddy:2-alpine
 ARG CADDYFILE=Caddyfile
 COPY ${CADDYFILE} /etc/caddy/Caddyfile
 
+# Both Caddyfiles listen on :{$PORT} and nothing else. caddy:2-alpine inherits
+# EXPOSE 80, 443 and 2019, so without these two lines the image advertises
+# three ports it never opens and none of the one it does -- and Coolify picks
+# the routed port off exactly this metadata when it generates a domain.
+ENV PORT=8080
+EXPOSE 8080
+
 # Fail the build rather than the deploy: a Caddyfile that does not parse should
 # never reach a running container.
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

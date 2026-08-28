@@ -40,6 +40,10 @@ RUN corepack install
 # is running rather than leaving you to guess from the deploy history.
 COPY VERSION /app/VERSION
 
+# `next start` reads PORT, and Coolify reads this pair when it generates the
+# service's domain -- the docs image carries the same two lines and is the one
+# service whose generated domain came out carrying its port.
+ENV PORT=3000
 EXPOSE 3000
 WORKDIR /app/apps/web
 CMD ["pnpm", "start"]
