@@ -12,14 +12,14 @@ hub start it for you (see [automatic rollouts](#automatic-rollouts)).
 
 ## The policy
 
-| Field                   | What it does                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| **Canary devices**      | The first N update alone; the rest wait for them to succeed.                    |
-| **Soak (min)**          | Extra wait after the canary succeeds, before the rest go.                       |
-| **Retry backoff (s)**   | Hold before the next attempt — 60 by default, doubling, capped at 30 minutes.   |
-| **Attempts per device** | How many tries before a job is left failed.                                     |
-| **Clean install**       | Uninstall first instead of upgrading in place. **Wipes app data on every box.** |
-| **Skip up-to-date**     | Leave boxes already on the version alone.                                       |
+| Field                   | What it does                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| **Canary devices**      | The first N update alone; the rest wait for them to succeed.                                     |
+| **Soak (min)**          | Extra wait after the canary succeeds, before the rest go.                                        |
+| **Retry backoff (s)**   | Hold before the next attempt — 60 by default, doubling, capped at 30 minutes.                    |
+| **Attempts per device** | How many tries before a job is left failed.                                                      |
+| **Clean install**       | Uninstall first instead of upgrading in place. **Wipes app data on every box.**                  |
+| **Skip up-to-date**     | Leave boxes already on the version alone. Always off for a [manual install](/docs/fleet/manual). |
 
 Targeting is one box, a selection, a device group, or the fleet. Groups are the
 useful unit past one site: they carry their own pre/post-install hooks and can

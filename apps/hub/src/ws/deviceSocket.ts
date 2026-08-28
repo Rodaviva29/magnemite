@@ -213,6 +213,7 @@ async function handleMessage(ws: WebSocket, deviceId: string, ip: string | null,
         agentVersion: msg.agentVersion,
         publicIp: ip,
         info: msg.device,
+        capabilities: msg.capabilities,
       });
       await applyMetrics(deviceId, msg.metrics);
       await reconcileJobs(deviceId, msg.currentJobId ?? null, (m) => ws.send(JSON.stringify(m)));

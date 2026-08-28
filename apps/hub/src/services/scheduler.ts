@@ -5,6 +5,7 @@ import { getHubSettings } from "./hubSettings.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { isOnline, sendTo } from "../registry.js";
+import { hasWriteConfig, renderConfig } from "./deviceConfig.js";
 import { ACTIVE_STATES, logJobEvent, recomputeRollout, requeueStalled } from "./jobs.js";
 import { pruneMetrics } from "./metrics.js";
 import { evaluate } from "./monitor.js";
@@ -169,14 +170,54 @@ async function dispatchQueued(maxConcurrentJobs: number) {
       sizeBytes: Number(version.sizeBytes),
       version: version.version,
       forceClean: rollout.forceClean,
-      // A rollout may carry its own hooks — a manual install of some other
-      // app has to stop and start *that* app, not whatever the group stops
-      // for the watched one. Falls back to the group when it does not.
-      preInstallHook: rollout.preInstallHook ?? job.device.group?.preInstallHook ?? null,
-      postInstallHook: rollout.postInstallHook ?? job.device.group?.postInstallHook ?? null,
+      // A rollout may carry its own hooks — a manual deploy of some other app
+      // has to stop and start *that* app, not whatever the group stops for the
+      // watched one. Falls back to the group when it does not.
+      //
+      // `hookMode` then decides which of the two survive. It is not a third
+      // override but a veto over both, because the case it exists for is a box
+      // where the hooks have nothing to act on: on a bare box the pre-install
+      // hook stops a scanner that is not installed, and on the deploy before
+      // the MITM even the post-install hook has nothing to start.
+      preInstallHook:
+        rollout.hookMode === "NORMAL"
+          ? (rollout.preInstallHook ?? job.device.group?.preInstallHook ?? null)
+          : null,
+      postInstallHook:
+        rollout.hookMode === "NONE"
+          ? null
+          : (rollout.postInstallHook ?? job.device.group?.postInstallHook ?? null),
       extraSplits: [],
       timeoutSeconds: 3600,
     };
+
+    // The config belongs to the MITM, so it rides the install of the MITM and
+    // nothing else: putting a launcher on a box whose group runs Aegis must
+    // not rewrite Aegis's config. The package check does that on its own, and
+    // `writeConfig` is the deliberate opt-out on top of it — the deploy that
+    // reinstalls a crashed scanner, or rolls a build back, over a config on the
+    // box that must survive.
+    //
+    // The candidate query already includes the device and its group, so this
+    // costs no extra round trip inside the dispatch loop.
+    if (rollout.writeConfig && job.device.group?.mitmPackageName === target.packageName) {
+      const config = renderConfig(job.device);
+      if (config?.ok) {
+        message.config = config.file;
+      } else if (config) {
+        // The install still goes ahead. A box left on the previous config is
+        // worth a warning; a box left without the app at all is worse.
+        await logJobEvent(job.id, `config not sent: ${config.reason}`, { level: "WARN" });
+      }
+      if (config?.ok && !hasWriteConfig(job.device.capabilities)) {
+        await logJobEvent(
+          job.id,
+          "config not written: this box's agent is too old, and takes an agent update first",
+          { level: "WARN" },
+        );
+        message.config = null;
+      }
+    }
 
     const attempt = job.attempt + 1;
     await prisma.job.update({

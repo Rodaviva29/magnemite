@@ -240,6 +240,7 @@ func (a *Agent) sendHello() error {
 		Device:          a.Sys.DeviceInfo(ctx),
 		Metrics:         metrics,
 		CurrentJobID:    a.currentJob(),
+		Capabilities:    proto.AgentCapabilities(),
 	})
 }
 
@@ -517,6 +518,9 @@ func (a *Agent) startJob(ctx context.Context, job proto.InstallJob) {
 			WorkDir: a.Cfg.WorkDir,
 			Token:   a.Cfg.DeviceToken,
 			Client:  &http.Client{Timeout: 0},
+			// So a job carrying a config cannot be pointed at the file holding
+			// this box's own device token.
+			AgentConfigPath: a.ConfigPath,
 		}
 		res := inst.Run(jobCtx, job, rep)
 

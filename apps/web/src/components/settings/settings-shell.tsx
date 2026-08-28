@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import {
   AppWindow,
   Boxes,
-  Columns3,
   KeyRound,
   Rss,
   SearchX,
@@ -17,7 +16,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { cn } from "@/lib/utils";
 
 export type SettingsSectionId =
-  "tuning" | "monitoring" | "apps" | "sources" | "columns" | "groups" | "enrollment";
+  "tuning" | "monitoring" | "apps" | "sources" | "groups" | "enrollment";
 
 export type SettingsSection = {
   id: SettingsSectionId;
@@ -134,17 +133,14 @@ const CATEGORIES: Category[] = [
     ],
   },
   {
-    id: "columns",
-    label: "Fleet columns",
-    icon: Columns3,
-    summary: "Extra packages to show an installed version for on the fleet table.",
-    terms: ["watched package", "column header", "reporting", "installed version", "scanner"],
-  },
-  {
     id: "groups",
     label: "Device groups",
     icon: Boxes,
-    summary: "Install hooks that run around an install, and per-site concurrency.",
+    summary:
+      "Install hooks, per-site concurrency, and the MITM each site runs — its version column and its config file.",
+    // The Fleet columns tab's words are in here rather than gone: the column is
+    // still a thing, it is just declared on the group that runs the app now,
+    // and somebody searching for what they used to call it has to land here.
     terms: [
       "pre-install hook",
       "post-install hook",
@@ -152,6 +148,22 @@ const CATEGORIES: Category[] = [
       "site",
       "force-stop",
       "root",
+      "mitm",
+      "aegis",
+      "atlas",
+      "gocheats",
+      "scanner",
+      "config json",
+      "config path",
+      "restart command",
+      "placeholder",
+      "rotom origin",
+      "push config",
+      "fleet column",
+      "watched package",
+      "column header",
+      "reporting",
+      "installed version",
     ],
   },
   {

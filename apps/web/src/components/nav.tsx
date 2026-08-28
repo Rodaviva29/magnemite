@@ -34,7 +34,7 @@ const SECTIONS: { label?: string; links: NavLink[] }[] = [
     links: [
       { href: "/rollouts", label: "Rollouts", icon: Rocket },
       { href: "/versions", label: "Versions", icon: Package },
-      { href: "/manual", label: "Manual install", icon: Upload },
+      { href: "/manual", label: "Manual deploy", icon: Upload },
     ],
   },
   {

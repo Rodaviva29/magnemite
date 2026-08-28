@@ -9,16 +9,20 @@ package sys
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"magnemite/agent/internal/proto"
@@ -33,6 +37,15 @@ type System interface {
 	Shell(ctx context.Context, script string) (string, error)
 	// Disk reports free and total bytes on the filesystem holding path.
 	Disk(path string) (free uint64, total uint64, err error)
+	// WriteFileAtomic puts content at path through a temp file and a rename, so
+	// a scanner reading the file while it is replaced sees the old bytes or the
+	// new ones and never a half-written middle.
+	//
+	// It returns the sha256 of what is on disk once the rename is done, read
+	// back rather than computed from the content it was handed: the hub uses it
+	// to prove what the box has, and hashing the input would only prove what
+	// the hub sent.
+	WriteFileAtomic(path string, content []byte, mode os.FileMode) (sha256 string, err error)
 	// SystemServicesUp reports whether the binder services an install needs
 	// are registered. False while system_server is restarting — which on
 	// these boxes is not the same thing as the box being down, because the
@@ -99,6 +112,53 @@ func (a *Android) Exec(ctx context.Context, name string, args ...string) (string
 
 func (a *Android) Shell(ctx context.Context, script string) (string, error) {
 	return a.Exec(ctx, "sh", "-c", script)
+}
+
+func (a *Android) WriteFileAtomic(path string, content []byte, mode os.FileMode) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	// Same shape as the agent's own config save: a box losing power mid-write
+	// must never come back with a truncated file.
+	//
+	// The pid and a counter are in the name because two writes of the same
+	// path do overlap: an install of a group's MITM writes its config from the
+	// job goroutine while a dashboard push writes it from the socket handler.
+	// Sharing one `.tmp` meant both truncating and filling the same file, and
+	// what got renamed into place could be a splice of the two — the very
+	// half-written file this function exists to prevent, published atomically.
+	tmp := tempPathFor(path)
+	if err := os.WriteFile(tmp, content, mode); err != nil {
+		return "", err
+	}
+	// WriteFile only applies mode when it creates the file, and a leftover tmp
+	// from a killed write would keep its old one.
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return sha256File(path)
+}
+
+// Makes each in-flight temp file's name its own. Package-level so the Fake
+// shares it — the fake fleet writes configs from the same two goroutines.
+var tmpCounter uint64
+
+func tempPathFor(path string) string {
+	return fmt.Sprintf("%s.tmp.%d.%d", path, os.Getpid(), atomic.AddUint64(&tmpCounter, 1))
+}
+
+func sha256File(path string) (string, error) {
+	written, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(written)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // The two services every install touches: `pm` talks to one and the hooks'

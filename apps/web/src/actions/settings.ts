@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
+import { CONFIG_PLACEHOLDERS } from "@/lib/config-placeholders";
 import {
   generateToken,
   hashToken,
@@ -133,9 +134,9 @@ export async function updateHubSettings(
   };
 }
 
-/** Pre/post-install hooks and the concurrency cap for one device group. */
+/** Hooks, the concurrency cap, and the MITM data for one device group. */
 export async function updateGroup(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  await requireOperator();
+  const user = await requireOperator();
   const id = String(formData.get("groupId") ?? "");
   if (!id) return { error: "Missing group." };
 
@@ -148,17 +149,146 @@ export async function updateGroup(_prev: ActionState, formData: FormData): Promi
         ? Math.floor(parsed)
         : null;
 
+  const field = (name: string) => String(formData.get(name) ?? "").trim() || null;
+  const mitmPackageName = field("mitmPackageName");
+  const mitmConfigPath = field("mitmConfigPath");
+  const mitmConfig = field("mitmConfig");
+
+  if (mitmPackageName && !PACKAGE_NAME.test(mitmPackageName)) {
+    return { error: "That is not a package name — try com.pokemod.aegis." };
+  }
+  // A path with no config would push an empty file over a working one, and a
+  // config with no path has nowhere to go. Either both or neither.
+  if (Boolean(mitmConfigPath) !== Boolean(mitmConfig)) {
+    return { error: "A config needs both a file path and its contents — set both, or neither." };
+  }
+  if (mitmConfigPath) {
+    const bad = checkConfigPath(mitmConfigPath);
+    if (bad) return { error: bad };
+  }
+  if (mitmConfig) {
+    const bad = checkConfigTemplate(mitmConfig);
+    if (bad) return { error: bad };
+  }
+
+  const before = await prisma.deviceGroup.findUnique({
+    where: { id },
+    select: { mitmPackageName: true },
+  });
+
   await prisma.deviceGroup.update({
     where: { id },
     data: {
-      preInstallHook: String(formData.get("preInstallHook") ?? "").trim() || null,
-      postInstallHook: String(formData.get("postInstallHook") ?? "").trim() || null,
+      preInstallHook: field("preInstallHook"),
+      postInstallHook: field("postInstallHook"),
       maxConcurrency,
+      mitmPackageName,
+      mitmLabel: field("mitmLabel"),
+      mitmConfigPath,
+      mitmConfig,
     },
   });
 
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "deviceGroup.update",
+      targetType: "DeviceGroup",
+      targetId: id,
+      // The config's size, never the config: it holds the bearer tokens the
+      // MITM authenticates with.
+      meta: { mitmPackageName, mitmConfigPath, configBytes: mitmConfig?.length ?? 0 },
+    },
+  });
+
+  // The MITM package is in the list every box reports on, so a changed one has
+  // to reach the fleet for its column to fill in — otherwise it waits for each
+  // box to happen to reconnect.
+  if (before?.mitmPackageName !== mitmPackageName) {
+    await hub.refreshTrackedPackages().catch(() => undefined);
+    revalidatePath("/");
+  }
+
   revalidatePath("/settings");
   return { ok: true, message: "Saved." };
+}
+
+/**
+ * The same refusals the agent enforces, restated here so an operator hears
+ * about a bad path at Save rather than sixty seconds into a push.
+ */
+function checkConfigPath(p: string): string | null {
+  if (!p.startsWith("/")) return `${p} is not an absolute path.`;
+  // The agent refuses anything where `path.Clean(p) != p`, which is a wider
+  // net than spotting `..` and `//`: `/data/local/./tmp/x.json` used to save
+  // here and then fail on every box in the group with "path must be
+  // normalised", with nothing on this form saying the stored value was
+  // unusable. Same rule, so the refusal happens at Save.
+  if (p !== normalisePath(p)) return `${p} is not a normalised path — try ${normalisePath(p)}.`;
+  for (const root of [
+    "/system",
+    "/vendor",
+    "/product",
+    "/apex",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/boot",
+  ]) {
+    if (p === root || p.startsWith(`${root}/`)) return `Nothing may be written under ${root}.`;
+  }
+  // This file holds each box's device token. A config push able to reach it
+  // would be a way to rewrite the whole fleet's credentials.
+  if (p.startsWith("/data/adb/magnemite/")) {
+    return "That is the agent's own directory — writing there would lock Magnemite out of the box.";
+  }
+  return null;
+}
+
+/** `path.Clean` for the handful of shapes a config path can take. */
+function normalisePath(p: string): string {
+  const segments: string[] = [];
+  for (const segment of p.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") segments.pop();
+    else segments.push(segment);
+  }
+  return `/${segments.join("/")}`;
+}
+
+/**
+ * One regex, matching anything between the braces and judging it by name
+ * afterwards.
+ *
+ * Scanning for `[a-zA-Z0-9_.]` and substituting `[^}]*` was two different
+ * ideas of what a placeholder is, and a token with a character in neither —
+ * `{{device-name}}` — fell through both: never reported as unknown here, never
+ * matched by the hub, and written to every box in the group verbatim. The hub's
+ * `TOKEN` is now this same shape.
+ */
+const TEMPLATE_TOKEN = /\{\{([^{}]*)\}\}/g;
+
+function checkConfigTemplate(template: string): string | null {
+  const known: readonly string[] = CONFIG_PLACEHOLDERS;
+  const unknown = [...template.matchAll(TEMPLATE_TOKEN)]
+    .map((match) => (match[1] as string).trim())
+    .filter((name) => !known.includes(name));
+  if (unknown.length > 0) {
+    return `Unknown placeholder ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")}. Known: ${CONFIG_PLACEHOLDERS.join(", ")}.`;
+  }
+
+  // A placeholder always stands in for a JSON string, and the hub escapes what
+  // it substitutes so it stays one. Checking with a quoted stand-in is what
+  // makes that the rule rather than an accident: `"workers": {{device.name}}`
+  // is refused here, which is what lets the hub escape without having to ask
+  // whether the token sat inside quotes.
+  try {
+    JSON.parse(template.replace(TEMPLATE_TOKEN, "PLACEHOLDER"));
+  } catch (err) {
+    return `The config is not valid JSON: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  return null;
 }
 
 export async function createGroup(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -411,91 +541,6 @@ export async function deleteAppTarget(id: string): Promise<ActionState> {
   revalidatePath("/versions");
   revalidatePath("/");
   return { ok: true, message: `Removed "${target.displayName}".` };
-}
-
-/**
- * Watch a package's version across the fleet.
- *
- * Magnemite does not update these — it only asks each box what it has — so
- * this is a column in the fleet table, not an app target. Adding one puts it
- * in the list the agents report on every heartbeat, and the hub pushes that
- * list out immediately so the column fills in without waiting for reconnects.
- */
-export async function createWatchedPackage(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const user = await requireOperator();
-  const packageName = String(formData.get("packageName") ?? "").trim();
-  const label = String(formData.get("label") ?? "").trim();
-
-  if (!PACKAGE_NAME.test(packageName)) {
-    return { error: "That is not a package name — try com.example.app." };
-  }
-
-  const existing = await prisma.watchedPackage.findUnique({ where: { packageName } });
-  if (existing) return { error: `${packageName} is already watched.` };
-
-  const last = await prisma.watchedPackage.findFirst({ orderBy: { position: "desc" } });
-  const watched = await prisma.watchedPackage.create({
-    data: { packageName, label: label || null, position: (last?.position ?? 0) + 1 },
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      userId: user.id,
-      userEmail: user.email,
-      action: "watchedPackage.create",
-      targetType: "WatchedPackage",
-      targetId: watched.id,
-      meta: { packageName },
-    },
-  });
-
-  // Best effort: a hub that is down does not stop the column existing, and
-  // every box picks the list up when it next connects anyway.
-  const pushed = await hub
-    .refreshTrackedPackages()
-    .then((result) => result.sent)
-    .catch(() => null);
-
-  revalidatePath("/settings");
-  revalidatePath("/");
-  return {
-    ok: true,
-    message:
-      pushed === null
-        ? `Watching ${packageName}. Boxes will report it as they reconnect.`
-        : `Watching ${packageName} — ${pushed} box${pushed === 1 ? "" : "es"} told to report it.`,
-  };
-}
-
-export async function deleteWatchedPackage(id: string): Promise<ActionState> {
-  const user = await requireOperator();
-  const watched = await prisma.watchedPackage.findUnique({
-    where: { id },
-    select: { packageName: true },
-  });
-  if (!watched) return { error: "That package is already gone." };
-
-  await prisma.watchedPackage.delete({ where: { id } });
-
-  await prisma.auditLog.create({
-    data: {
-      userId: user.id,
-      userEmail: user.email,
-      action: "watchedPackage.delete",
-      targetType: "WatchedPackage",
-      targetId: id,
-      meta: { packageName: watched.packageName },
-    },
-  });
-
-  await hub.refreshTrackedPackages().catch(() => undefined);
-
-  revalidatePath("/settings");
-  revalidatePath("/");
-  return { ok: true, message: `Stopped watching ${watched.packageName}.` };
 }
 
 /**

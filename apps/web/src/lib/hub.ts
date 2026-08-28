@@ -40,6 +40,15 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return payload as T;
 }
 
+/**
+ * Which of a rollout's hooks may run.
+ *
+ * NORMAL is the usual pair. POST_ONLY is a box with nothing running yet: there
+ * is nothing to stop, but the hook that starts the scanner still has work.
+ * NONE is the deploy that lands before the thing the hooks act on exists.
+ */
+export type HookMode = "NORMAL" | "POST_ONLY" | "NONE";
+
 export type CreateRolloutInput = {
   appVersionId: string;
   deviceIds?: string[];
@@ -47,6 +56,10 @@ export type CreateRolloutInput = {
   /** Override the device group's hooks for this rollout only. */
   preInstallHook?: string | null;
   postInstallHook?: string | null;
+  /** Which of the resolved hooks may run. Defaults to both. */
+  hookMode?: HookMode;
+  /** False leaves the group's MITM config alone. Defaults to writing it. */
+  writeConfig?: boolean;
   canaryCount?: number;
   soakMinutes?: number;
   retryBackoffSeconds?: number;
@@ -107,7 +120,7 @@ export const hub = {
   rotomDeviceAction: (id: string, action: "restart" | "reboot" | "enable" | "disable") =>
     call(`/internal/devices/${id}/rotom/${action}`),
   rotomSync: () => call<{ seen: number; matched: number }>("/internal/rotom/sync"),
-  /** Push a changed watched-package list to every connected box. */
+  /** Push a changed tracked-package list to every connected box. */
   refreshTrackedPackages: () => call<{ sent: number }>("/internal/tracked-packages/refresh"),
   cacheVersion: (id: string) => call(`/internal/versions/${id}/cache`),
   pruneVersions: (keepLatest?: number) =>

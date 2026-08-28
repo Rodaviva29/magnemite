@@ -33,23 +33,6 @@ export type AppTargetRow = {
 
 export type FeedChoice = { id: string; name: string; enabled: boolean };
 
-/** What a target starts life with, which is what the empty card stands in with. */
-const PLACEHOLDER: AppTargetRow = {
-  id: "placeholder",
-  displayName: "",
-  packageName: "",
-  autoUpdateEnabled: false,
-  autoApprove: false,
-  canaryCount: 1,
-  soakMinutes: 30,
-  retryBackoffSeconds: 60,
-  maxAttempts: 3,
-  updateCooldownMinutes: 0,
-  windowStart: null,
-  windowEnd: null,
-  sourceIds: [],
-};
-
 /**
  * One app target, whole.
  *
@@ -64,8 +47,7 @@ export function AppTargetCard({
   feeds,
   disabled,
 }: {
-  /** Null before any target exists: the card shows what one buys you, greyed out. */
-  target: AppTargetRow | null;
+  target: AppTargetRow;
   feeds: FeedChoice[];
   disabled: boolean;
 }) {
@@ -76,31 +58,29 @@ export function AppTargetCard({
   const [removing, startRemoving] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const values = target ?? PLACEHOLDER;
+  const values = target;
   const [enabled, setEnabled] = useState(values.autoUpdateEnabled);
   const [autoApprove, setAutoApprove] = useState(values.autoApprove);
 
-  // No target means nothing on this card can be touched, whatever the role.
-  const locked = disabled || target === null;
-  // The policy needs a target *and* the automatic path switched on.
+  const locked = disabled;
+  // The policy is only read by the automatic path, so the switch gates it.
   const policyLocked = locked || !enabled;
 
   return (
-    <Card className={cn(target === null && "opacity-70")}>
+    <Card>
       <CardHeader className="flex-row items-start justify-between gap-2 space-y-0">
         <div className="flex min-w-0 flex-col gap-1">
           <CardTitle className="flex items-center gap-2">
             <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">{target?.displayName || "App target"}</span>
+            <span className="truncate">{target.displayName}</span>
           </CardTitle>
           <CardDescription>
-            {target === null
-              ? "Add a target below and this is what you get to set: the package to track, the sources its builds are discovered at, and whether the hub rolls them out on its own."
-              : "The package this fleet tracks, where its builds are discovered, and how they reach the boxes."}
+            The package this fleet tracks, where its builds are discovered, and how they reach the
+            boxes.
           </CardDescription>
         </div>
 
-        {target !== null && !disabled ? (
+        {!disabled ? (
           <Button
             type="button"
             variant="ghost"
@@ -316,11 +296,9 @@ export function AppTargetCard({
 
               {/* One line that explains the greying, so it is not read as a bug. */}
               <p className="-mt-1 text-xs text-muted-foreground">
-                {target === null
-                  ? "No app target yet — nothing here can be set until one exists."
-                  : !enabled
-                    ? "Only automatic rollouts use these. Turn the switch above on to set them; a manual rollout takes its canary, soak and attempts from the fleet page instead."
-                    : "The cooldown is how long after one automatic rollout finishes before another may start — 0 ships a new build as soon as it is discovered. Leave both window fields blank to let automatic rollouts dispatch at any hour; the window only gates automatic ones, a manual rollout always starts immediately."}
+                {!enabled
+                  ? "Only automatic rollouts use these. Turn the switch above on to set them; a manual rollout takes its canary, soak and attempts from the fleet page instead."
+                  : "The cooldown is how long after one automatic rollout finishes before another may start — 0 ships a new build as soon as it is discovered. Leave both window fields blank to let automatic rollouts dispatch at any hour; the window only gates automatic ones, a manual rollout always starts immediately."}
               </p>
             </div>
           </Section>
@@ -337,39 +315,37 @@ export function AppTargetCard({
         </form>
       </CardContent>
 
-      {target !== null ? (
-        <ConfirmDialog
-          open={confirmOpen}
-          onOpenChange={setConfirmOpen}
-          title={`Remove ${target.displayName}?`}
-          description={
-            <>
-              Every version discovered for it is deleted with it, and the fleet stops tracking{" "}
-              <span className="font-mono text-xs">{target.packageName}</span>. The boxes keep the
-              app they already have installed.
-            </>
-          }
-          confirmLabel="Remove target"
-          pending={removing}
-          error={removeError}
-          onConfirm={() => {
-            startRemoving(async () => {
-              const result = await deleteAppTarget(target.id);
-              setRemoveError(result.error ?? null);
-              // Left open on failure so the reason is read where the decision
-              // was made, rather than behind a closed dialog.
-              if (!result.error) setConfirmOpen(false);
-            });
-          }}
-        >
-          {/* The rollout history is what actually blocks this, and finding
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Remove ${target.displayName}?`}
+        description={
+          <>
+            Every version discovered for it is deleted with it, and the fleet stops tracking{" "}
+            <span className="font-mono text-xs">{target.packageName}</span>. The boxes keep the app
+            they already have installed.
+          </>
+        }
+        confirmLabel="Remove target"
+        pending={removing}
+        error={removeError}
+        onConfirm={() => {
+          startRemoving(async () => {
+            const result = await deleteAppTarget(target.id);
+            setRemoveError(result.error ?? null);
+            // Left open on failure so the reason is read where the decision
+            // was made, rather than behind a closed dialog.
+            if (!result.error) setConfirmOpen(false);
+          });
+        }}
+      >
+        {/* The rollout history is what actually blocks this, and finding
               that out only after clicking Remove is worth pre-empting. */}
-          <p className="rounded-md border border-border bg-subtle px-3 py-2 text-xs text-muted-foreground">
-            A target that has already shipped a rollout cannot be removed — the rollout pins the
-            version it installed.
-          </p>
-        </ConfirmDialog>
-      ) : null}
+        <p className="rounded-md border border-border bg-subtle px-3 py-2 text-xs text-muted-foreground">
+          A target that has already shipped a rollout cannot be removed — the rollout pins the
+          version it installed.
+        </p>
+      </ConfirmDialog>
     </Card>
   );
 }

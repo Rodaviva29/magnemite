@@ -49,10 +49,29 @@ export function EnrollmentSection({
   // hidden `autoApprove` input either way, so the form posts the same.
   const [autoApprove, setAutoApprove] = useState(true);
 
+  // The real token once there is one, so the commands below can be copied and
+  // run. Before that they are still worth showing, with the placeholder the
+  // docs use, because they say what the flags are called.
+  const token = state.token ?? "<enrollment token>";
+
   const sample = `{
   "serverUrl": "${publicUrl}",
-  "enrollmentToken": "${state.token ?? "<enrollment token>"}"
+  "enrollmentToken": "${token}"
 }`;
+
+  // The same two flags in the two shells that can run the build. The Makefile
+  // shells out to awk and pwd, so on Windows it wants Git Bash and the
+  // PowerShell script is the way in — which is why both are here rather than
+  // whichever one the reader's machine happens to want.
+  //
+  // Neither value is quoted, and a token starting with `-` is fine in both: a
+  // base64url token needs no shell quoting, and PowerShell takes the word
+  // after `-Token` as its value even when it looks like a parameter name.
+  const buildCommands = `# Linux, macOS, Git Bash
+make module SERVER=${publicUrl} TOKEN=${token}
+
+# Windows PowerShell
+./scripts/build-agent.ps1 -Server ${publicUrl} -Token ${token}`;
 
   return (
     <Card>
@@ -85,9 +104,18 @@ export function EnrollmentSection({
           <pre className="overflow-x-auto rounded-lg border border-border bg-subtle p-3 font-mono text-xs">
             {sample}
           </pre>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label>Or bake it into the Magisk module zip, to flash a batch</Label>
+          <pre className="overflow-x-auto rounded-lg border border-border bg-subtle p-3 font-mono text-xs">
+            {buildCommands}
+          </pre>
           <p className="text-xs text-muted-foreground">
-            Or bake the same file into the Magisk module zip before flashing a batch: see
-            scripts/enroll.sh.
+            Either one writes that same config.json into the zip, so a flashed box enrols on its own
+            with no further typing. Server and token go together — both refuse one without the
+            other. Then flash the batch over adb with{" "}
+            <code className="font-mono">scripts/enroll.sh</code>.
           </p>
         </div>
 

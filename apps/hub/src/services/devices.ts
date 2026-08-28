@@ -22,7 +22,12 @@ function toBigInt(value: number | string | null | undefined): bigint | null {
 
 export async function markOnline(
   deviceId: string,
-  opts: { agentVersion: string; publicIp: string | null; info: DeviceInfo },
+  opts: {
+    agentVersion: string;
+    publicIp: string | null;
+    info: DeviceInfo;
+    capabilities: string[];
+  },
 ) {
   await prisma.device.update({
     where: { id: deviceId },
@@ -30,6 +35,9 @@ export async function markOnline(
       status: "ONLINE",
       lastSeenAt: new Date(),
       agentVersion: opts.agentVersion,
+      // Replaced outright on every hello, empty list included: a rolled-back
+      // agent has to stop claiming what it can no longer do.
+      capabilities: opts.capabilities,
       publicIp: opts.publicIp,
       // Only the agent knows the box's LAN address; keep whatever we had if an
       // older agent does not report one.
@@ -184,16 +192,30 @@ export async function sweepOffline(timeoutSeconds: number) {
 /**
  * Packages the agent should report on every heartbeat.
  *
- * Two sources: the apps Magnemite updates, and the ones it only watches — the
- * scanner and friends, which nothing here installs but whose version is worth
- * seeing across the fleet.
+ * Two sources: the apps Magnemite updates, and the MITM each device group runs
+ * — which nothing here polls a feed for, but whose version is worth seeing
+ * across the fleet.
+ *
+ * The MITM list is the union of every group's, not each box's own. Sending a
+ * box only its group's MITM looks tidier and is wrong: a box moved between
+ * groups would stop reporting the one it actually has, and its old cell would
+ * sit there stale forever. The union is also how a box in the wrong group is
+ * spotted at all.
  */
 export async function trackedPackages(): Promise<string[]> {
-  const [targets, watched] = await Promise.all([
+  const [targets, groups] = await Promise.all([
     prisma.appTarget.findMany({ where: { enabled: true }, select: { packageName: true } }),
-    prisma.watchedPackage.findMany({ select: { packageName: true } }),
+    prisma.deviceGroup.findMany({
+      where: { mitmPackageName: { not: null } },
+      select: { mitmPackageName: true },
+    }),
   ]);
-  return [...new Set([...targets, ...watched].map((row) => row.packageName))];
+  return [
+    ...new Set([
+      ...targets.map((row) => row.packageName),
+      ...groups.map((row) => row.mitmPackageName as string),
+    ]),
+  ];
 }
 
 /**

@@ -27,6 +27,8 @@ const createRolloutBody = z.object({
   forceClean: z.boolean().optional(),
   preInstallHook: z.string().nullable().optional(),
   postInstallHook: z.string().nullable().optional(),
+  hookMode: z.enum(["NORMAL", "POST_ONLY", "NONE"]).optional(),
+  writeConfig: z.boolean().optional(),
   canaryCount: z.number().int().min(0).optional(),
   soakMinutes: z.number().int().min(0).optional(),
   maxConcurrency: z.number().int().positive().nullable().optional(),

@@ -174,6 +174,15 @@ export const helloSchema = z.object({
   metrics: deviceMetricsSchema,
   /** Set when the agent is resuming a job it was running before it restarted. */
   currentJobId: z.string().nullish(),
+  /**
+   * What this build of the agent can be asked to do, beyond the message set
+   * that has always existed. Empty from an agent old enough not to send it.
+   *
+   * The hub gates on this rather than comparing `agentVersion`: version
+   * arithmetic reads a backported build as too old, and the failure mode is a
+   * message sent to a box that silently drops it.
+   */
+  capabilities: z.array(z.string()).default([]),
 });
 
 export const heartbeatSchema = z.object({
@@ -352,6 +361,25 @@ export const welcomeSchema = z.object({
   monitor: monitorSpecSchema.nullish(),
 });
 
+/**
+ * A file to put on the box, written between the verify and the post-install
+ * hook so the hook that starts the scanner never starts it against the
+ * previous site's settings.
+ *
+ * It rides `install_job` and nothing else. There was a `write_config` message
+ * that pushed one on its own, with a restart command to make the running
+ * process re-read it; both are gone. A config reaches a box by installing the
+ * MITM that reads it, and the post-install hook is what starts that MITM.
+ */
+export const deviceConfigFileSchema = z.object({
+  /** Absolute path. The agent refuses system paths and its own config. */
+  path: z.string().min(1),
+  content: z.string(),
+  /** Octal, as a string. 0644 is right for /data/local/tmp. */
+  mode: z.string().default("0644"),
+});
+export type DeviceConfigFile = z.infer<typeof deviceConfigFileSchema>;
+
 export const installJobSchema = z.object({
   type: z.literal("install_job"),
   jobId: z.string(),
@@ -370,6 +398,13 @@ export const installJobSchema = z.object({
    * splits, matched by name. Rarely needed.
    */
   extraSplits: z.array(z.string()).default([]),
+  /**
+   * Written once the install verifies and before the post-install hook, so the
+   * hook that starts the scanner never starts it against the previous fleet's
+   * config. Absent for every app that is not the box's group MITM, and ignored
+   * outright by an agent old enough not to know the field.
+   */
+  config: deviceConfigFileSchema.nullish(),
   /** Seconds before the agent gives up on the whole job. */
   timeoutSeconds: z.number().int().positive().default(3600),
 });
@@ -437,6 +472,44 @@ export const execCommandSchema = z.object({
   command: z.string().min(1),
   timeoutSeconds: z.number().int().positive().default(60),
 });
+
+/**
+ * Names the agent puts in `hello.capabilities`.
+ *
+ * Still `write_config` after the message of that name was removed: it says the
+ * agent can write a config file at all, which is what the hub checks before
+ * attaching one to an install. Renaming it would make every already-deployed
+ * agent look incapable until it updated.
+ */
+export const CAPABILITY_WRITE_CONFIG = "write_config";
+
+/**
+ * What a group's config template may substitute.
+ *
+ * An allow-list and not a reach into the device row by key: the row holds
+ * `tokenHash`, and a template able to name it would be a way to write the
+ * fleet's credentials into a file the scanner reads.
+ *
+ * The dashboard keeps its own copy in `apps/web/src/lib/config-placeholders.ts`
+ * rather than importing this. It cannot: this module is every zod schema in the
+ * protocol, and the dashboard needs the list in a client component. Change one,
+ * change the other.
+ */
+export const CONFIG_PLACEHOLDERS = [
+  "device.id",
+  "device.name",
+  "device.serial",
+  "device.model",
+  "device.manufacturer",
+  "device.androidVersion",
+  "device.abi",
+  "device.localIp",
+  "device.publicIp",
+  "device.rotomOrigin",
+  "device.rotomDeviceId",
+  "group.name",
+] as const;
+export type ConfigPlaceholder = (typeof CONFIG_PLACEHOLDERS)[number];
 
 export const pingSchema = z.object({ type: z.literal("ping") });
 

@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Label } from "@/components/ui/label";
 import { SaveButton } from "@/components/ui/save-button";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 
 export type SourceFeedRow = {
   id: string;
@@ -78,15 +79,26 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
   const [pending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  // Controlled rather than `defaultChecked`, only so the block can recede the
+  // moment the switch goes off. A paused source keeps every field it had —
+  // they are what it resumes with — but reading as loud as a live one made a
+  // list of feeds say nothing about which of them were actually polling.
+  const [enabled, setEnabled] = useState(feed.enabled);
 
   return (
-    <form action={formAction} className="flex flex-col gap-3 rounded-md border border-border p-4">
+    <form
+      action={formAction}
+      className={cn(
+        "flex flex-col gap-3 rounded-md border p-4 transition-colors",
+        enabled ? "border-border" : "border-border/60 bg-subtle",
+      )}
+    >
       <input type="hidden" name="feedId" value={feed.id} />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className={cn("flex items-center gap-2 transition-opacity", !enabled && "opacity-60")}>
           <h3 className="text-sm font-medium">{feed.name}</h3>
-          {feed.enabled ? null : <Badge variant="secondary">disabled</Badge>}
+          {enabled ? null : <Badge variant="secondary">paused</Badge>}
           <span className="text-xs text-muted-foreground">
             {feed.versionCount} version{feed.versionCount === 1 ? "" : "s"} discovered ·{" "}
             {feed.targetCount} target{feed.targetCount === 1 ? "" : "s"}
@@ -107,7 +119,10 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      {/* Dimmed as one block, so it reads as a source that is switched off
+          rather than four fields that happen to have faded. They stay editable
+          — setting a paused feed up before turning it on is the normal order. */}
+      <div className={cn("grid gap-3 transition-opacity sm:grid-cols-2", !enabled && "opacity-60")}>
         <div className="flex flex-col gap-2 sm:col-span-2">
           <Label htmlFor={`index-${feed.id}`}>Index URL</Label>
           <Input
@@ -172,11 +187,12 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
           <Switch
             id={`enabled-${feed.id}`}
             name="enabled"
-            defaultChecked={feed.enabled}
+            checked={enabled}
+            onCheckedChange={setEnabled}
             disabled={disabled}
           />
           <Label htmlFor={`enabled-${feed.id}`} className="text-sm font-normal">
-            Poll this source
+            {enabled ? "Poll this source" : "Paused — this source is not polled"}
           </Label>
         </div>
 

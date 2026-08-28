@@ -1,12 +1,8 @@
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { compareVersions } from "@/lib/format";
-import {
-  FleetTable,
-  type DeviceRow,
-  type VersionOption,
-  type WatchedColumn,
-} from "@/components/fleet-table";
+import { mitmColumns } from "@/lib/mitm-columns";
+import { FleetTable, type DeviceRow, type VersionOption } from "@/components/fleet-table";
 
 export const dynamic = "force-dynamic";
 
@@ -25,16 +21,18 @@ export default async function FleetPage() {
   const target = await prisma.appTarget.findFirst({ where: { enabled: true, manual: false } });
   const packageName = target?.packageName ?? "com.nianticlabs.pokemongo";
 
-  // Extra version columns, configured in Settings. Their packages are fetched
-  // alongside the target's, so a device row is still one query.
-  const watched = await prisma.watchedPackage.findMany({ orderBy: { position: "asc" } });
-  const watchedNames = watched.map((row) => row.packageName);
+  // The MITM columns come from the device groups: each one names the MITM its
+  // boxes run. Read before the rest so their packages can be fetched alongside
+  // the target's, keeping a device row at one query.
+  const groups = await prisma.deviceGroup.findMany({ orderBy: { name: "asc" } });
+  const columns = mitmColumns(groups);
+  const mitmNames = columns.map((column) => column.packageName);
 
-  const [devices, groups, versions] = await Promise.all([
+  const [devices, versions] = await Promise.all([
     prisma.device.findMany({
       include: {
         group: { select: { id: true, name: true } },
-        packages: { where: { packageName: { in: [packageName, ...watchedNames] } } },
+        packages: { where: { packageName: { in: [packageName, ...mitmNames] } } },
         jobs: {
           where: { state: { in: [...ACTIVE_OR_QUEUED] } },
           orderBy: { queuedAt: "desc" },
@@ -44,7 +42,6 @@ export default async function FleetPage() {
       },
       orderBy: [{ status: "asc" }, { name: "asc" }],
     }),
-    prisma.deviceGroup.findMany({ orderBy: { name: "asc" } }),
     // Every watched app, not just the primary one: a rollout picks its app in
     // the dialog, and only builds already cached here can be shipped.
     prisma.appVersion.findMany({
@@ -68,8 +65,8 @@ export default async function FleetPage() {
       agentVersion: device.agentVersion,
       groupName: device.group?.name ?? null,
       installedVersion: installed.get(packageName)?.versionName ?? null,
-      watchedVersions: Object.fromEntries(
-        watchedNames.map((name) => {
+      mitmVersions: Object.fromEntries(
+        mitmNames.map((name) => {
           const pkg = installed.get(name);
           // Uninstalled is not the same as never reported, and both read as an
           // empty cell — the count in Settings is where that distinction lives.
@@ -114,11 +111,6 @@ export default async function FleetPage() {
   const latestVersion =
     versionOptions.find((option) => option.targetId === target?.id)?.version ?? null;
 
-  const watchedColumns: WatchedColumn[] = watched.map((row) => ({
-    packageName: row.packageName,
-    label: row.label || (row.packageName.split(".").pop() ?? row.packageName),
-  }));
-
   return (
     <FleetTable
       rows={rows}
@@ -126,7 +118,7 @@ export default async function FleetPage() {
       versions={versionOptions}
       latestVersion={latestVersion}
       packageName={packageName}
-      watchedColumns={watchedColumns}
+      mitmColumns={columns}
       canOperate={user.role !== "VIEWER"}
     />
   );

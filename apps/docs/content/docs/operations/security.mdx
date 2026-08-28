@@ -31,9 +31,22 @@ agents' domain, anything that is not `/ws/device`, `/api/enroll`, `/files/*` or
 ## The agent
 
 It runs as root but **changes no device settings of its own accord**. It
-installs, reads package versions and free space, collects logs when asked, and
-runs the shell you gave it: the pre/post-install hooks, and whatever an operator
-types into [Execute](/docs/fleet/logs#execute).
+installs, reads package versions and free space, collects logs when asked, writes
+the [MITM config](/docs/fleet/configs) its group declares, and runs the shell you
+gave it: the pre/post-install hooks, and whatever an operator types into
+[Execute](/docs/fleet/logs#execute).
+
+Writing a file is the one primitive it grew that is not a shell, and it is
+narrower than one on purpose. It refuses a path that is relative or
+un-normalised, anything under `/system`, `/vendor`, `/product`, `/apex`,
+`/proc`, `/sys`, `/dev` or `/boot`, and its own `config.json` — that file holds
+the box's device token, and a config write able to overwrite it would be a way to
+rewrite the fleet's credentials from the dashboard.
+
+A MITM config holds credentials of its own: a bearer token, a device auth token,
+an account email. It is never written to the hub's log, never into an audit
+entry, and never sent to a VIEWER's browser — they are told a config exists, not
+what is in it.
 
 That last pair is worth being clear about. An operator account can run arbitrary
 commands as root on every box in the fleet — that is what the hooks have always

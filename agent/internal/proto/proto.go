@@ -127,6 +127,22 @@ type Hello struct {
 	Device          DeviceInfo    `json:"device"`
 	Metrics         DeviceMetrics `json:"metrics"`
 	CurrentJobID    string        `json:"currentJobId,omitempty"`
+	// What this build can be asked to do, beyond the message set that has
+	// always existed. The hub gates on this rather than comparing AgentVersion:
+	// version arithmetic reads a backported build as too old, and what that
+	// costs is a message sent to a box that silently drops it.
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// Capabilities this build reports in Hello. Add the constant next to the
+// handler that implements it, not before.
+const (
+	CapabilityWriteConfig = "write_config"
+)
+
+// AgentCapabilities is what this binary claims it can do.
+func AgentCapabilities() []string {
+	return []string{CapabilityWriteConfig}
 }
 
 type Heartbeat struct {
@@ -254,6 +270,22 @@ type MonitorCheckSpec struct {
 	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 }
 
+// ConfigFile is a file to put on the box, written between the verify and the
+// post-install hook so the hook that starts the scanner never starts it against
+// the previous site's settings.
+//
+// It rides InstallJob and nothing else. A WriteConfig message used to push one
+// on its own, with a restart command to make the running process re-read it;
+// both are gone, and a config now reaches a box by installing the MITM that
+// reads it.
+type ConfigFile struct {
+	// Absolute path. The agent refuses system paths and its own config.
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	// Octal, as a string. Empty means 0644.
+	Mode string `json:"mode,omitempty"`
+}
+
 type InstallJob struct {
 	Type            string   `json:"type"`
 	JobID           string   `json:"jobId"`
@@ -266,7 +298,11 @@ type InstallJob struct {
 	PreInstallHook  string   `json:"preInstallHook,omitempty"`
 	PostInstallHook string   `json:"postInstallHook,omitempty"`
 	ExtraSplits     []string `json:"extraSplits,omitempty"`
-	TimeoutSeconds  int      `json:"timeoutSeconds"`
+	// Written once the install verifies and before the post-install hook, so
+	// the hook that starts the scanner never starts it against the previous
+	// fleet's config. Nil for every app that is not this box's group MITM.
+	Config         *ConfigFile `json:"config,omitempty"`
+	TimeoutSeconds int         `json:"timeoutSeconds"`
 }
 
 type CancelJob struct {

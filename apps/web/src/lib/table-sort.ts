@@ -52,13 +52,15 @@ export function useTableSort<K extends string, Row>(
     (rows: Row[]) => {
       const accessor = accessors[sort.key];
       if (!accessor) return rows;
-      return [...rows].sort((a, b) =>
-        compareValues(accessor(a), accessor(b), sort.direction),
-      );
+      return [...rows].sort((a, b) => compareValues(accessor(a), accessor(b), sort.direction));
     },
-    // The accessor map is rebuilt each render by callers; only its shape matters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sort],
+    // `accessors` is in here, not excluded as "shape only". The accessors close
+    // over what the table is currently showing — the picked package on the
+    // manual page, the MITM columns on the fleet table — so a map that changed
+    // while `sort` did not left this closure sorting by the previous package
+    // under a header naming the new one. Both callers build the map in a
+    // useMemo, so this changes identity only when the columns really change.
+    [accessors, sort],
   );
 
   const headProps = useCallback(
@@ -70,5 +72,8 @@ export function useTableSort<K extends string, Row>(
     [sort, toggle],
   );
 
-  return useMemo(() => ({ sort, toggle, sortRows, headProps }), [sort, toggle, sortRows, headProps]);
+  return useMemo(
+    () => ({ sort, toggle, sortRows, headProps }),
+    [sort, toggle, sortRows, headProps],
+  );
 }

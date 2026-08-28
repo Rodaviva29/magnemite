@@ -188,6 +188,11 @@ adding to it, or two ladders would race over one fault and the box would be
 restarted twice. That is the seam for a fleet running Atlas at one site and
 Aegis at another.
 
+The group is also where that site declares which MITM it runs and what to write
+into its [config](/docs/fleet/configs). A group-scoped rule and its group's MITM
+package are two halves of the same answer, so they are worth keeping in step: a
+rule probing Atlas's log on a group that runs Aegis is a rule that never fires.
+
 The seeded rules are not invented: their thresholds and ladders are what
 [aconf](https://github.com/TechG3n/aconf)'s `atlas_monitor.sh` has done on this
 hardware for years. The probe strings are Atlas's, which is exactly why they

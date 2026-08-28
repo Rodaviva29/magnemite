@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"magnemite/agent/internal/apkm"
+	"magnemite/agent/internal/deviceconfig"
 	"magnemite/agent/internal/proto"
 	"magnemite/agent/internal/sys"
 )
@@ -66,6 +67,9 @@ type Installer struct {
 	// forward_auth lets them through.
 	Token  string
 	Client *http.Client
+	// The agent's own config, which a job-carried config file is refused
+	// permission to overwrite.
+	AgentConfigPath string
 }
 
 type Result struct {
@@ -224,6 +228,24 @@ func (i *Installer) Run(ctx context.Context, job proto.InstallJob, rep Reporter)
 	installed, verr := i.verify(ctx, job)
 	if verr != nil {
 		return Result{InstallMode: mode, DataWiped: dataWiped, Err: verr}
+	}
+
+	// --- 8. config -------------------------------------------------------
+	// Here rather than in the post-install hook, and here rather than after
+	// Run returns: the deferred hook is what starts the scanner again, and a
+	// scanner started before its config is in place reads the previous one.
+	if job.Config != nil {
+		rep.Progress(proto.StateVerifying, 90, "writing config")
+		res, cerr := deviceconfig.Apply(i.Sys, *job.Config, i.AgentConfigPath)
+		if cerr != nil {
+			// A configured app is the point of installing this one, so a
+			// config that did not land fails the job rather than leaving a
+			// scanner quietly running on someone else's settings. The bundle
+			// is kept for the retry, so this costs an attempt and not a
+			// second 170 MB download.
+			return Result{InstallMode: mode, DataWiped: dataWiped, Err: cerr}
+		}
+		rep.Log(proto.LevelInfo, fmt.Sprintf("wrote %s (sha256 %s)", job.Config.Path, res.SHA256[:12]))
 	}
 
 	// The bundle has done its job; on a 8 GB box 170 MB is worth reclaiming.

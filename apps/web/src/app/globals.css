@@ -179,6 +179,24 @@
 
   html {
     background-color: var(--background);
+    /*
+     * Reserve the scrollbar's 8px whether or not there is one, so the layout
+     * does not move sideways.
+     *
+     * Two things moved it. Navigating from a page that scrolls to one that does
+     * not took the scrollbar away and slid everything 8px right — most visible
+     * on the header and the tab rail, which are full-bleed. And every Radix
+     * overlay (dialog, select, dropdown) locks the page while it is open, which
+     * removes the scrollbar for exactly as long as the dialog is up: the page
+     * jumped 8px on open and back on close, under a dialog that was itself
+     * centred against the moved viewport.
+     *
+     * `stable` keeps the gutter reserved through both, including while the
+     * scroll lock is on, so there is nothing left to compensate for. Nothing
+     * adds padding to <body> to make up the difference — which is what would
+     * double up with this and push the page the other way.
+     */
+    scrollbar-gutter: stable;
   }
 
   body {

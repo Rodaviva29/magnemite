@@ -34,6 +34,20 @@ Lives in `agent/internal/sys/fake.go`, driven by environment variables:
 | `MAGNEMITE_FAKE_FREE_BYTES`        | Override free space, to trip the space gate                    |
 | `MAGNEMITE_FAKE_INSTALL_MS`        | How long a commit pretends to take                             |
 
+## Where a pushed config lands
+
+`/data/local/tmp/aegis_config.json` is not a path a laptop has, so a fake box
+writes under its own state file instead, separators flattened into the name:
+
+```
+.dev/fleet/fake-001.files/data_local_tmp_aegis_config.json
+```
+
+The whole path is exercised — the mkdir, the temp file, the rename, the sha256
+read back — so a [MITM config](/docs/fleet/configs) written by a deploy can be
+verified end to end, placeholder substitution included, without a box in the
+room.
+
 ## What this is good for
 
 - **Scheduler behaviour under load.** 200 devices against a max concurrent

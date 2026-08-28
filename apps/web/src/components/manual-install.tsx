@@ -2,8 +2,18 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Package, Trash2, Upload, Wand2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FileJson,
+  Package,
+  Trash2,
+  Upload,
+  Wand2,
+  X,
+} from "lucide-react";
 import { deleteManualVersion, startManualInstall } from "@/actions/manual";
+import type { HookMode } from "@/lib/hub";
 import { readApkInfoFromFile, type ApkInfo } from "@/lib/apk-info";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import { OnlineDot } from "@/components/status";
 import { formatBytes } from "@/lib/format";
+import type { MitmColumn } from "@/lib/mitm-columns";
 import { RelativeTime } from "@/components/relative-time";
 import { useTableSort } from "@/lib/table-sort";
 import { cn } from "@/lib/utils";
@@ -34,7 +45,27 @@ export type FleetPackage = {
   packageName: string;
   displayName: string | null;
   devices: number;
+  /**
+   * A MITM some device group runs. These lead the picker: on a fresh fleet the
+   * one app you most need to install is the one no box has reported yet, so
+   * ordering by "how many boxes have it" buries it.
+   */
+  isMitm?: boolean;
 };
+
+/**
+ * The three answers to "is there anything for these hooks to act on".
+ *
+ * Named for what happens rather than for the phase of a project: "initial
+ * setup" makes the reader work out which hooks that implies, and gets it wrong
+ * on the half of a fresh fleet where the post-install hook is the one thing
+ * that matters.
+ */
+const HOOK_MODES: { id: HookMode; label: string; hint: string }[] = [
+  { id: "NORMAL", label: "Normal", hint: "Stop before, start after." },
+  { id: "POST_ONLY", label: "Start only", hint: "New box: nothing to stop yet." },
+  { id: "NONE", label: "Neither", hint: "Nothing here is running yet." },
+];
 
 export type ManualDevice = {
   id: string;
@@ -67,30 +98,38 @@ type Group = {
   name: string;
   preInstallHook: string | null;
   postInstallHook: string | null;
+  mitmPackageName: string | null;
 };
 
 const CUSTOM = "__custom__";
 
 /**
- * Manual install: put an APK you have in your hand onto boxes you choose.
+ * Install or update an APK you have in your hand, on boxes you choose.
  *
  * Everything else in Magnemite is about the one watched app and the versions a
  * source publishes for it. This is the escape hatch — a scanner build that is
  * not on the mirror yet, a launcher, a config app — and it deliberately ends
  * up in the same place: a normal rollout, with the same jobs and the same page
  * to watch it fail or finish on.
+ *
+ * Installing onto a box that has nothing has always worked: a device with no
+ * reported version gets a normal queued job. What it never did was *say* so,
+ * and the one app a fresh box most needs was the hardest to pick, because the
+ * list was built from what boxes already had.
  */
 export function ManualInstall({
   packages,
   devices,
   groups,
   builds,
+  mitmColumns,
   canOperate,
 }: {
   packages: FleetPackage[];
   devices: ManualDevice[];
   groups: Group[];
   builds: ManualBuild[];
+  mitmColumns: MitmColumn[];
   canOperate: boolean;
 }) {
   const router = useRouter();
@@ -120,7 +159,14 @@ export function ManualInstall({
   const [preHook, setPreHook] = useState("");
   const [postHook, setPostHook] = useState("");
   const [forceClean, setForceClean] = useState(false);
-  const [skipUpToDate, setSkipUpToDate] = useState(false);
+  // Follows the suggestion until somebody picks for themselves, and then stops
+  // moving. A control that kept re-deciding under the cursor as boxes are
+  // ticked would be worse than one that never suggested anything.
+  const [hookMode, setHookMode] = useState<HookMode>("NORMAL");
+  const [hookModeTouched, setHookModeTouched] = useState(false);
+  // On by default: writing the config is the point of deploying a MITM, and
+  // there is no other way for an edited one to reach the boxes.
+  const [writeConfig, setWriteConfig] = useState(true);
   const [note, setNote] = useState("");
 
   const [pending, startTransition] = useTransition();
@@ -131,21 +177,35 @@ export function ManualInstall({
     [builds, packageName],
   );
 
+  // The MITM columns, minus one that would duplicate the "currently on" column
+  // when the thing being installed is itself a MITM.
+  const extraColumns = useMemo(
+    () => mitmColumns.filter((column) => column.packageName !== packageName),
+    [mitmColumns, packageName],
+  );
+
   // Sorted like the fleet table, because this is the fleet — the question
-  // "which boxes" is the same one, asked while holding a file.
-  const { headProps, sortRows } = useTableSort<
-    "device" | "group" | "version" | "free" | "lastSeen",
-    ManualDevice
-  >(
-    {
+  // "which boxes" is the same one, asked while holding a file. Keys are open
+  // rather than a closed union for the same reason they are there: one
+  // `pkg:<name>` per MITM column.
+  const accessors = useMemo(() => {
+    const map: Record<string, (d: ManualDevice) => string | number | null> = {
       device: (d) => d.name,
       group: (d) => d.groupName,
       version: (d) => (packageName ? (d.installed[packageName] ?? null) : null),
       free: (d) => d.freeBytes,
       lastSeen: (d) => d.lastSeenAt,
-    },
-    { key: "device", direction: "asc" },
-  );
+    };
+    for (const column of extraColumns) {
+      map[`pkg:${column.packageName}`] = (d) => d.installed[column.packageName] ?? null;
+    }
+    return map;
+  }, [packageName, extraColumns]);
+
+  const { headProps, sortRows } = useTableSort<string, ManualDevice>(accessors, {
+    key: "device",
+    direction: "asc",
+  });
 
   const visibleDevices = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -157,11 +217,66 @@ export function ManualInstall({
         device.serial.toLowerCase().includes(q) ||
         (device.model?.toLowerCase().includes(q) ?? false) ||
         (device.groupName?.toLowerCase().includes(q) ?? false) ||
-        (packageName ? (device.installed[packageName]?.toLowerCase().includes(q) ?? false) : false)
+        // Any reported version, not only the chosen package's: with the MITM
+        // columns on screen, typing a version you can see has to find its rows.
+        Object.values(device.installed).some((version) => version.toLowerCase().includes(q))
       );
     });
     return sortRows(filtered);
-  }, [devices, query, groupFilter, packageName, sortRows]);
+  }, [devices, query, groupFilter, sortRows]);
+
+  /**
+   * How the picked set splits between boxes that have this app and boxes that
+   * do not. The whole point of the page saying "install" rather than "update".
+   */
+  const split = useMemo(() => {
+    const chosen = devices.filter((device) => picked.has(device.id));
+    const fresh = packageName
+      ? chosen.filter((device) => !device.installed[packageName]).length
+      : chosen.length;
+    return { total: chosen.length, fresh, updates: chosen.length - fresh };
+  }, [devices, picked, packageName]);
+
+  /** Groups whose MITM is the app being installed — the ones whose config rides along. */
+  const configuredGroups = useMemo(
+    () => (packageName ? groups.filter((g) => g.mitmPackageName === packageName) : []),
+    [groups, packageName],
+  );
+
+  /**
+   * Which hooks this deploy should be allowed to run, worked out rather than
+   * asked for.
+   *
+   * The hooks are written to stop and start the group's MITM, and whether that
+   * is the right thing to do depends on whether the MITM is on the box yet.
+   * Setting a fleet up is two deploys where the answer differs: the watched app
+   * first, onto boxes with no scanner at all, and then the MITM itself, where
+   * there is still nothing to stop but the hook that starts it finally has
+   * something to start.
+   *
+   * A guess, and overridable, because a hook is arbitrary shell: this reads
+   * "the group's MITM is installed" as "the hooks have something to act on",
+   * which is the convention the presets follow rather than a rule anyone is
+   * held to.
+   */
+  const mitmByGroup = useMemo(
+    () => new Map(groups.map((g) => [g.id, g.mitmPackageName])),
+    [groups],
+  );
+  const suggestedHookMode: HookMode = useMemo(() => {
+    if (!packageName || picked.size === 0) return "NORMAL";
+    const chosen = devices.filter((device) => picked.has(device.id));
+    const anyScannerPresent = chosen.some((device) => {
+      const mitm = device.groupId ? mitmByGroup.get(device.groupId) : null;
+      return Boolean(mitm && device.installed[mitm]);
+    });
+    if (anyScannerPresent) return "NORMAL";
+    // Nothing to stop on any of them. Whether there is anything worth starting
+    // afterwards depends on whether this deploy is what puts it there.
+    return configuredGroups.length > 0 ? "POST_ONLY" : "NONE";
+  }, [packageName, picked, devices, mitmByGroup, configuredGroups]);
+
+  const effectiveHookMode = hookModeTouched ? hookMode : suggestedHookMode;
 
   const allVisiblePicked =
     visibleDevices.length > 0 && visibleDevices.every((d) => picked.has(d.id));
@@ -281,8 +396,9 @@ export function ManualInstall({
         deviceIds: [...picked],
         preInstallHook: preHook.trim() || null,
         postInstallHook: postHook.trim() || null,
+        hookMode: effectiveHookMode,
+        writeConfig,
         forceClean,
-        skipUpToDate,
         maxConcurrency: null,
         note: note.trim() || null,
       });
@@ -315,7 +431,7 @@ export function ManualInstall({
   return (
     <div className="flex flex-col gap-5">
       <header>
-        <h1 className="text-xl font-semibold tracking-tight">Manual install</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Manual deploy</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Push an APK you have on hand to boxes you pick! Made for an app no source is watched for,
           or a build that is not published yet. It runs as a normal rollout.
@@ -333,6 +449,47 @@ export function ManualInstall({
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           {error}
         </p>
+      ) : null}
+
+      {/* The config is the half of a MITM deploy that is easy not to think
+          about, so it says so before the file is even chosen rather than in a
+          line under the hooks, three cards down and after the decision. */}
+      {configuredGroups.length > 0 ? (
+        <div
+          className={cn(
+            "flex flex-col gap-3 rounded-lg border px-4 py-3",
+            writeConfig ? "border-primary/40 bg-primary/5" : "border-border bg-subtle",
+          )}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-2">
+              <FileJson className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="text-sm">
+                <span className="font-medium">
+                  This is the MITM for {configuredGroups.map((g) => g.name).join(", ")}.
+                </span>{" "}
+                <span className="text-muted-foreground">
+                  {writeConfig
+                    ? "Each box there also gets its group's config written once the install verifies, before the hook that starts it. Disable this to leave the config as is."
+                    : "The config on each box is left exactly as it is. The app is installed and nothing else is touched."}
+                </span>
+              </div>
+            </div>
+            <Switch
+              checked={writeConfig}
+              onCheckedChange={setWriteConfig}
+              disabled={!canOperate}
+              aria-label="Write the group's config with this deploy"
+            />
+          </div>
+          {!writeConfig ? (
+            <p className="text-xs text-muted-foreground">
+              For the deploy that must not overwrite what is already there: reinstalling a scanner
+              that crashed, rolling a build back, or shipping a hotfix over a config somebody edited
+              on the box by hand.
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {/* --- 1. the app ---------------------------------------------------- */}
@@ -355,7 +512,16 @@ export function ManualInstall({
               options={[
                 ...packages.map((p) => ({
                   value: p.packageName,
-                  label: p.devices > 0 ? `${p.packageName} · ${p.devices} boxes` : p.packageName,
+                  // "0 boxes" spelled out rather than left blank: on a fresh
+                  // fleet that is the normal state of the app you are here to
+                  // install, and an empty suffix read as missing data.
+                  label: [
+                    p.packageName,
+                    p.isMitm ? "MITM" : null,
+                    `${p.devices} ${p.devices === 1 ? "box" : "boxes"}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · "),
                 })),
                 { value: CUSTOM, label: "Another package…" },
               ]}
@@ -606,6 +772,14 @@ export function ManualInstall({
                   <TableSortHead {...headProps("version")}>
                     {packageName ? packageName.split(".").pop() : "Installed"}
                   </TableSortHead>
+                  {extraColumns.map((column) => (
+                    <TableSortHead
+                      key={column.packageName}
+                      {...headProps(`pkg:${column.packageName}`)}
+                    >
+                      {column.label}
+                    </TableSortHead>
+                  ))}
                   <TableSortHead {...headProps("free")} align="right">
                     Free
                   </TableSortHead>
@@ -615,7 +789,10 @@ export function ManualInstall({
               <TableBody>
                 {visibleDevices.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={6 + extraColumns.length}
+                      className="py-8 text-center text-muted-foreground"
+                    >
                       No approved device matches this filter.
                     </TableCell>
                   </TableRow>
@@ -664,6 +841,14 @@ export function ManualInstall({
                         )}
                       </TableCell>
 
+                      {extraColumns.map((column) => (
+                        <TableCell key={column.packageName} className="font-mono text-xs">
+                          {device.installed[column.packageName] ?? (
+                            <span className="font-sans text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                      ))}
+
                       <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
                         {device.freeBytes === null ? "—" : formatBytes(device.freeBytes)}
                       </TableCell>
@@ -690,6 +875,53 @@ export function ManualInstall({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label>Which hooks run</Label>
+            <div
+              role="radiogroup"
+              aria-label="Which hooks run"
+              className="grid gap-2 sm:grid-cols-3"
+            >
+              {HOOK_MODES.map((option) => {
+                const active = effectiveHookMode === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    disabled={!canOperate}
+                    onClick={() => {
+                      setHookMode(option.id);
+                      setHookModeTouched(true);
+                    }}
+                    className={cn(
+                      "flex flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors",
+                      "disabled:cursor-not-allowed disabled:opacity-60",
+                      active ? "border-primary bg-primary/10" : "border-border hover:bg-subtle",
+                    )}
+                  >
+                    <span className="text-sm font-medium">{option.label}</span>
+                    <span className="text-xs text-muted-foreground">{option.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Why it landed where it did. Without this the pre-selection reads
+                as the form having an opinion nobody can check. */}
+            <p className="text-xs text-muted-foreground">
+              {hookModeTouched
+                ? "Picked by hand."
+                : picked.size === 0
+                  ? "Pick the boxes and this follows what they already have."
+                  : suggestedHookMode === "NORMAL"
+                    ? "Some of the picked boxes already run their group's scanner, so there is something to stop and start."
+                    : suggestedHookMode === "POST_ONLY"
+                      ? "None of the picked boxes run their group's scanner yet, and this deploy is what puts it there."
+                      : "None of the picked boxes run their group's scanner, and this deploy is not what installs it."}
+            </p>
+          </div>
+
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="pre">Pre-install hook</Label>
@@ -700,8 +932,11 @@ export function ManualInstall({
                 placeholder={
                   packageName ? `am force-stop ${packageName}` : "am force-stop com.example.app"
                 }
-                disabled={!canOperate}
+                disabled={!canOperate || effectiveHookMode !== "NORMAL"}
               />
+              {effectiveHookMode !== "NORMAL" ? (
+                <p className="text-xs text-muted-foreground">Not run under the choice above.</p>
+              ) : null}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="post">Post-install hook</Label>
@@ -714,8 +949,11 @@ export function ManualInstall({
                     ? `monkey -p ${packageName} -c android.intent.category.LAUNCHER 1`
                     : "monkey -p com.example.app -c android.intent.category.LAUNCHER 1"
                 }
-                disabled={!canOperate}
+                disabled={!canOperate || effectiveHookMode === "NONE"}
               />
+              {effectiveHookMode === "NONE" ? (
+                <p className="text-xs text-muted-foreground">Not run under the choice above.</p>
+              ) : null}
             </div>
           </div>
 
@@ -747,26 +985,10 @@ export function ManualInstall({
               <span>
                 <span className="text-sm font-medium">Clean install</span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Uninstall first instead of upgrading in place. Wipes the app&apos;s data on every
-                  box: accounts, logins, settings.
+                  Uninstall first instead of upgrading in place.
                 </span>
               </span>
               <Switch checked={forceClean} onCheckedChange={setForceClean} disabled={!canOperate} />
-            </label>
-
-            <label className="flex items-start justify-between gap-4">
-              <span>
-                <span className="text-sm font-medium">Skip boxes already on this label</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Off by default here: a re-upload under the same label is usually a different
-                  build, and skipping would quietly do nothing.
-                </span>
-              </span>
-              <Switch
-                checked={skipUpToDate}
-                onCheckedChange={setSkipUpToDate}
-                disabled={!canOperate}
-              />
             </label>
           </div>
 
@@ -789,8 +1011,18 @@ export function ManualInstall({
             <>
               <span className="font-mono text-foreground">{selected.packageName}</span>{" "}
               <Badge variant="outline">{selected.version}</Badge> on{" "}
-              <span className="text-foreground">{picked.size}</span> box
-              {picked.size === 1 ? "" : "es"}
+              <span className="text-foreground">{split.total}</span> box
+              {split.total === 1 ? "" : "es"}
+              {/* Which of them have it already is the question the page used to
+                  leave unanswered, and it is the difference between a first
+                  install and an upgrade that can wipe data. */}
+              {split.total > 0 && split.fresh > 0 && split.updates > 0
+                ? ` · ${split.fresh} first install${split.fresh === 1 ? "" : "s"}, ${split.updates} update${split.updates === 1 ? "" : "s"}`
+                : split.total > 0 && split.fresh > 0
+                  ? ` · all first installs`
+                  : split.total > 0
+                    ? ` · all updates`
+                    : ""}
               {forceClean ? " · data will be wiped" : ""}
             </>
           ) : (
@@ -802,7 +1034,11 @@ export function ManualInstall({
           disabled={!canOperate || pending || !selected || picked.size === 0}
         >
           <Wand2 />
-          {pending ? "Starting…" : "Install now"}
+          {pending
+            ? "Starting…"
+            : split.total > 0 && split.updates === 0
+              ? `Install on ${split.total}`
+              : "Install now"}
         </Button>
       </div>
     </div>

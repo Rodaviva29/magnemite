@@ -1,5 +1,8 @@
+import Link from "next/link";
+import { Package } from "lucide-react";
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
+import { Button } from "@/components/ui/button";
 import { compareVersions } from "@/lib/format";
 import { VersionsTable, type VersionRow } from "@/components/versions-table";
 
@@ -16,10 +19,29 @@ export default async function VersionsPage() {
   });
 
   if (targets.length === 0) {
+    // A bare sentence at the top-left of an otherwise blank page read as a
+    // page that had failed to load. This is the same empty state the rest of
+    // the app uses, and it carries the way out rather than naming it.
     return (
-      <p className="text-sm text-muted-foreground">
-        No app target configured. Add one from Settings.
-      </p>
+      <div className="flex flex-col gap-6">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Versions</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Builds discovered for the packages this fleet tracks.
+          </p>
+        </div>
+
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-16 text-center">
+          <Package className="h-6 w-6 text-muted-foreground" />
+          <p className="max-w-md text-sm text-muted-foreground">
+            No app target yet. Versions are discovered per tracked package, so nothing is polled and
+            nothing appears here until one exists.
+          </p>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/settings#apps">Add an app target</Link>
+          </Button>
+        </div>
+      </div>
     );
   }
 

@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { JobState, VersionSource } from "@magnemite/db";
+import type { MitmColumn } from "@/lib/mitm-columns";
 import { startRollout, type ActionState } from "@/actions/rollouts";
 import { rebootDevice, setDeviceApproval } from "@/actions/devices";
 import { Badge } from "@/components/ui/badge";
@@ -65,8 +66,8 @@ export type DeviceRow = {
   agentVersion: string | null;
   groupName: string | null;
   installedVersion: string | null;
-  /** Installed version of each watched package, keyed by package name. */
-  watchedVersions: Record<string, string | null>;
+  /** Installed version of each group's MITM, keyed by package name. */
+  mitmVersions: Record<string, string | null>;
   freeBytes: number | null;
   lastSeenAt: string | null;
   /** Only present when the Rotom integration is on and this box was matched. */
@@ -94,16 +95,7 @@ export type VersionOption = {
 
 type Filter = "all" | "online" | "offline" | "outdated" | "pending";
 
-/**
- * An extra version column, configured in Settings.
- *
- * Magnemite does not update these packages — the boxes just report what they
- * have — so the column is a plain version with none of the up-to-date badging
- * the target app's column carries.
- */
-export type WatchedColumn = { packageName: string; label: string };
-
-// Plus one `pkg:<name>` per watched column, which is why this is not a closed
+// Plus one `pkg:<name>` per MITM column, which is why this is not a closed
 // union.
 type FleetSortKey = string;
 
@@ -113,7 +105,7 @@ export function FleetTable({
   versions,
   latestVersion,
   packageName,
-  watchedColumns,
+  mitmColumns,
   canOperate,
 }: {
   rows: DeviceRow[];
@@ -121,7 +113,7 @@ export function FleetTable({
   versions: VersionOption[];
   latestVersion: string | null;
   packageName: string;
-  watchedColumns: WatchedColumn[];
+  mitmColumns: MitmColumn[];
   canOperate: boolean;
 }) {
   // The scanner column only earns its space once Rotom has matched something.
@@ -143,11 +135,11 @@ export function FleetTable({
       agent: (r) => r.agentVersion,
       lastSeen: (r) => r.lastSeenAt,
     };
-    for (const column of watchedColumns) {
-      map[`pkg:${column.packageName}`] = (r) => r.watchedVersions[column.packageName] ?? null;
+    for (const column of mitmColumns) {
+      map[`pkg:${column.packageName}`] = (r) => r.mitmVersions[column.packageName] ?? null;
     }
     return map;
-  }, [watchedColumns]);
+  }, [mitmColumns]);
 
   const { headProps, sort, sortRows } = useTableSort<FleetSortKey, DeviceRow>(accessors, {
     key: "device",
@@ -180,7 +172,7 @@ export function FleetTable({
         row.serial.toLowerCase().includes(q) ||
         (row.model?.toLowerCase().includes(q) ?? false) ||
         (row.installedVersion?.toLowerCase().includes(q) ?? false) ||
-        Object.values(row.watchedVersions).some(
+        Object.values(row.mitmVersions).some(
           (version) => version?.toLowerCase().includes(q) ?? false,
         )
       );
@@ -309,7 +301,7 @@ export function FleetTable({
               <TableSortHead {...headProps("version")}>
                 {packageName.split(".").pop()}
               </TableSortHead>
-              {watchedColumns.map((column) => (
+              {mitmColumns.map((column) => (
                 <TableSortHead key={column.packageName} {...headProps(`pkg:${column.packageName}`)}>
                   {column.label}
                 </TableSortHead>
@@ -328,7 +320,7 @@ export function FleetTable({
             {visible.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={(showRotom ? 10 : 9) + watchedColumns.length}
+                  colSpan={(showRotom ? 10 : 9) + mitmColumns.length}
                   className="py-10 text-center text-muted-foreground"
                 >
                   {rows.length === 0
@@ -346,7 +338,7 @@ export function FleetTable({
                   onToggle={() => toggleOne(row.id)}
                   canOperate={canOperate}
                   showRotom={showRotom}
-                  watchedColumns={watchedColumns}
+                  mitmColumns={mitmColumns}
                 />
               ))
             )}
@@ -365,14 +357,14 @@ function DeviceRowView({
   onToggle,
   canOperate,
   showRotom,
-  watchedColumns,
+  mitmColumns,
 }: {
   row: DeviceRow;
   latestVersion: string | null;
   selected: boolean;
   onToggle: () => void;
   canOperate: boolean;
-  watchedColumns: WatchedColumn[];
+  mitmColumns: MitmColumn[];
   showRotom: boolean;
 }) {
   const [pending, startTransition] = useTransition();
@@ -422,8 +414,8 @@ function DeviceRowView({
         )}
       </TableCell>
 
-      {watchedColumns.map((column) => {
-        const version = row.watchedVersions[column.packageName] ?? null;
+      {mitmColumns.map((column) => {
+        const version = row.mitmVersions[column.packageName] ?? null;
         return (
           <TableCell key={column.packageName} className="font-mono text-xs">
             {version ?? <span className="font-sans text-muted-foreground">—</span>}

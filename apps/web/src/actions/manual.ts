@@ -3,15 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@magnemite/db";
 import { requireOperator } from "@/lib/session";
-import { hub } from "@/lib/hub";
+import { type HookMode, hub } from "@/lib/hub";
 
 export type ManualInstallInput = {
   appVersionId: string;
   deviceIds: string[];
   preInstallHook: string | null;
   postInstallHook: string | null;
+  hookMode: HookMode;
+  writeConfig: boolean;
   forceClean: boolean;
-  skipUpToDate: boolean;
   maxConcurrency: number | null;
   note: string | null;
 };
@@ -37,9 +38,16 @@ export async function startManualInstall(input: ManualInstallInput): Promise<Man
       appVersionId: input.appVersionId,
       deviceIds: input.deviceIds,
       forceClean: input.forceClean,
-      skipUpToDate: input.skipUpToDate,
+      // Always off from here, and sent rather than omitted: `createRollout`
+      // defaults it to true, so leaving it out would flip the behaviour to
+      // skipping. There is nothing to be up to date with on a first install,
+      // and a re-upload under the same label is usually a different build —
+      // skipping either would quietly do nothing.
+      skipUpToDate: false,
       preInstallHook: input.preInstallHook,
       postInstallHook: input.postInstallHook,
+      hookMode: input.hookMode,
+      writeConfig: input.writeConfig,
       maxConcurrency: input.maxConcurrency,
       createdById: user.id,
       note: input.note,

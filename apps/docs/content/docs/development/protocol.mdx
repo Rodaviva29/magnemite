@@ -20,13 +20,14 @@ The message set is small on purpose — it is implemented twice, in
 | `log_bundle_result`   | Only on failure: the log bundle was not collected or uploaded                        |
 | `log_lines`           | A batch of live logcat lines, and how many were dropped keeping up                   |
 | `exec_result`         | What a one-off command printed, and whether it worked                                |
+| `config_result`       | A config file landed (or did not), with the sha256 read back off the box             |
 | `pong`                | Answering a `ping`                                                                   |
 
 ## Hub → box
 
 | Message            | When                                                   |
 | ------------------ | ------------------------------------------------------ |
-| `welcome`          | Accepting the socket, and what to monitor               |
+| `welcome`          | Accepting the socket, and what to monitor              |
 | `install_job`      | Artifact URL, sha256, target version, hooks, flags     |
 | `cancel_job`       | You cancelled it, or the scheduler re-queued it        |
 | `reboot`           | From the device page                                   |
@@ -36,6 +37,39 @@ The message set is small on purpose — it is implemented twice, in
 | `log_stream_stop`  | Nobody is watching any more                            |
 | `exec_command`     | Run this shell command as root and say what it printed |
 | `ping`             | Liveness                                               |
+
+## Configs ride the install
+
+A [MITM's config](/docs/fleet/configs) reaches a box one way: on **`install_job`**,
+as an optional `config` object. A rollout of a group's own MITM carries that
+group's config, written after the install verifies and before the post-install
+hook — the one moment the app is already stopped and the hook that starts it has
+not run yet.
+
+There was a second path, a `write_config` message that pushed a config on its own
+when the config had changed but the app had not. It needed a restart command to
+go with it, because writing a file a running process has already read changes
+nothing by itself. Inside an install the post-install hook already restarts the
+scanner, so the command only earned its keep on the push, and the two were
+removed together. An edited config now reaches the fleet by deploying the MITM
+again.
+
+The write is still atomic rather than a truncate-then-fill a scanner can read
+halfway through, and the JSON never goes through a shell that would have to
+escape it.
+
+## Capabilities, not version arithmetic
+
+`hello` carries an optional `capabilities` list — what this build of the agent
+can be asked to do beyond the message set that has always existed. The hub checks
+it before attaching a config to a job. The name is still `write_config` after the
+message of that name was removed: it says the agent can write a config file at
+all, and renaming it would make every already-deployed agent look incapable until
+it updated.
+
+Comparing `agentVersion` instead would look equivalent and is not: it reads a
+backported build as too old, and what that costs is a message sent to a box that
+drops it in silence. An agent that sends no list is simply not asked.
 
 ## Monitoring rides both of those
 
@@ -73,3 +107,16 @@ separates the two, and without it the hub cannot read any of the rest.
 Change `packages/protocol`, mirror it in Go, and remember that a fleet updates
 its agents on its own schedule: a hub must keep understanding the previous
 message set until every box has taken an `agent_update`.
+
+Additions do not move `PROTOCOL_VERSION`. It is a floor on the message set an
+agent must understand, not a change counter — bumping it would say old agents are
+incompatible, and they are not. `install_job`'s `config` and `hello`'s
+`capabilities` both arrived without touching it, and `write_config` and
+`config_result` came and went the same way — a hub that never sends a message
+type is indistinguishable, to an agent, from one that has not needed to yet.
+
+What makes that safe is on the agent side: the type switch has no default branch,
+so an unknown message type falls straight through and is ignored, and Go's JSON
+decoding drops fields it does not know. An old box takes an extended `install_job`
+and installs without the config. Adding a field is free; repurposing or removing
+one is not.

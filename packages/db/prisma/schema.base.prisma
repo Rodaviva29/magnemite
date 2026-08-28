@@ -34,6 +34,15 @@ enum VersionStatus {
   FAILED
 }
 
+/// NORMAL runs both hooks. POST_ONLY skips the pre-install hook, for boxes
+/// with nothing running yet. NONE skips both, for the deploy that lands before
+/// the thing the hooks act on exists.
+enum RolloutHookMode {
+  NORMAL
+  POST_ONLY
+  NONE
+}
+
 enum RolloutMode {
   MANUAL
   AUTO
@@ -99,6 +108,14 @@ model Device {
   sdkInt         Int?
   abi            String?
   agentVersion   String?
+
+  /// What this box's agent says it can do, from its `hello` — a JSON array of
+  /// strings, null on an agent old enough not to say. That is the point: a
+  /// feature added to the protocol asks this rather than doing version
+  /// arithmetic on `agentVersion`, which breaks the first time a build is
+  /// backported. Json rather than String[] because a scalar list is Postgres
+  /// only and this schema is generated for MariaDB too.
+  capabilities Json?
 
   /// sha256 of the bearer token the agent presents. The plaintext token is
   /// shown once at enrollment and never stored.
@@ -243,26 +260,6 @@ enum DeviceLogBundleState {
   FAILED // the agent could not collect it, or never answered
 }
 
-/// An app whose installed version is worth seeing across the fleet, without
-/// Magnemite updating it.
-///
-/// The scanner is the case this exists for: nothing here installs it, but
-/// "which boxes are on which build of it" is the same question the fleet table
-/// already answers for Pokémon GO. Adding one puts it in the agent's tracked
-/// list — so every box reports its version on each heartbeat — and adds a
-/// column.
-model WatchedPackage {
-  id          String  @id @default(cuid())
-  packageName String  @unique
-  /// Column header. Falls back to the last dotted segment of the package name.
-  label       String?
-  /// Left-to-right order of the columns, lowest first.
-  position    Int     @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 /// One point on a box's health timeline.
 ///
 /// The `Device` row only ever holds the latest reading, which answers "is this
@@ -362,6 +359,34 @@ model DeviceGroup {
   /// Overrides the fleet-wide max concurrent jobs (Settings → Hub settings)
   /// for boxes in this group, e.g. to protect a site on a thin uplink.
   maxConcurrency Int?
+
+  // --- MITM ----------------------------------------------------------------
+  /// The MITM this group runs — Aegis, Atlas, GoCheats, whatever. Every box in
+  /// the fleet reports its version (that is the MITM column), and every box in
+  /// *this* group is configured with the JSON below.
+  ///
+  /// It lives here rather than in a fleet-wide list because the config does:
+  /// two sites on two Rotom instances are two groups, and a config that could
+  /// only be set once could not describe them both.
+  mitmPackageName String?
+  /// Column header. Falls back to the last dotted segment of the package name.
+  mitmLabel       String?
+  /// Where the file goes on the box. aconf's is
+  /// `/data/local/tmp/<mitm>_config.json`; GoCheats reads
+  /// `/data/local/tmp/config.json`.
+  mitmConfigPath  String?
+  /// The file's contents. `{{device.name}}` and friends are substituted per
+  /// box before it is written — the same job aconf does with
+  /// `sed 's,dummy,$origin,g'`.
+  ///
+  /// Text and not Json, for two reasons. It is a *template*, and a template is
+  /// not always valid JSON: nothing parses `"workers": {{device.workers}}`
+  /// until something has substituted it, and half-typed is a state a form
+  /// field is in constantly. And a Json column normalises key order and
+  /// whitespace, so an operator's file would not come back the way they wrote
+  /// it. `@db.Text` because a bare String is VARCHAR(191) on MariaDB and an
+  /// aegis config is longer than that.
+  mitmConfig      String? @db.Text
 
   devices      Device[]
   monitorRules MonitorRule[]
@@ -549,10 +574,29 @@ model Rollout {
   retryBackoffSeconds Int @default(60)
 
   /// Hooks for this rollout only, overriding the ones on the device's group.
-  /// A manual install of some other app needs to stop and start that app, not
+  /// A manual deploy of some other app needs to stop and start that app, not
   /// whatever the group stops for the watched one.
   preInstallHook  String?
   postInstallHook String?
+
+  /// Which of the resolved hooks this rollout is allowed to run.
+  ///
+  /// Null on `preInstallHook` already means "fall back to the group", so there
+  /// was no way to say "run neither" — which is what a first deploy onto bare
+  /// boxes needs. Setting up a fleet is two deploys: the watched app, where
+  /// there is no scanner to stop *or* start, and then the MITM, where there is
+  /// nothing to stop but the hook that starts it finally has something to
+  /// start.
+  hookMode RolloutHookMode @default(NORMAL)
+
+  /// Whether this rollout may write the group's MITM config.
+  ///
+  /// True is the point of the feature: a deploy of a group's own MITM carries
+  /// that group's config, and there is no other way for an edited one to reach
+  /// the fleet. False is for the deploy that must not touch what is already on
+  /// the boxes — reinstalling the scanner after a crash, rolling a build back,
+  /// pushing a hotfix while the config on disk is one somebody edited by hand.
+  writeConfig Boolean @default(true)
 
   note        String?
   createdById String?

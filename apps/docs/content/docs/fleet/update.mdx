@@ -90,6 +90,21 @@ is not taken as proof.
 
 <Step>
 
+### Write the MITM config
+
+Only when the app being installed is the one the device's group names as its
+MITM, and only when that group has a config set. The file is rendered for this
+box — `{{device.name}}` and friends become its own values — and written
+atomically before the hook runs, so the hook that starts the scanner never
+starts it against the previous site's config. See [Configs](/docs/fleet/configs).
+
+A config that cannot be rendered is a warning on the job, not a failure: a box
+left on the previous config is better than a box left without the app.
+
+</Step>
+
+<Step>
+
 ### Run the post-install hook
 
 Usually starting the scanner again. It runs on **every** way out, not only the
@@ -110,5 +125,7 @@ percentage and the box's own log.
 </Callout>
 
 The agent runs as root but changes **no device settings**. It installs, reads
-package versions and free space, and runs the hooks you configured — nothing
-else.
+package versions and free space, writes the one config file its group declares,
+and runs the hooks you configured — nothing else. The paths it will write are
+bounded: never under `/system`, `/vendor`, `/product`, `/apex`, `/proc`,
+`/sys`, `/dev` or `/boot`, and never its own directory in `/data/adb/magnemite`.

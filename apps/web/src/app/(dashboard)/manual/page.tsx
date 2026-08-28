@@ -1,5 +1,6 @@
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
+import { mitmColumns } from "@/lib/mitm-columns";
 import {
   ManualInstall,
   type FleetPackage,
@@ -18,7 +19,14 @@ export default async function ManualPage() {
       where: { approved: true },
       include: {
         group: { select: { id: true, name: true } },
-        packages: { select: { packageName: true, versionName: true } },
+        // `installed: true` matters: a box that had the app and lost it keeps
+        // its DevicePackage row with the last version it reported. Without the
+        // filter the version column showed an app that is gone, and the box was
+        // counted as an update rather than a fresh install.
+        packages: {
+          where: { installed: true },
+          select: { packageName: true, versionName: true },
+        },
       },
       orderBy: [{ status: "asc" }, { name: "asc" }],
     }),
@@ -42,12 +50,15 @@ export default async function ManualPage() {
   ]);
 
   const displayNames = new Map(targets.map((t) => [t.packageName, t.displayName]));
+  const columns = mitmColumns(groups);
+  const mitmPackages = new Set(columns.map((column) => column.packageName));
 
   const packages: FleetPackage[] = packageCounts
     .map((row) => ({
       packageName: row.packageName,
       displayName: displayNames.get(row.packageName) ?? null,
       devices: row._count._all,
+      isMitm: mitmPackages.has(row.packageName),
     }))
     .sort((a, b) => b.devices - a.devices || a.packageName.localeCompare(b.packageName));
 
@@ -58,9 +69,28 @@ export default async function ManualPage() {
         packageName: target.packageName,
         displayName: target.displayName,
         devices: 0,
+        isMitm: mitmPackages.has(target.packageName),
       });
     }
   }
+
+  // The groups' MITMs, whether or not any box has reported one. This is the
+  // fresh-install case: on a fleet that has just been flashed, the app you are
+  // here to put on is precisely the one the census above cannot know about.
+  for (const column of columns) {
+    if (!packages.some((p) => p.packageName === column.packageName)) {
+      packages.push({
+        packageName: column.packageName,
+        displayName: column.label,
+        devices: 0,
+        isMitm: true,
+      });
+    }
+  }
+
+  // MITMs first: on a fresh fleet the one app most needed is the one with the
+  // fewest reported installs, which every other ordering buries.
+  packages.sort((a, b) => Number(Boolean(b.isMitm)) - Number(Boolean(a.isMitm)));
 
   const deviceRows: ManualDevice[] = devices.map((device) => ({
     id: device.id,
@@ -100,8 +130,10 @@ export default async function ManualPage() {
         name: g.name,
         preInstallHook: g.preInstallHook,
         postInstallHook: g.postInstallHook,
+        mitmPackageName: g.mitmPackageName,
       }))}
       builds={buildRows}
+      mitmColumns={columns}
       canOperate={canOperate}
     />
   );

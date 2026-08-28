@@ -1,4 +1,4 @@
-import { type RolloutMode, prisma } from "@magnemite/db";
+import { type RolloutHookMode, type RolloutMode, prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
 import { isOnline } from "../registry.js";
@@ -13,6 +13,10 @@ export type CreateRolloutInput = {
   /** Overrides the device group's hooks for this rollout only. */
   preInstallHook?: string | null;
   postInstallHook?: string | null;
+  /** Which of the resolved hooks may run. Defaults to both. */
+  hookMode?: RolloutHookMode;
+  /** False leaves the group's MITM config alone. Defaults to writing it. */
+  writeConfig?: boolean;
   canaryCount?: number;
   soakMinutes?: number;
   maxConcurrency?: number | null;
@@ -74,6 +78,8 @@ export async function createRollout(input: CreateRolloutInput) {
       forceClean: input.forceClean ?? false,
       preInstallHook: input.preInstallHook?.trim() || null,
       postInstallHook: input.postInstallHook?.trim() || null,
+      hookMode: input.hookMode ?? "NORMAL",
+      writeConfig: input.writeConfig ?? true,
       canaryCount: canaryIds.size,
       soakMinutes: input.soakMinutes ?? 0,
       maxConcurrency: input.maxConcurrency ?? null,

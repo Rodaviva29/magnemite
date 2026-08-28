@@ -64,28 +64,36 @@ the heartbeats writing to it.
   retention set to 0.
 </Callout>
 
-## Extra version columns
+## The MITM column
 
-The fleet table shows the installed version of each app Magnemite updates. Any
-other package can have a column too — the scanner being the obvious one.
-**Settings → Fleet columns → Add column**: a package name, optionally a shorter
-header.
+The fleet table shows the installed version of each app Magnemite updates, plus
+one column per MITM. That column comes from the device groups: each group names
+the MITM its boxes run, in **Settings → Device groups → MITM data**.
 
 ```
 com.pokemod.aegis    →  header "aegis"
 ```
 
-It sorts, searches and groups like every other column. Magnemite **does not
-update these** — it only asks each box what it has, which is the whole
-difference from an app target: no rollouts, no versions page, no auto-update.
+It sorts, searches and groups like every other column. Magnemite installs a MITM
+and writes its config, but **nothing polls a feed for it** — no versions page, no
+auto-update. Its version is reported rather than tracked.
 
-The hub keeps one list of packages worth reporting — the app targets plus these
-— and hands it to each agent in its `welcome`. Adding a column pushes the list
-to every connected box, so it fills in on the next heartbeat; an offline box
-picks it up when it returns. An empty cell means the box has not reported that
-package: either it is not installed, or it has not been heard from since. The
-settings tab shows how many boxes answered for each, which tells the two apart.
+Two groups may name the same package: two sites on Aegis, pointed at different
+Rotom instances by their own configs. That is **one** column, not two, or a fleet
+of five sites would grow five identical ones.
 
-Removing a column stops the reporting. Recorded versions stay, and the device
+The hub keeps one list of packages worth reporting — the app targets plus every
+group's MITM — and hands it to each agent in its `welcome`. The list is the union
+across all groups, not each box's own: a box moved between groups would otherwise
+stop reporting the MITM it actually has, and its old cell would sit there stale
+forever. It is also how a box in the wrong group is spotted at all.
+
+Changing a group's MITM package pushes the list to every connected box, so the
+column fills in on the next heartbeat; an offline box picks it up when it
+returns. An empty cell means the box has not reported that package: either it is
+not installed, or it has not been heard from since. The group's field shows how
+many boxes answered, which tells the two apart.
+
+Clearing the package stops the reporting. Recorded versions stay, and the device
 page keeps listing every package a box reported — the column is a view, not the
 record.

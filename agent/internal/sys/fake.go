@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,6 +94,50 @@ func (f *Fake) save() {
 		return
 	}
 	_ = os.WriteFile(f.statePath, data, 0o644)
+}
+
+// WriteFileAtomic writes where a real box would, except that "/data/local/tmp/
+// aegis_config.json" is not a path a laptop has. Everything lands in a directory
+// named for the box, with the separators flattened into the filename, so a
+// config pushed to fake-007 shows up as
+// `.dev/fleet/fake-007.files/data_local_tmp_aegis_config.json` and can be read
+// back to check the placeholders were substituted.
+//
+// The whole path is still exercised — the mkdir, the temp file, the rename, the
+// read-back — which is the point of the fake at all.
+func (f *Fake) WriteFileAtomic(path string, content []byte, mode os.FileMode) (string, error) {
+	local := f.localPath(path)
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		return "", err
+	}
+	// Its own name per write, for the reason the real one has: an install and a
+	// dashboard push can write the same path at the same time.
+	tmp := tempPathFor(local)
+	if err := os.WriteFile(tmp, content, mode); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, local); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return sha256File(local)
+}
+
+// FakeFilesDir is where a fake box's written files land, given its state path.
+// Exported so a test can look for them without repeating the rule.
+func FakeFilesDir(statePath, serial string) string {
+	if statePath == "" {
+		return filepath.Join(os.TempDir(), "magnemite-fake", serial+".files")
+	}
+	// Named for the box rather than derived from the state file, whose name is
+	// "<config>.json.state" — trimming extensions off that produces something
+	// nobody would guess when they go looking for the file.
+	return filepath.Join(filepath.Dir(statePath), serial+".files")
+}
+
+func (f *Fake) localPath(path string) string {
+	flat := strings.Trim(strings.ReplaceAll(filepath.ToSlash(path), "/", "_"), "_")
+	return filepath.Join(FakeFilesDir(f.statePath, f.serial), flat)
 }
 
 func (f *Fake) Prop(_ context.Context, name string) string {
