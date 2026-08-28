@@ -9,11 +9,17 @@ services:
     environment:
       NODE_ENV: production
       DB_PROVIDER: ${DB_PROVIDER:-mysql}
-      # The external database, set in the Environment tab. The default below
-      # is only the shape to copy -- it has to be reachable from *this
-      # container*, so a Coolify database resource means the internal hostname
-      # it publishes on the shared network, not any public one it also has.
-      DATABASE_URL: ${DATABASE_URL:-mysql://magnemite:password@magnemite-db:3306/magnemite}
+      # The external database, set in the Environment tab. The default below is
+      # only the shape to copy -- replace all four angle-bracket parts:
+      #
+      #   <user>      the database user
+      #   <password>  its password
+      #   <host>      the hostname *this container* can reach. A Coolify
+      #               database resource shows it as its internal hostname on
+      #               the shared network -- not the public one it may also
+      #               publish, which a restart or the firewall can move.
+      #   <database>  the database name, e.g. magnemite
+      DATABASE_URL: ${DATABASE_URL:-mysql://<user>:<password>@<host>:3306/<database>}
       HUB_PORT: 3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
       # Two different audiences, two different hosts on Coolify:
@@ -87,7 +93,7 @@ services:
     environment:
       NODE_ENV: production
       DB_PROVIDER: ${DB_PROVIDER:-mysql}
-      DATABASE_URL: ${DATABASE_URL:-mysql://magnemite:password@magnemite-db:3306/magnemite}
+      DATABASE_URL: ${DATABASE_URL:-mysql://<user>:<password>@<host>:3306/<database>}
       AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
       MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL}
