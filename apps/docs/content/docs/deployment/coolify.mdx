@@ -11,10 +11,14 @@ small Caddy of our own (`edge`) in front of the hub. It uses **two domains**
 rather than path routing, because the agents and the dashboard are separate
 audiences.
 
-| Coolify variable    | Points at                                                            |
-| ------------------- | -------------------------------------------------------------------- |
-| `SERVICE_FQDN_WEB`  | the dashboard you log into                                           |
-| `SERVICE_FQDN_EDGE` | what the boxes talk to — use a subdomain like `agents.<your-domain>` |
+| Declared in the file    | Domain for                                                           | Routed to |
+| ----------------------- | -------------------------------------------------------------------- | --------- |
+| `SERVICE_URL_WEB_3000`  | the dashboard you log into                                           | Next      |
+| `SERVICE_URL_EDGE_8080` | what the boxes talk to — use a subdomain like `agents.<your-domain>` | Caddy     |
+
+The numeric suffix is the container port the proxy sends that domain to — see
+[the port lives in the variable
+name](#the-port-lives-in-the-variable-name).
 
 ## Deploying
 
@@ -24,7 +28,23 @@ audiences.
 
 ### Create the resource
 
-**New Resource → Docker Compose**, pointed at `deploy/compose.coolify.yml`.
+**New Resource → Docker Compose**, pointed at this repository. The compose file
+is resolved from two fields in **Build configuration**, and it is the pair that
+matters, not either one alone:
+
+| Field          | Value                  |
+| -------------- | ---------------------- |
+| Base directory | `/deploy`              |
+| Compose file   | `/compose.coolify.yml` |
+
+Coolify echoes the result underneath as **Resolved file:
+`/deploy/compose.coolify.yml`** — check that line before continuing.
+
+Both fields are joined, so a full path in one and `/` in the other resolves to
+the same file — but the base directory is also the working directory of the
+**Custom Build/Start Commands**, so keep it on `/deploy` and the commands stay
+the short ones used [to narrow a
+deploy](/docs/deployment/zero-downtime).
 
 </Step>
 
@@ -33,12 +53,14 @@ audiences.
 ### Set both domains
 
 In the **Domains** tab, give `web` your dashboard domain and `edge` the agents'
-subdomain. Give the edge domain the `:8080` suffix so the proxy hits Caddy's
-port:
+subdomain — bare domains, no port:
 
 ```
-https://agents.magnemite.example.com:8080
+https://agents.magnemite.example.com
 ```
+
+The port is already carried by the variable names, so there is no `:8080` to
+remember here.
 
 </Step>
 
@@ -46,14 +68,13 @@ https://agents.magnemite.example.com:8080
 
 ### Deploy
 
-The admin account is created automatically the moment the hub boots — nothing
-to run by hand. Optionally, seed a starter app target, two version sources, a
-device group and a first enrollment token:
+Nothing to run by hand afterwards. The database migrates itself on boot and the
+admin account is created the moment the hub starts.
 
-```sh
-docker ps --format '{{.Names}}' | grep hub
-docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
-```
+The first deploy has to be the full-stack one, with the **Custom Build/Start
+Command** fields empty — narrowing them comes later, once there are sockets
+worth protecting. See [deploying without dropping the
+fleet](/docs/deployment/zero-downtime).
 
 </Step>
 
@@ -61,7 +82,7 @@ docker exec -it <hub-container> pnpm --filter @magnemite/db run seed
 
 ### Read the generated admin password
 
-Coolify generates the Postgres password, the internal secret, `AUTH_SECRET` and
+Coolify generates the database password, the internal secret, `AUTH_SECRET` and
 the **admin password** itself, and shows them in the **Environment** tab. Read
 `SERVICE_PASSWORD_ADMIN` from there to sign in the first time; change it from
 **Settings → Accounts** afterwards if you prefer one you can remember.
@@ -69,6 +90,19 @@ the **admin password** itself, and shows them in the **Environment** tab. Read
 </Step>
 
 </Steps>
+
+## What you set up from the dashboard
+
+The stack boots empty apart from the admin account: no app target, no version
+sources, no groups. That is the first session in the dashboard, not a script —
+an app target and its [version sources](/docs/operations/sources) first, then a
+group and an [enrollment token](/docs/fleet/enrollment) for the boxes, all under
+**Settings**.
+
+<Callout type="warn">
+  The UnownHash mirror needs its base URL set to `https://mirror.unownhash.com/apks/`, with the
+  trailing path. Without it the index still parses and every download 404s.
+</Callout>
 
 ## The admin login
 
@@ -89,12 +123,70 @@ your own.
 
 ## Things this file does differently
 
-### Bare `SERVICE_FQDN_*` declarations
+### The database is MariaDB
 
-`edge` and `web` declare `- SERVICE_FQDN_EDGE` and `- SERVICE_FQDN_WEB` with no
-value. That is deliberate: Coolify fills them from the Domains tab, and writing
-`${SERVICE_FQDN_EDGE}` would make Compose interpolate a variable that does not
-exist yet and blank it out.
+Unlike `deploy/compose.yml`, which runs Postgres, this stack runs `mariadb:11`.
+Prisma reaches it through the **`mysql`** connector — there is no separate
+`mariadb` provider — so `DB_PROVIDER: mysql` appears twice per app service, and
+both are load-bearing:
+
+- as a **build arg**, because the Prisma Client is generated into the hub and
+  web images at build time and has to match the URL it will be given;
+- as a **runtime env**, because the hub's entrypoint runs `prisma migrate
+deploy`, and the provider is what selects `prisma/migrations-mysql` over
+  `prisma/migrations`.
+
+<Callout type="error" title="Providers do not migrate into each other">
+  The two migration histories are separate and nothing copies data between them. Editing this file
+  does not turn an existing Postgres deployment into a MariaDB one — it starts an empty database
+  next to it. Dump and restore by hand if you have a fleet already enrolled.
+</Callout>
+
+### Valueless `SERVICE_*` entries
+
+`edge` and `web` declare `SERVICE_URL_EDGE_8080:` and `SERVICE_URL_WEB_3000:`
+with no value at all. That is deliberate: Coolify fills them from the Domains
+tab, and writing `${SERVICE_URL_EDGE}` would make Compose interpolate a variable
+that does not exist yet and blank it out.
+
+They are written in **map** form. The list form of the same thing
+(`- SERVICE_URL_EDGE_8080`) means exactly the same to Compose, but Coolify's own
+compose preview mis-converts it into a numeric key and the deploy fails with:
+
+```
+non-string key in services.edge.environment: 0
+```
+
+### The port lives in the variable name
+
+Coolify's proxy has to know which container port a domain belongs to, and the
+place that is written is the **numeric suffix on the name** — `_8080` on the
+edge, `_3000` on the dashboard. Declaring the plain `SERVICE_FQDN_EDGE` instead
+generates the domain but nothing to route it to, which is why that shape needed
+a `:8080` typed into the Domains tab by hand.
+
+One declaration produces four variables, and the difference between them is
+what the rest of the file relies on:
+
+| Variable                 | Value                        | Used for                                                                      |
+| ------------------------ | ---------------------------- | ----------------------------------------------------------------------------- |
+| `SERVICE_FQDN_EDGE`      | `agents.example.com`         | a bare host, no scheme — what the auth fallback accepts                       |
+| `SERVICE_URL_EDGE`       | `https://agents.example.com` | the absolute URL — `MAGNEMITE_PUBLIC_URL`, which artifact URLs are built from |
+| `SERVICE_FQDN_EDGE_8080` | the same, carrying `:8080`   | the proxy's own routing                                                       |
+| `SERVICE_URL_EDGE_8080`  | the same, carrying `:8080`   | the proxy's own routing                                                       |
+
+So `SERVICE_FQDN_EDGE` and `SERVICE_URL_EDGE` are not two ways of saying the
+same thing: the hub needs an absolute URL because it hands artifact URLs to the
+boxes, and the dashboard's auth fallback wants a bare host.
+
+<Callout type="warn" title="Change a domain from the UI and the generic pair goes stale">
+  Coolify updates the two port-carrying variables when you edit a domain in the Domains tab, but
+  [not always the generic `SERVICE_URL_*` /
+  `SERVICE_FQDN_*`](https://github.com/coollabsio/coolify/issues/8912) — they keep the autogenerated
+  wildcard domain. `MAGNEMITE_PUBLIC_URL` comes from the generic one, so a stale value points every
+  box at the wrong host for its downloads. After changing a domain, read the value back in the
+  **Environment** tab before deploying.
+</Callout>
 
 ### The auth URL fallback
 
@@ -120,11 +212,20 @@ proxies only `/ws/device`, `/api/enroll` and `/healthz` through. Everything else
 on that domain is a 404, which keeps the hub's `/internal/*` API unreachable
 from outside — the same guarantee the Caddy setup gives.
 
+The Caddyfile is **baked into the image**, not bind-mounted, because Coolify
+turns a file bind mount into one it manages itself — see [when the Caddyfile
+changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
+
 ## Upgrading from an earlier version of this file
 
-The boxes' domain moved from `SERVICE_FQDN_HUB_3001` to `SERVICE_FQDN_EDGE`.
-Keep the same domain value and nothing needs re-flashing: a box only ever knows
-the URL.
+The boxes' domain has moved twice, and neither move needs re-flashing — a box
+only ever knows the URL, so keeping the same domain value is enough:
+
+- `SERVICE_FQDN_HUB_3001` → `SERVICE_FQDN_EDGE`, when the edge gained its own
+  service.
+- `SERVICE_FQDN_EDGE` → `SERVICE_URL_EDGE_8080`, moving the port out of the
+  Domains tab and into the name. Coming from that shape, **delete the `:8080`
+  suffix from the domain** when you upgrade; the name carries it now.
 
 ## Next
 

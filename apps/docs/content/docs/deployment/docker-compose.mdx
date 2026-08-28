@@ -124,7 +124,8 @@ takes one setting on [Coolify](/docs/deployment/zero-downtime).
 ## Postgres or MariaDB
 
 `deploy/compose.yml` runs Postgres. `deploy/compose.mariadb.yml` is the same
-four services with `mariadb` in place of `postgres` — pick one, not both:
+four services with `mariadb` in place of `postgres` — pick one, not both (the
+[Coolify files](/docs/deployment/coolify) run MariaDB either way):
 
 ```sh
 docker compose --env-file .env -f deploy/compose.mariadb.yml up -d --build

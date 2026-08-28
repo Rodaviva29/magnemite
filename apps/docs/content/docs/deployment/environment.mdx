@@ -20,13 +20,13 @@ resource's **Environment** tab; the rest have defaults.
 
 ## Database
 
-| Variable       | Default      | What it is                                                                                                                                                                                                                                                                                              |
-| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PROVIDER`  | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside compose; matters by hand only outside Docker or when running Prisma directly. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
-| `DB_USER`      | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                          |
-| `DB_PASSWORD`  | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                        |
-| `DB_NAME`      | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                            |
-| `DATABASE_URL` | —            | Only used when running Prisma or the apps **outside** Docker. Inside compose it is built from the `DB_*` values and points at the `postgres`/`mariadb` service.                                                                                                                                         |
+| Variable       | Default      | What it is                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PROVIDER`  | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside compose — `mysql` in `compose.mariadb.yml` and in both Coolify files, which run MariaDB. Matters by hand only outside Docker or when running Prisma directly. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
+| `DB_USER`      | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                                                                                                          |
+| `DB_PASSWORD`  | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                                                                                                        |
+| `DB_NAME`      | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                                                                                                            |
+| `DATABASE_URL` | —            | Only used when running Prisma or the apps **outside** Docker. Inside compose it is built from the `DB_*` values and points at the `postgres`/`mariadb` service.                                                                                                                                                                                                                         |
 
 ## Auth and the first admin
 
@@ -81,16 +81,23 @@ optional `pnpm db:seed` adds two starter sources with no env var involved.
 Coolify replaces every `SERVICE_*` placeholder on first deploy and shows the
 result in the Environment tab.
 
-| Placeholder                                           | Becomes                                                  |
-| ----------------------------------------------------- | -------------------------------------------------------- |
-| `SERVICE_FQDN_WEB`                                    | the dashboard's domain                                   |
-| `SERVICE_FQDN_EDGE`                                   | the agents' domain                                       |
-| `SERVICE_FQDN_DOCS`                                   | the documentation site's domain (docs compose file only) |
-| `SERVICE_URL_WEB` / `SERVICE_URL_EDGE`                | the same, with the scheme                                |
-| `SERVICE_USER_POSTGRES` / `SERVICE_PASSWORD_POSTGRES` | database credentials                                     |
-| `SERVICE_PASSWORD_HUBSECRET`                          | `HUB_INTERNAL_SECRET`                                    |
-| `SERVICE_BASE64_64_AUTHSECRET`                        | `AUTH_SECRET`                                            |
-| `SERVICE_PASSWORD_ADMIN`                              | the first admin's password                               |
+The three domains are **declared** with the container port in the name —
+`SERVICE_URL_WEB_3000`, `SERVICE_URL_EDGE_8080` and, in
+`compose.coolify-docs.yml`, `SERVICE_URL_DOCS_3002`. Each declaration also
+yields the generic pair below, which is what the services actually read. See
+[the port lives in the variable
+name](/docs/deployment/coolify#the-port-lives-in-the-variable-name).
+
+| Placeholder                                         | Becomes                                                           |
+| --------------------------------------------------- | ----------------------------------------------------------------- |
+| `SERVICE_FQDN_WEB`                                  | the dashboard's domain, bare host                                 |
+| `SERVICE_FQDN_EDGE`                                 | the agents' domain, bare host                                     |
+| `SERVICE_FQDN_DOCS`                                 | the documentation site's domain (`compose.coolify-docs.yml` only) |
+| `SERVICE_URL_WEB` / `SERVICE_URL_EDGE`              | the same, with the scheme                                         |
+| `SERVICE_USER_MARIADB` / `SERVICE_PASSWORD_MARIADB` | database credentials                                              |
+| `SERVICE_PASSWORD_HUBSECRET`                        | `HUB_INTERNAL_SECRET`                                             |
+| `SERVICE_BASE64_64_AUTHSECRET`                      | `AUTH_SECRET`                                                     |
+| `SERVICE_PASSWORD_ADMIN`                            | the first admin's password                                        |
 
 ## The agent's own configuration
 

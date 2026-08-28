@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/magnemite.png" alt="Magnemite" width="160" />
+  <img src="apps/web/public/magnemite-256.png" alt="Magnemite" width="160" />
   <h1>Magnemite</h1>
   <p><strong>Over-the-air updater for a fleet of rooted Android TV boxes.</strong></p>
   <p>
