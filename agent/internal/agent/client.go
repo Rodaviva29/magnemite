@@ -19,6 +19,7 @@ import (
 	"magnemite/agent/internal/certfix"
 	"magnemite/agent/internal/config"
 	"magnemite/agent/internal/installer"
+	"magnemite/agent/internal/monitor"
 	"magnemite/agent/internal/proto"
 	"magnemite/agent/internal/sys"
 )
@@ -50,6 +51,9 @@ type Agent struct {
 	mu      sync.Mutex
 	conn    *websocket.Conn
 	tracked []string
+	// What to watch on each beat. Nil until a welcome says otherwise, which is
+	// also what a fleet with monitoring switched off leaves it as.
+	monitor *proto.MonitorSpec
 	// How often to beat. The hub sets it in every welcome, so it survives a
 	// reconnect without the loop having to wait for one.
 	heartbeat time.Duration
@@ -223,17 +227,58 @@ func (a *Agent) sendHello() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// A reconnect is the cheapest moment to take a full inventory: the hub has
+	// just lost sight of this box and one `pm list` is nothing next to the
+	// reconnect itself.
+	metrics := sys.Metrics(ctx, a.Sys, a.trackedPackages(), true)
+	a.applyMonitor(ctx, &metrics)
+
 	return a.send(proto.Hello{
 		Type:            "hello",
 		ProtocolVersion: proto.Version,
 		AgentVersion:    a.Version,
 		Device:          a.Sys.DeviceInfo(ctx),
-		// A reconnect is the cheapest moment to take a full inventory: the
-		// hub has just lost sight of this box and one `pm list` is nothing
-		// next to the reconnect itself.
-		Metrics:      sys.Metrics(ctx, a.Sys, a.trackedPackages(), true),
-		CurrentJobID: a.currentJob(),
+		Metrics:         metrics,
+		CurrentJobID:    a.currentJob(),
 	})
+}
+
+// monitorSpec is what to watch this beat, or nil when there is nothing to
+// watch — or when a job is running. An install force-stops the scanner on
+// purpose, so every probe would faithfully report the damage the hub itself
+// asked for, and the hub would act on it.
+func (a *Agent) monitorSpec() *proto.MonitorSpec {
+	if a.currentJob() != "" {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.monitor
+}
+
+// applyMonitor folds this beat's answers into the metrics about to go out.
+//
+// Budgeted at half the interval: probes are worth having only for as long as
+// they leave room for the heartbeat itself, and one slow dumpsys must not be
+// what stops a box reporting at all.
+func (a *Agent) applyMonitor(ctx context.Context, metrics *proto.DeviceMetrics) {
+	spec := a.monitorSpec()
+	if spec == nil {
+		return
+	}
+
+	a.mu.Lock()
+	interval := a.heartbeat
+	a.mu.Unlock()
+	if interval <= 0 {
+		interval = defaultHeartbeat
+	}
+
+	result := monitor.Collect(ctx, a.Sys, spec, interval/2)
+	metrics.MonitorRan = true
+	metrics.ForegroundPackage = result.Foreground
+	metrics.ANRPackages = result.ANR
+	metrics.Checks = result.Checks
 }
 
 // setHeartbeat adopts an interval the hub asked for in its welcome.
@@ -296,6 +341,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 
 			mctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			metrics := sys.Metrics(mctx, a.Sys, a.trackedPackages(), withInventory)
+			a.applyMonitor(mctx, &metrics)
 			cancel()
 
 			if err := a.send(proto.Heartbeat{
@@ -335,6 +381,12 @@ func (a *Agent) handle(ctx context.Context, data []byte) {
 			a.tracked = msg.TrackedPackages
 			a.mu.Unlock()
 		}
+		// Replaced outright, including with nil: a rule being switched off in
+		// the dashboard has to stop the probe running, and "no spec" is a
+		// state the hub is allowed to put this box into.
+		a.mu.Lock()
+		a.monitor = msg.Monitor
+		a.mu.Unlock()
 		if a.Cfg.DeviceID != msg.DeviceID {
 			a.Cfg.DeviceID = msg.DeviceID
 			_ = a.Cfg.Save(a.ConfigPath)

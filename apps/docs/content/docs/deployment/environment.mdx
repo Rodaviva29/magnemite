@@ -10,23 +10,23 @@ resource's **Environment** tab; the rest have defaults.
 
 ## URLs
 
-| Variable                  | Default                   | What it is                                                                                                                                                 |
-| ------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, in plain HTTP. Your own reverse proxy terminates TLS and forwards here. Compose deployment only.                             |
-| `MAGNEMITE_PUBLIC_URL`    | —                         | The base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can actually reach. On Coolify this is the _edge_ domain. |
-| `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin, checked by Better Auth. Only needs setting when the two audiences are on separate domains.                                     |
-| `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Base URL for auth callbacks. Falls back to Coolify's `SERVICE_FQDN_WEB`; a bare host with no scheme is accepted.                                           |
-| `HUB_URL`                 | `http://hub:3001`         | Where the dashboard reaches the hub's internal API, over the compose network.                                                                              |
+| Variable                  | Default                   | What it is                                                                                                                                                           |
+| ------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, in plain HTTP. Your own reverse proxy terminates TLS and forwards here. Compose deployment only.                                       |
+| `MAGNEMITE_PUBLIC_URL`    | —                         | The base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can actually reach. On Coolify this is the _edge_ domain.           |
+| `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin, checked by Better Auth. Only needs setting when the two audiences are on separate domains — **required on Coolify**, which splits them.  |
+| `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Base URL for auth callbacks. Falls back to Coolify's `SERVICE_FQDN_WEB` / `SERVICE_URL_WEB` if either is in the environment; a bare host with no scheme is accepted. |
+| `HUB_URL`                 | `http://hub:3001`         | Where the dashboard reaches the hub's internal API, over the compose network.                                                                                        |
 
 ## Database
 
-| Variable       | Default      | What it is                                                                                                                                                                                                                                                                                                                                                                              |
-| -------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PROVIDER`  | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside compose — `mysql` in `compose.mariadb.yml` and in both Coolify files, which run MariaDB. Matters by hand only outside Docker or when running Prisma directly. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
-| `DB_USER`      | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                                                                                                          |
-| `DB_PASSWORD`  | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                                                                                                        |
-| `DB_NAME`      | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                                                                                                            |
-| `DATABASE_URL` | —            | Only used when running Prisma or the apps **outside** Docker. Inside compose it is built from the `DB_*` values and points at the `postgres`/`mariadb` service.                                                                                                                                                                                                                         |
+| Variable       | Default      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PROVIDER`  | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside `compose.yml` and `compose.mariadb.yml`. On Coolify it defaults to `mysql` and has to match the external `DATABASE_URL`; changing it needs a rebuild, because the Prisma Client is generated into the images. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
+| `DB_USER`      | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                                                                                                                                                          |
+| `DB_PASSWORD`  | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `DB_NAME`      | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                                                                                                                                                            |
+| `DATABASE_URL` | —            | Only used when running Prisma or the apps **outside** Docker. `deploy/compose.yml` and `deploy/compose.mariadb.yml` build it from the `DB_*` values and point at their own database service; the Coolify files **require** it, because they run no database of their own.                                                                                                                                                               |
 
 ## Auth and the first admin
 
@@ -78,26 +78,19 @@ optional `pnpm db:seed` adds two starter sources with no env var involved.
 
 ## Coolify-generated names
 
-Coolify replaces every `SERVICE_*` placeholder on first deploy and shows the
-result in the Environment tab.
+Coolify generates the secrets below on first deploy and shows them in the
+Environment tab.
 
-The three domains are **declared** with the container port in the name —
-`SERVICE_URL_WEB_3000`, `SERVICE_URL_EDGE_8080` and, in
-`compose.coolify-docs.yml`, `SERVICE_URL_DOCS_3002`. Each declaration also
-yields the generic pair below, which is what the services actually read. See
-[the port lives in the variable
-name](/docs/deployment/coolify#the-port-lives-in-the-variable-name).
+The domains and the database are **not** generated: the domains are typed into
+the Domains tab, and `MAGNEMITE_PUBLIC_URL`, `MAGNEMITE_DASHBOARD_URL` and
+`DATABASE_URL` are set by hand alongside them — see [adding the
+domains](/docs/deployment/coolify#add-the-domains).
 
-| Placeholder                                         | Becomes                                                           |
-| --------------------------------------------------- | ----------------------------------------------------------------- |
-| `SERVICE_FQDN_WEB`                                  | the dashboard's domain, bare host                                 |
-| `SERVICE_FQDN_EDGE`                                 | the agents' domain, bare host                                     |
-| `SERVICE_FQDN_DOCS`                                 | the documentation site's domain (`compose.coolify-docs.yml` only) |
-| `SERVICE_URL_WEB` / `SERVICE_URL_EDGE`              | the same, with the scheme                                         |
-| `SERVICE_USER_MARIADB` / `SERVICE_PASSWORD_MARIADB` | database credentials                                              |
-| `SERVICE_PASSWORD_HUBSECRET`                        | `HUB_INTERNAL_SECRET`                                             |
-| `SERVICE_BASE64_64_AUTHSECRET`                      | `AUTH_SECRET`                                                     |
-| `SERVICE_PASSWORD_ADMIN`                            | the first admin's password                                        |
+| Placeholder                    | Becomes                    |
+| ------------------------------ | -------------------------- |
+| `SERVICE_PASSWORD_HUBSECRET`   | `HUB_INTERNAL_SECRET`      |
+| `SERVICE_BASE64_64_AUTHSECRET` | `AUTH_SECRET`              |
+| `SERVICE_PASSWORD_ADMIN`       | the first admin's password |
 
 ## The agent's own configuration
 

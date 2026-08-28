@@ -4,7 +4,7 @@ import { z } from "zod";
  * Wire protocol between the Go agent on each Android TV and the hub.
  *
  * Every frame is JSON with a `type` discriminator. The Go side mirrors these
- * shapes in agent/internal/protocol/protocol.go — change both together.
+ * shapes in agent/internal/proto/proto.go — change both together.
  *
  * Compatibility rule: agents update themselves over the air and a box that is
  * powered off for a month will reconnect running an old build. Only ever add
@@ -82,6 +82,23 @@ export const processStatsSchema = z.object({
 });
 export type ProcessStats = z.infer<typeof processStatsSchema>;
 
+/**
+ * What one configured probe came back with.
+ *
+ * `ok` is the whole answer — the agent applies the thresholds, because the
+ * alternative is shipping a log window over the socket every twenty seconds.
+ * `detail` is the one line an operator needs to understand a failure, capped
+ * hard: this rides every heartbeat and a frame is 1 MB.
+ */
+export const monitorCheckResultSchema = z.object({
+  id: z.string(),
+  ok: z.boolean(),
+  detail: z.string().nullish(),
+  /** How long the probe took, for spotting one that is too expensive to run. */
+  ms: z.number().int().nonnegative().nullish(),
+});
+export type MonitorCheckResult = z.infer<typeof monitorCheckResultSchema>;
+
 export const deviceMetricsSchema = z.object({
   /** Free bytes on /data — the partition the install session writes to. */
   freeBytes: z.number().nonnegative().nullish(),
@@ -122,6 +139,27 @@ export const deviceMetricsSchema = z.object({
    * for an app that simply is not running.
    */
   processes: z.array(processStatsSchema).default([]),
+
+  /**
+   * What the box saw when it ran the monitor spec from its `welcome`.
+   *
+   * All three are absent on an agent from before monitoring existed, and the
+   * hub has to read that absence as *unknown* rather than as *failing* — a
+   * fleet updates its agents on its own schedule, and a rule that rebooted
+   * every box still running last month's build would be a disaster.
+   */
+  /**
+   * Set when the box actually ran a spec this beat. It is the difference
+   * between "the launcher is up" and "this agent has never heard of
+   * monitoring", which the three fields below cannot tell apart on their own —
+   * both look like an absent `foregroundPackage`. One is a fault worth acting
+   * on and the other is a box that must be left alone, so the flag is what
+   * makes the rest of this readable at all.
+   */
+  monitorRan: z.boolean().default(false),
+  foregroundPackage: z.string().nullish(),
+  anrPackages: z.array(z.string()).default([]),
+  checks: z.array(monitorCheckResultSchema).default([]),
 });
 
 // ---------------------------------------------------------------------------
@@ -244,6 +282,59 @@ export type AgentMessage = z.infer<typeof agentMessageSchema>;
 // hub -> agent
 // ---------------------------------------------------------------------------
 
+/**
+ * One thing the box should look at on every beat.
+ *
+ * The thresholds live here rather than on the hub because the evidence lives
+ * on the box: `logMatch` is a window of the scanner's own log file, and the
+ * whole point is to answer "is this thing working" without shipping the log.
+ *
+ * Every MITM writes a different log and answers to a different service name,
+ * which is why none of these strings are hard-coded — they are rows in the
+ * database that an operator edits per fleet, or per group.
+ */
+export const monitorCheckSpecSchema = z.object({
+  /** Matches the `id` in the result, and the rule that asked for it. */
+  id: z.string(),
+  kind: z.enum(["shell", "http", "logMatch"]),
+  /** shell: the command · http: the URL · logMatch: the log file's path. */
+  target: z.string(),
+  /** shell: a regex the output must match · logMatch: a regex counted as a fault. */
+  expect: z.string().nullish(),
+  /** logMatch: how many trailing lines to read. */
+  lines: z.number().int().positive().default(200),
+  /** logMatch: matches inside that window before the check fails. */
+  failAt: z.number().int().positive().default(1),
+  /**
+   * logMatch: a regex counted as a success, so the check can be a ratio
+   * rather than a count. Some faults are normal under load and only mean
+   * something when they outnumber the work getting done.
+   */
+  successPattern: z.string().nullish(),
+  /** logMatch: fail when faults ≥ successes × this. Null skips the ratio. */
+  maxRatio: z.number().positive().nullish(),
+  /**
+   * logMatch: also fail when the file itself has not been written to for this
+   * long. Deliberately the file's mtime rather than a timestamp parsed out of
+   * a line — every MITM formats its log differently, and "nothing has been
+   * written here for five minutes" is both format-independent and exactly
+   * what a stalled loop looks like.
+   */
+  maxAgeSeconds: z.number().int().positive().nullish(),
+  timeoutSeconds: z.number().int().positive().default(10),
+});
+export type MonitorCheckSpec = z.infer<typeof monitorCheckSpecSchema>;
+
+/** Everything the box should watch, sent with the `welcome` that accepts it. */
+export const monitorSpecSchema = z.object({
+  /** Report which package owns the focused activity. */
+  foreground: z.boolean().default(false),
+  /** Report packages sitting on an ANR dialog. */
+  anr: z.boolean().default(false),
+  checks: z.array(monitorCheckSpecSchema).default([]),
+});
+export type MonitorSpec = z.infer<typeof monitorSpecSchema>;
+
 export const welcomeSchema = z.object({
   type: z.literal("welcome"),
   deviceId: z.string(),
@@ -252,6 +343,13 @@ export const welcomeSchema = z.object({
   heartbeatSeconds: z.number().int().positive().default(20),
   /** Packages the agent should report versions for on every heartbeat. */
   trackedPackages: z.array(z.string()).default([]),
+  /**
+   * What to watch for, or null for a fleet with monitoring switched off. Like
+   * the heartbeat interval, a box only learns a changed spec on its next
+   * `welcome` — which the hub pushes on save rather than leaving to a
+   * reconnect.
+   */
+  monitor: monitorSpecSchema.nullish(),
 });
 
 export const installJobSchema = z.object({

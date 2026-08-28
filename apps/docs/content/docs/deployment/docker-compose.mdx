@@ -24,9 +24,8 @@ Traefik, a tunnel) to put in front.
 
 Postgres is published on `127.0.0.1:5433` on purpose: it is enough for Prisma
 Studio or `psql` from the host, and reachable from nowhere else.
-`deploy/compose.mariadb.yml` swaps that service for `mariadb:11`, published
-the same way on `127.0.0.1:3307` — see [Postgres or MariaDB](#postgres-or-mariadb)
-below.
+`deploy/compose.mariadb.yml` runs the other three services against a database
+you host yourself — see [Postgres or MariaDB](#postgres-or-mariadb) below.
 
 ## Configuration
 
@@ -123,9 +122,9 @@ takes one setting on [Coolify](/docs/deployment/zero-downtime).
 
 ## Postgres or MariaDB
 
-`deploy/compose.yml` runs Postgres. `deploy/compose.mariadb.yml` is the same
-four services with `mariadb` in place of `postgres` — pick one, not both (the
-[Coolify files](/docs/deployment/coolify) run MariaDB either way):
+`deploy/compose.yml` brings its own Postgres and needs nothing else.
+`deploy/compose.mariadb.yml` is the same stack with **no database service at
+all**: it connects to one you already run, over `DATABASE_URL`.
 
 ```sh
 docker compose --env-file .env -f deploy/compose.mariadb.yml up -d --build
@@ -134,10 +133,21 @@ make up COMPOSE_FILE=deploy/compose.mariadb.yml
 ```
 
 Prisma has no separate "mariadb" provider — MariaDB speaks the same wire
-protocol as MySQL, so it uses Prisma's `mysql` connector. The compose file sets
-`DB_PROVIDER=mysql` on `hub` and `web` for you; it only matters by hand when
-running Prisma or the apps outside Docker (see the
-[environment reference](/docs/deployment/environment)).
+protocol as MySQL, so it uses the `mysql` connector, which is what
+`DB_PROVIDER` defaults to in that file. Set it to `postgresql` and the same
+file serves an external Postgres just as well.
+
+<Callout type="warn" title="DATABASE_URL is resolved inside the container">
+  The `DATABASE_URL` in `.env.example` points at the host-published port, for Prisma Studio and
+  clients on your machine. That is the one address a container cannot use. Give this file the
+  database's own address instead.
+</Callout>
+
+Changing `DB_PROVIDER` is a **rebuild**, not a restart: the Prisma Client is
+generated into the hub and web images at build time, so it has to match the URL
+those images will be handed. The Coolify files work the same way — see [the
+database is not in the
+stack](/docs/deployment/coolify#the-database-is-not-in-the-stack).
 
 The two engines keep separate migration histories —
 `packages/db/prisma/migrations` for Postgres, `migrations-mysql` for MariaDB —

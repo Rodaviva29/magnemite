@@ -1,0 +1,961 @@
+import type { deviceMetricsSchema, MonitorSpec } from "@magnemite/protocol";
+import type { z } from "zod";
+import {
+  type MonitorAction,
+  type MonitorLevel,
+  type MonitorSignal,
+  type Prisma,
+  prisma,
+} from "@magnemite/db";
+import { getHubSettings, getMonitorSettings } from "./hubSettings.js";
+import { bus } from "../bus.js";
+import { log } from "../log.js";
+import { isOnline, sendTo } from "../registry.js";
+import { execOnDevice } from "./deviceCommands.js";
+import { ACTIVE_STATES } from "./jobs.js";
+import { notify } from "./notify.js";
+import { deviceAction, rotomEnabled } from "./rotom.js";
+
+/**
+ * Monitoring: watch a box, and act when it stops working.
+ *
+ * The division of labour is the whole design. The box runs the probes, because
+ * the evidence is a window of the scanner's own log and shipping that every
+ * twenty seconds would cost more than the heartbeat. The hub keeps the
+ * counters and decides, because escalation is a fleet-wide policy and because
+ * a box that has locked up is in no position to decide to reboot itself.
+ *
+ * What this file is mostly made of is refusals. A watchdog that acts whenever
+ * it is unsure is worse than none: the failure mode is a fleet that reboots
+ * itself in a loop, and every guard below is one way that has been known to
+ * happen.
+ */
+
+type DeviceMetrics = z.infer<typeof deviceMetricsSchema>;
+
+// ---------------------------------------------------------------------------
+// The latest reading
+// ---------------------------------------------------------------------------
+
+/**
+ * What a box last said about itself, held in memory rather than written to a
+ * row on every beat.
+ *
+ * This is deliberately *not* persisted. It is the answer to "how is this box
+ * right now", it is replaced every heartbeat, and storing it would be a write
+ * per box per beat for a value nothing reads afterwards. A hub restart empties
+ * it, which reads as unknown for a few seconds until the next beat — and the
+ * startup grace already covers that window.
+ *
+ * The ladders, which do have to survive a restart, live in `MonitorState`.
+ */
+type Reading = {
+  at: number;
+  /** False for an agent from before monitoring existed. See `monitorRan`. */
+  ran: boolean;
+  foreground: string;
+  anr: Set<string>;
+  checks: Map<string, { ok: boolean; detail: string | null }>;
+  /** Packages with at least one live process, for the SERVICE_DOWN fallback. */
+  processes: Set<string>;
+};
+
+const readings = new Map<string, Reading>();
+
+/** Called from `applyMetrics` on every hello and heartbeat. */
+export function recordReading(deviceId: string, metrics: DeviceMetrics): void {
+  readings.set(deviceId, {
+    at: Date.now(),
+    ran: metrics.monitorRan === true,
+    foreground: metrics.foregroundPackage ?? "",
+    anr: new Set(metrics.anrPackages),
+    checks: new Map(
+      metrics.checks.map((check) => [check.id, { ok: check.ok, detail: check.detail ?? null }]),
+    ),
+    processes: new Set(
+      metrics.processes.filter((p) => (p.processCount ?? 0) > 0).map((p) => p.packageName),
+    ),
+  });
+}
+
+export function forgetReading(deviceId: string): void {
+  readings.delete(deviceId);
+}
+
+/**
+ * A reading older than this is not evidence of anything.
+ *
+ * A box that went quiet keeps its last reading in the map, and acting on it
+ * would mean force-stopping an app because of something seen ten minutes ago.
+ */
+const READING_MAX_AGE_MS = 3 * 60_000;
+
+function freshReading(deviceId: string): Reading | null {
+  const reading = readings.get(deviceId);
+  if (!reading) return null;
+  if (Date.now() - reading.at > READING_MAX_AGE_MS) return null;
+  return reading;
+}
+
+// ---------------------------------------------------------------------------
+// The action catalog
+// ---------------------------------------------------------------------------
+
+/**
+ * The default command behind each action, `{pkg}` substituted.
+ *
+ * A catalog rather than a free-text field so that an alert can say "cleared
+ * the cache and restarted" instead of quoting a command line — but every one
+ * of them is editable per rule, because the app to poke and the way to poke it
+ * differ between MITM setups.
+ */
+export const ACTION_COMMANDS: Partial<Record<MonitorAction, string>> = {
+  RESTART_APP:
+    "am force-stop {pkg}; sleep 2; monkey -p {pkg} -c android.intent.category.LAUNCHER 1",
+  KILL_APP: "am force-stop {pkg}",
+  CLEAR_CACHE_RESTART:
+    "am force-stop {pkg}; rm -rf /data/data/{pkg}/cache; sleep 2; monkey -p {pkg} -c android.intent.category.LAUNCHER 1",
+  // 66 is ENTER, which is what dismisses an ANR dialog.
+  SEND_KEYEVENT: "input keyevent 66",
+  START_SERVICE: "am startservice {pkg}",
+  SHELL: "",
+};
+
+/** Actions that ride the device socket, and so need the box to be reachable. */
+const NEEDS_SOCKET = new Set<MonitorAction>([
+  "RESTART_APP",
+  "KILL_APP",
+  "CLEAR_CACHE_RESTART",
+  "SEND_KEYEVENT",
+  "START_SERVICE",
+  "SHELL",
+  "REBOOT",
+]);
+
+function substitute(command: string, packageName: string | null): string {
+  return command.replaceAll("{pkg}", packageName ?? "");
+}
+
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+type RuleRow = Prisma.MonitorRuleGetPayload<{ include: { steps: true } }>;
+
+/**
+ * One rule's probe, as stored in its `config` JSON.
+ *
+ * Read defensively rather than with a schema: this is operator input that has
+ * been round-tripped through a JSON column, and a rule with a malformed probe
+ * should stop being evaluated, not stop the whole pass.
+ */
+type RuleProbe = Omit<MonitorSpec["checks"][number], "id">;
+
+function probeOf(rule: RuleRow): RuleProbe | null {
+  const config = rule.config as { probe?: unknown } | null;
+  const probe = config?.probe as Partial<RuleProbe> | undefined;
+  if (!probe || typeof probe.target !== "string" || !probe.target) return null;
+  if (probe.kind !== "shell" && probe.kind !== "http" && probe.kind !== "logMatch") return null;
+  return {
+    kind: probe.kind,
+    target: probe.target,
+    expect: probe.expect ?? null,
+    lines: probe.lines ?? 200,
+    failAt: probe.failAt ?? 1,
+    successPattern: probe.successPattern ?? null,
+    maxRatio: probe.maxRatio ?? null,
+    maxAgeSeconds: probe.maxAgeSeconds ?? null,
+    timeoutSeconds: probe.timeoutSeconds ?? 10,
+  };
+}
+
+export async function loadEnabledRules(): Promise<RuleRow[]> {
+  const settings = await getMonitorSettings();
+  if (!settings.enabled) return [];
+  return prisma.monitorRule.findMany({
+    where: { enabled: true },
+    include: { steps: { orderBy: { atFailure: "asc" } } },
+    orderBy: { position: "asc" },
+  });
+}
+
+/**
+ * The rules that apply to one box.
+ *
+ * A group-scoped rule *replaces* the fleet-wide rule for the same signal and
+ * package rather than adding to it. Stacking them would mean two ladders
+ * racing over one fault, and a box restarted twice for it.
+ */
+export function rulesFor(rules: RuleRow[], groupId: string | null): RuleRow[] {
+  const chosen = new Map<string, RuleRow>();
+  for (const rule of rules) {
+    if (rule.groupId !== null && rule.groupId !== groupId) continue;
+    const key = `${rule.signal}:${rule.packageName ?? ""}`;
+    const winner = chosen.get(key);
+    // Specific beats general; otherwise the first one wins, which `position`
+    // already ordered.
+    if (!winner || (winner.groupId === null && rule.groupId !== null)) chosen.set(key, rule);
+  }
+  return [...chosen.values()];
+}
+
+/** What to tell a box to watch, given the rules that apply to it. */
+export function specFor(rules: RuleRow[], groupId: string | null): MonitorSpec | null {
+  const applicable = rulesFor(rules, groupId);
+  if (applicable.length === 0) return null;
+
+  const spec: MonitorSpec = { foreground: false, anr: false, checks: [] };
+  for (const rule of applicable) {
+    if (rule.signal === "APP_NOT_FOREGROUND") spec.foreground = true;
+    if (rule.signal === "APP_ANR") spec.anr = true;
+
+    const probe = probeOf(rule);
+    // The check's id is the rule's, so a result comes back already attributed.
+    if (probe) spec.checks.push({ id: rule.id, ...probe });
+  }
+
+  if (!spec.foreground && !spec.anr && spec.checks.length === 0) return null;
+  return spec;
+}
+
+/** The spec for one box, for the `welcome` that accepts its socket. */
+export async function specForDevice(groupId: string | null): Promise<MonitorSpec | null> {
+  return specFor(await loadEnabledRules(), groupId);
+}
+
+// ---------------------------------------------------------------------------
+// Reading the signals
+// ---------------------------------------------------------------------------
+
+type DeviceRow = Prisma.DeviceGetPayload<{ include: { group: { select: { name: true } } } }>;
+
+/**
+ * Is this signal bad right now?
+ *
+ * Three answers, and the third is the important one: `null` means *unknown*,
+ * and unknown never counts as a failure. An agent too old to look, a probe
+ * that ran out of budget, a Rotom that has never seen the box — all of them
+ * are silence, and silence is not evidence.
+ */
+function readSignal(
+  rule: RuleRow,
+  device: DeviceRow,
+  reading: Reading | null,
+  unreachableAfterMs: number,
+  rotomStaleMs: number,
+): boolean | null {
+  switch (rule.signal) {
+    case "AGENT_OFFLINE": {
+      if (device.status === "ONLINE") return false;
+      if (!device.lastSeenAt) return null;
+      const gone = Date.now() - device.lastSeenAt.getTime();
+      // Inside the delay nothing is known yet — a box is allowed to be away
+      // for a moment without that being either a fault or a recovery.
+      return gone >= unreachableAfterMs ? true : null;
+    }
+
+    case "ROTOM_DISCONNECTED": {
+      if (!rotomEnabled() || !device.rotomDeviceId) return null;
+      // A box somebody disabled in Rotom is out of the pool on purpose.
+      // Alerting on that means alerting on a decision already made — and it is
+      // now the only way a box gets disabled, since Magnemite no longer does it
+      // around installs.
+      if (!device.rotomEnabled) return null;
+
+      if (!device.rotomConnected || !device.rotomCanBeUsed) return true;
+      if (device.rotomLastSeenAt) {
+        return Date.now() - device.rotomLastSeenAt.getTime() >= rotomStaleMs;
+      }
+      return false;
+    }
+
+    case "SERVICE_DOWN": {
+      const probe = probeOf(rule);
+      if (probe) return checkResult(rule, reading);
+      // No probe configured: fall back to whether the package has a process.
+      if (!reading || !rule.packageName) return null;
+      // An entirely empty process list is ambiguous — it is what an agent too
+      // old to report them sends, and also what a box with everything dead
+      // sends. The safe reading of that is unknown; a fleet that wants
+      // certainty configures the probe, which is what the seeded rule does.
+      if (reading.processes.size === 0) return null;
+      return !reading.processes.has(rule.packageName);
+    }
+
+    case "APP_NOT_FOREGROUND": {
+      if (!reading?.ran || !rule.packageName) return null;
+      // An empty foreground is the launcher sitting on the screen, which is
+      // exactly the fault. `ran` is what makes that readable rather than
+      // indistinguishable from an agent that never looked.
+      return reading.foreground !== rule.packageName;
+    }
+
+    case "APP_ANR": {
+      if (!reading?.ran || !rule.packageName) return null;
+      return reading.anr.has(rule.packageName);
+    }
+
+    case "HEALTH_CHECK_FAILED":
+    case "LOOP_STALLED":
+      return checkResult(rule, reading);
+  }
+}
+
+function checkResult(rule: RuleRow, reading: Reading | null): boolean | null {
+  if (!reading?.ran) return null;
+  const result = reading.checks.get(rule.id);
+  // No result means the probe did not run — it was added since the box's last
+  // welcome, or the beat ran out of budget. Not a failure.
+  if (!result) return null;
+  return !result.ok;
+}
+
+function detailFor(rule: RuleRow, reading: Reading | null): string | null {
+  return reading?.checks.get(rule.id)?.detail ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// The pass
+// ---------------------------------------------------------------------------
+
+let lastTickAt = 0;
+let startedAt = Date.now();
+let lastPruneAt = 0;
+
+/**
+ * Restart the startup grace.
+ *
+ * Called on boot. The hub runs under `tsx watch` in development, so every file
+ * save restarts it and drops every device socket at once — without this,
+ * editing this repository would reboot the fleet.
+ */
+export function markMonitorStart(): void {
+  startedAt = Date.now();
+  readings.clear();
+}
+
+/** "HH:MM" window, inclusive of the start, exclusive of the end. Wraps midnight. */
+function insideWindow(start: string | null, end: string | null, now = new Date()): boolean {
+  if (!start || !end) return true;
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const toMinutes = (v: string) => {
+    const [h = "0", m = "0"] = v.split(":");
+    return Number(h) * 60 + Number(m);
+  };
+  const from = toMinutes(start);
+  const to = toMinutes(end);
+  return from <= to ? minutes >= from && minutes < to : minutes >= from || minutes < to;
+}
+
+/**
+ * One evaluation pass, keeping its own clock so it can ride the scheduler's
+ * five-second tick without running twelve times a minute.
+ *
+ * That clock is the heartbeat, and deliberately not a setting of its own. A
+ * pass reads what the boxes last said, and they say it once per beat: running
+ * more often re-reads the same reading and counts one fault twice, running
+ * less often just adds lag. There is exactly one right answer, so there is
+ * nothing to configure.
+ */
+export async function evaluate(): Promise<void> {
+  const settings = await getMonitorSettings();
+  if (!settings.enabled) return;
+
+  const { heartbeatSeconds } = await getHubSettings();
+  const now = Date.now();
+  if (now - startedAt < settings.startupGraceSeconds * 1000) return;
+  if (now - lastTickAt < heartbeatSeconds * 1000) return;
+  lastTickAt = now;
+
+  const rules = await loadEnabledRules();
+  if (rules.length === 0) return;
+
+  const devices = await prisma.device.findMany({
+    where: { approved: true },
+    include: { group: { select: { name: true } } },
+  });
+  if (devices.length === 0) return;
+
+  const busy = await busyDeviceIds(settings.rebootGraceSeconds);
+  const budgets = await spentBudgets();
+
+  for (const device of devices) {
+    if (busy.has(device.id)) continue;
+    try {
+      await evaluateDevice(device, rules, settings, budgets);
+    } catch (err) {
+      // One box's failure is not the fleet's. A rule with a broken command
+      // must not stop every other box being looked at.
+      log.error({ err, device: device.name }, "monitor pass failed for a device");
+    }
+  }
+
+  await pruneEvents(settings.eventRetentionDays);
+}
+
+/**
+ * Boxes that must be left alone this pass.
+ *
+ * Two reasons, both of which look like a fault and are not:
+ *
+ *  - **An install is running.** It force-stops the scanner on purpose, so every
+ *    probe would faithfully report the damage the hub itself asked for.
+ *  - **We just rebooted it.** A box takes minutes to come back. Without this
+ *    its own reboot reads as unreachable and it is rebooted again, forever.
+ */
+async function busyDeviceIds(rebootGraceSeconds: number): Promise<Set<string>> {
+  const [installing, rebooted] = await Promise.all([
+    prisma.job.findMany({
+      where: { state: { in: ACTIVE_STATES } },
+      select: { deviceId: true },
+    }),
+    prisma.monitorEvent.findMany({
+      where: {
+        action: "REBOOT",
+        actionOk: true,
+        at: { gte: new Date(Date.now() - rebootGraceSeconds * 1000) },
+      },
+      select: { deviceId: true },
+    }),
+  ]);
+  return new Set([...installing, ...rebooted].map((row) => row.deviceId));
+}
+
+type Budgets = { actions: Map<string, number>; reboots: Map<string, number> };
+
+/** What each box has already had spent on it, for the circuit breakers. */
+async function spentBudgets(): Promise<Budgets> {
+  const now = Date.now();
+  const [actions, reboots] = await Promise.all([
+    prisma.monitorEvent.groupBy({
+      by: ["deviceId"],
+      where: { action: { not: null }, at: { gte: new Date(now - 3_600_000) } },
+      _count: { _all: true },
+    }),
+    prisma.monitorEvent.groupBy({
+      by: ["deviceId"],
+      where: { action: "REBOOT", at: { gte: new Date(now - 86_400_000) } },
+      _count: { _all: true },
+    }),
+  ]);
+  return {
+    actions: new Map(actions.map((row) => [row.deviceId, row._count._all])),
+    reboots: new Map(reboots.map((row) => [row.deviceId, row._count._all])),
+  };
+}
+
+type Settings = Awaited<ReturnType<typeof getMonitorSettings>>;
+
+async function evaluateDevice(
+  device: DeviceRow,
+  rules: RuleRow[],
+  settings: Settings,
+  budgets: Budgets,
+): Promise<void> {
+  const reading = freshReading(device.id);
+
+  for (const rule of rulesFor(rules, device.groupId)) {
+    const bad = readSignal(
+      rule,
+      device,
+      reading,
+      settings.unreachableAlertSeconds * 1000,
+      settings.rotomStaleSeconds * 1000,
+    );
+    if (bad === null) continue;
+
+    const state = await prisma.monitorState.findUnique({
+      where: { deviceId_ruleId: { deviceId: device.id, ruleId: rule.id } },
+    });
+
+    if (!bad) {
+      await recover(device, rule, state);
+      continue;
+    }
+
+    const failures = (state?.failures ?? 0) + 1;
+    await prisma.monitorState.upsert({
+      where: { deviceId_ruleId: { deviceId: device.id, ruleId: rule.id } },
+      update: { failures, firstFailedAt: state?.firstFailedAt ?? new Date() },
+      create: { deviceId: device.id, ruleId: rule.id, failures, firstFailedAt: new Date() },
+    });
+
+    if (failures < rule.threshold) continue;
+    await escalate(device, rule, { ...state, failures }, settings, budgets, reading);
+  }
+}
+
+/** The signal went good again. Reset the ladder, and say so if it had moved. */
+async function recover(
+  device: DeviceRow,
+  rule: RuleRow,
+  state: { failures: number } | null,
+): Promise<void> {
+  if (!state || state.failures === 0) return;
+
+  await prisma.monitorState.update({
+    where: { deviceId_ruleId: { deviceId: device.id, ruleId: rule.id } },
+    data: { failures: 0, firstFailedAt: null, lastStepFired: null },
+  });
+  await record(device, rule, {
+    level: "INFO",
+    message: `${rule.name} recovered`,
+    action: null,
+    actionOk: null,
+    detail: null,
+  });
+}
+
+async function escalate(
+  device: DeviceRow,
+  rule: RuleRow,
+  state: { failures: number; lastActionAt?: Date | null; lastStepFired?: number | null },
+  settings: Settings,
+  budgets: Budgets,
+  reading: Reading | null,
+): Promise<void> {
+  // The rung this many failures has earned: the highest one at or below the
+  // count, so a box that failed three times in a row does not walk back up
+  // through the gentle steps it has already proved do not work.
+  const ladder = [...rule.steps].sort((a, b) => b.atFailure - a.atFailure);
+  const step = ladder.find((s) => s.atFailure <= state.failures);
+  if (!step) return;
+
+  // Cooldown first: it is what keeps a fault that never clears from being
+  // acted on every single pass.
+  if (state.lastActionAt) {
+    const since = Date.now() - state.lastActionAt.getTime();
+    if (since < rule.cooldownSeconds * 1000) return;
+  }
+
+  // A rung already spent is not spent again — a box that has proved a restart
+  // does not fix it should not keep being restarted. The exception is the top
+  // of the ladder, which repeats at the cooldown for as long as the fault
+  // lasts: there is nothing stronger left to try, and the circuit breakers are
+  // what stop that rather than a one-shot flag.
+  const isTop = ladder[0] !== undefined && step.atFailure === ladder[0].atFailure;
+  const spent = state.lastStepFired ?? null;
+  if (spent !== null && step.atFailure <= spent && !isTop) return;
+
+  // Quiet hours stop the *action*, never the alert. Not rebooting a box at 3am
+  // is a reasonable policy; hiding that it needs one is not.
+  const acting = insideWindow(rule.windowStart, rule.windowEnd) && step.action !== "NOTIFY_ONLY";
+
+  const detail = detailFor(rule, reading);
+  if (!acting) {
+    // The rung is deliberately *not* marked spent: an action held back by
+    // quiet hours has to still run once the window opens, rather than the
+    // ladder having quietly skipped it overnight.
+    await fire(device, rule, null, {
+      level: rule.notifyLevel,
+      message: rule.name,
+      action: step.action === "NOTIFY_ONLY" ? null : step.action,
+      actionOk: null,
+      detail:
+        step.action === "NOTIFY_ONLY"
+          ? detail
+          : [`held back until ${rule.windowStart}`, detail].filter(Boolean).join(" · "),
+    });
+    return;
+  }
+
+  if (NEEDS_SOCKET.has(step.action) && !isOnline(device.id)) {
+    // Refused rather than failed: the step is not spent, so it still runs when
+    // the box comes back rather than the ladder having burned a rung on a
+    // message that went nowhere.
+    log.debug({ device: device.name, action: step.action }, "monitor action needs the box online");
+    return;
+  }
+
+  const breaker = tripped(device, step.action, settings, budgets);
+  if (breaker) {
+    // Same reasoning as the window: the rung is not spent, so the ladder
+    // resumes where it was once the hour or the day rolls.
+    await fire(device, rule, null, {
+      level: "CRITICAL",
+      message: `${rule.name} — stopped acting on this box`,
+      action: null,
+      actionOk: null,
+      detail: breaker,
+    });
+    return;
+  }
+
+  const outcome = await runAction(device, rule, step.action, step.command);
+  spend(device.id, step.action, budgets);
+
+  await fire(device, rule, step.atFailure, {
+    level: outcome.ok ? rule.notifyLevel : "CRITICAL",
+    message: rule.name,
+    action: step.action,
+    actionOk: outcome.ok,
+    detail: [detail, outcome.detail].filter(Boolean).join(" · ") || null,
+  });
+}
+
+/**
+ * The circuit breakers, and the reason this feature is safe to leave running.
+ *
+ * A rule that is simply wrong — a probe pointed at the wrong log, a regex that
+ * matches every line — otherwise acts forever. Past either ceiling the box is
+ * announced once and then left alone until the window rolls.
+ */
+function tripped(
+  device: DeviceRow,
+  action: MonitorAction,
+  settings: Settings,
+  budgets: Budgets,
+): string | null {
+  const actions = budgets.actions.get(device.id) ?? 0;
+  if (actions >= settings.maxActionsPerDeviceHour) {
+    return `${actions} actions in the last hour, at a ceiling of ${settings.maxActionsPerDeviceHour}`;
+  }
+  if (action === "REBOOT") {
+    const reboots = budgets.reboots.get(device.id) ?? 0;
+    if (reboots >= settings.maxRebootsPerDeviceDay) {
+      return `${reboots} reboots today, at a ceiling of ${settings.maxRebootsPerDeviceDay}`;
+    }
+  }
+  return null;
+}
+
+function spend(deviceId: string, action: MonitorAction, budgets: Budgets): void {
+  budgets.actions.set(deviceId, (budgets.actions.get(deviceId) ?? 0) + 1);
+  if (action === "REBOOT") budgets.reboots.set(deviceId, (budgets.reboots.get(deviceId) ?? 0) + 1);
+}
+
+async function runAction(
+  device: DeviceRow,
+  rule: RuleRow,
+  action: MonitorAction,
+  command: string | null,
+): Promise<{ ok: boolean; detail: string | null }> {
+  if (action === "NOTIFY_ONLY") return { ok: true, detail: null };
+
+  if (action === "REBOOT") {
+    const sent = sendTo(device.id, { type: "reboot" });
+    return { ok: sent, detail: sent ? null : "the box did not take the reboot" };
+  }
+
+  if (action === "ROTOM_RESTART") {
+    if (!device.rotomDeviceId) return { ok: false, detail: "not matched in rotom" };
+    const ok = await deviceAction(device.rotomDeviceId, "restart");
+    return { ok, detail: ok ? null : "rotom refused the restart" };
+  }
+
+  const script = substitute(command ?? ACTION_COMMANDS[action] ?? "", rule.packageName);
+  if (!script.trim()) return { ok: false, detail: "the rule has no command to run" };
+
+  const outcome = await execOnDevice(device.id, script, 60).catch((err: unknown) => ({
+    ok: false,
+    output: "",
+    error: err instanceof Error ? err.message : String(err),
+  }));
+  return {
+    ok: outcome.ok,
+    // Command output only when it failed; a successful force-stop prints
+    // nothing worth putting in an alert.
+    detail: outcome.ok ? null : (outcome.error ?? outcome.output.slice(0, 400) ?? null),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+type EventInput = {
+  level: MonitorLevel;
+  message: string;
+  action: MonitorAction | null;
+  actionOk: boolean | null;
+  detail: string | null;
+};
+
+/**
+ * Has this exact announcement already been made, with nothing since?
+ *
+ * Only asked of the events that announce a *state* rather than an action — a
+ * tripped breaker, an action held back by quiet hours. Those recur on every
+ * cooldown for as long as the state lasts, and without this a rule that is
+ * simply wrong writes a row per box per cooldown until somebody notices. An
+ * action never takes this path: three reboots are three things that happened,
+ * and collapsing them would hide the very thing the table is for.
+ */
+async function alreadySaid(deviceId: string, ruleId: string, message: string): Promise<boolean> {
+  const latest = await prisma.monitorEvent.findFirst({
+    where: { deviceId, ruleId },
+    orderBy: { at: "desc" },
+    select: { message: true, action: true },
+  });
+  return latest !== null && latest.action === null && latest.message === message;
+}
+
+/**
+ * Stamp the ladder and write the event in one place, so they cannot diverge.
+ *
+ * `atFailure` is null for an event that announced something without acting on
+ * it — held back by quiet hours, or refused by a circuit breaker. Those still
+ * take the cooldown, so the same thing is not announced every pass, but they
+ * must not mark the rung spent: the action is deferred, not skipped.
+ */
+async function fire(
+  device: DeviceRow,
+  rule: RuleRow,
+  atFailure: number | null,
+  event: EventInput,
+): Promise<void> {
+  await prisma.monitorState.update({
+    where: { deviceId_ruleId: { deviceId: device.id, ruleId: rule.id } },
+    data: {
+      lastActionAt: new Date(),
+      ...(atFailure === null ? {} : { lastStepFired: atFailure }),
+    },
+  });
+
+  // Still stamped above, so the cooldown keeps holding — but a state that has
+  // not changed is not news twice. A box parked behind a tripped breaker would
+  // otherwise write a row every cooldown for as long as the fault lasts.
+  if (atFailure === null && (await alreadySaid(device.id, rule.id, event.message))) return;
+
+  await record(device, rule, event);
+}
+
+async function record(device: DeviceRow, rule: RuleRow, event: EventInput): Promise<void> {
+  const notified = await notify({
+    deviceId: device.id,
+    deviceName: device.name,
+    groupName: device.group?.name ?? null,
+    signal: rule.signal,
+    level: event.level,
+    message: event.message,
+    action: event.action,
+    actionOk: event.actionOk,
+    detail: event.detail,
+  }).catch(() => false);
+
+  await prisma.monitorEvent.create({
+    data: {
+      deviceId: device.id,
+      ruleId: rule.id,
+      signal: rule.signal,
+      level: event.level,
+      message: event.message,
+      action: event.action,
+      actionOk: event.actionOk,
+      detail: event.detail,
+      // Only true when the message actually landed, so a quiet hour is
+      // explicable from the table rather than a mystery.
+      notified: rule.notify && notified,
+    },
+  });
+
+  log.info(
+    { device: device.name, rule: rule.name, action: event.action, ok: event.actionOk },
+    event.message,
+  );
+  // A monitor event is a change to a device, so it rides the event the
+  // dashboard already listens for rather than needing one of its own.
+  bus.publish({ kind: "device", deviceId: device.id });
+}
+
+// ---------------------------------------------------------------------------
+// Seeding
+// ---------------------------------------------------------------------------
+
+const POGO = "com.nianticlabs.pokemongo";
+const SCANNER = "com.pokemod.aegis";
+/** Where Atlas writes. A fleet on another MITM edits this in the rule. */
+const MITM_LOG = "/data/local/tmp/atlas.log";
+
+type Seed = {
+  name: string;
+  signal: MonitorSignal;
+  packageName: string | null;
+  config: Prisma.InputJsonValue;
+  threshold: number;
+  cooldownSeconds: number;
+  notify: boolean;
+  notifyLevel: MonitorLevel;
+  steps: { atFailure: number; action: MonitorAction }[];
+};
+
+/**
+ * The rules a new fleet starts with, all **disabled**.
+ *
+ * Their thresholds and ladders are not invented: they are what aconf's
+ * `atlas_monitor.sh` has been doing on this hardware for years, where
+ * `atlasdead` and `pogodead` count to one for a soft restart and to two for a
+ * reboot. The probe strings are Atlas's, which is why they are rows — a fleet
+ * on Aegis, Cosmog or GC edits them, and that is the whole point.
+ *
+ * Disabled because upgrading a fleet must never start rebooting it. Somebody
+ * has to read these and turn them on.
+ */
+const SEEDS: Seed[] = [
+  {
+    name: "Scanner offline",
+    signal: "SERVICE_DOWN",
+    packageName: SCANNER,
+    config: {
+      probe: {
+        kind: "shell",
+        target: "dumpsys activity services | grep -e MappingService",
+        timeoutSeconds: 15,
+      },
+    },
+    threshold: 1,
+    cooldownSeconds: 300,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [
+      { atFailure: 1, action: "RESTART_APP" },
+      { atFailure: 2, action: "REBOOT" },
+    ],
+  },
+  {
+    name: "Pogo not in focus",
+    signal: "APP_NOT_FOREGROUND",
+    packageName: POGO,
+    config: {},
+    threshold: 1,
+    cooldownSeconds: 300,
+    // aconf defaults this one's webhook to off, and it is right to: a box
+    // briefly on the launcher is common enough that announcing every one
+    // teaches people to mute the channel.
+    notify: false,
+    notifyLevel: "INFO",
+    steps: [
+      { atFailure: 1, action: "CLEAR_CACHE_RESTART" },
+      { atFailure: 2, action: "REBOOT" },
+    ],
+  },
+  {
+    name: "Pogo not responding",
+    signal: "APP_ANR",
+    packageName: POGO,
+    config: {},
+    threshold: 1,
+    cooldownSeconds: 120,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [
+      // ENTER dismisses the dialog, which is usually the whole fix.
+      { atFailure: 1, action: "SEND_KEYEVENT" },
+      { atFailure: 2, action: "REBOOT" },
+    ],
+  },
+  {
+    name: "Health check failing",
+    signal: "HEALTH_CHECK_FAILED",
+    packageName: POGO,
+    config: {
+      probe: {
+        kind: "logMatch",
+        target: MITM_LOG,
+        lines: 200,
+        // Ten of these only matter when they outnumber the work getting done,
+        // which is why the success pattern is half the rule.
+        expect: "\\[HEALTH CHECK\\] ([0-9]+) seconds since last ping\\.",
+        failAt: 10,
+        successPattern: "I \\| Worker",
+        maxRatio: 1,
+        timeoutSeconds: 15,
+      },
+    },
+    threshold: 1,
+    cooldownSeconds: 600,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [{ atFailure: 1, action: "KILL_APP" }],
+  },
+  {
+    name: "Loop stalled",
+    signal: "LOOP_STALLED",
+    packageName: SCANNER,
+    config: {
+      probe: {
+        kind: "logMatch",
+        target: MITM_LOG,
+        lines: 200,
+        expect: "loop has been stalled for over a minute",
+        failAt: 1,
+        timeoutSeconds: 15,
+      },
+    },
+    threshold: 1,
+    cooldownSeconds: 600,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [{ atFailure: 1, action: "RESTART_APP" }],
+  },
+  {
+    name: "Box unreachable",
+    signal: "AGENT_OFFLINE",
+    packageName: null,
+    config: {},
+    threshold: 1,
+    cooldownSeconds: 1800,
+    notify: true,
+    notifyLevel: "WARN",
+    // Nothing else is possible: a box Magnemite cannot reach cannot be told
+    // to do anything about it.
+    steps: [{ atFailure: 1, action: "NOTIFY_ONLY" }],
+  },
+  {
+    name: "Rotom lost the box",
+    signal: "ROTOM_DISCONNECTED",
+    packageName: null,
+    config: {},
+    threshold: 2,
+    cooldownSeconds: 1800,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [
+      { atFailure: 1, action: "NOTIFY_ONLY" },
+      { atFailure: 3, action: "ROTOM_RESTART" },
+    ],
+  },
+];
+
+/**
+ * Write the defaults, once, on a fleet that has none.
+ *
+ * Only when the table is empty: a fleet that deleted a rule on purpose must
+ * not find it back after the next deploy.
+ */
+export async function seedDefaultMonitorRules(): Promise<number> {
+  if ((await prisma.monitorRule.count()) > 0) return 0;
+
+  for (const [index, seed] of SEEDS.entries()) {
+    await prisma.monitorRule.create({
+      data: {
+        name: seed.name,
+        enabled: false,
+        signal: seed.signal,
+        packageName: seed.packageName,
+        config: seed.config,
+        threshold: seed.threshold,
+        cooldownSeconds: seed.cooldownSeconds,
+        notify: seed.notify,
+        notifyLevel: seed.notifyLevel,
+        position: index,
+        steps: { create: seed.steps },
+      },
+    });
+  }
+
+  log.info({ count: SEEDS.length }, "seeded the default monitor rules, all disabled");
+  return SEEDS.length;
+}
+
+/** Its own hourly clock, so riding the five-second tick costs nothing. */
+async function pruneEvents(retentionDays: number): Promise<void> {
+  if (retentionDays <= 0) return;
+  if (Date.now() - lastPruneAt < 3_600_000) return;
+  lastPruneAt = Date.now();
+
+  const { count } = await prisma.monitorEvent.deleteMany({
+    where: { at: { lt: new Date(Date.now() - retentionDays * 86_400_000) } },
+  });
+  if (count > 0) log.debug({ count }, "pruned monitor events");
+}

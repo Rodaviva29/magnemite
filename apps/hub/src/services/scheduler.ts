@@ -7,7 +7,7 @@ import { log } from "../log.js";
 import { isOnline, sendTo } from "../registry.js";
 import { ACTIVE_STATES, logJobEvent, recomputeRollout, requeueStalled } from "./jobs.js";
 import { pruneMetrics } from "./metrics.js";
-import { pauseForInstall, releaseOrphanedDevices, rotomEnabled } from "./rotom.js";
+import { evaluate } from "./monitor.js";
 
 const TICK_MS = 5_000;
 
@@ -52,9 +52,10 @@ async function tick() {
     await requeueStalled(settings.jobStallTimeoutSeconds);
     // Keeps its own hourly clock, so riding the 5-second tick costs nothing.
     await pruneMetrics();
-    // A hub restart mid-install would otherwise leave a box disabled in Rotom
-    // for good.
-    await releaseOrphanedDevices();
+    // Same idea, on the heartbeat's clock — one pass per beat, since that is
+    // how often a box has anything new to say. Returns immediately when
+    // monitoring is off, which is how every fleet starts.
+    await evaluate();
     await dispatchQueued(settings.maxConcurrentJobs);
   } catch (err) {
     log.error({ err }, "scheduler tick failed");
@@ -199,12 +200,6 @@ async function dispatchQueued(maxConcurrentJobs: number) {
       phase: "DISPATCHED",
     });
 
-    // Take the box out of Rotom's pool so the controller stops handing it
-    // accounts, rather than having a scan die halfway through the install.
-    if (rotomEnabled()) {
-      const paused = await pauseForInstall(job.deviceId, job.id);
-      if (paused) await logJobEvent(job.id, "disabled in rotom for the install");
-    }
     capacity -= 1;
     if (groupId) groupActive.set(groupId, (groupActive.get(groupId) ?? 0) + 1);
     rolloutActive.set(rollout.id, (rolloutActive.get(rollout.id) ?? 0) + 1);

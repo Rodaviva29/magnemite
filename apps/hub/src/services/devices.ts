@@ -1,10 +1,12 @@
 import type { deviceInfoSchema, deviceMetricsSchema } from "@magnemite/protocol";
 import type { z } from "zod";
 import { prisma } from "@magnemite/db";
+import { getHubSettings } from "./hubSettings.js";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
 import { onlineDeviceIds, sendTo } from "../registry.js";
 import { recordSample } from "./metrics.js";
+import { forgetReading, loadEnabledRules, recordReading, specFor } from "./monitor.js";
 
 type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 type DeviceMetrics = z.infer<typeof deviceMetricsSchema>;
@@ -46,6 +48,9 @@ export async function markOffline(deviceId: string) {
   await prisma.device
     .update({ where: { id: deviceId }, data: { status: "OFFLINE" } })
     .catch(() => undefined);
+  // Whatever the box last said about itself is now stale by definition, and a
+  // monitor rule acting on it would be acting on the past.
+  forgetReading(deviceId);
   bus.publish({ kind: "device", deviceId });
 }
 
@@ -74,8 +79,25 @@ export async function applyMetrics(deviceId: string, metrics: DeviceMetrics) {
       cpuTempC: metrics.cpuTempC ?? undefined,
       batteryTempC: metrics.batteryTempC ?? undefined,
       ...(isInventory ? { packagesSyncedAt: new Date() } : {}),
+      // Only stamped when the box actually ran a monitor spec. An agent too
+      // old to know about monitoring leaves both alone, which is what tells
+      // the dashboard it cannot be counted as capable — and what stops the
+      // rules that need it from reading its silence as a fault.
+      ...(metrics.monitorRan
+        ? {
+            monitorReportedAt: new Date(),
+            // Empty means the launcher is up, which is a real answer worth
+            // storing, so this is deliberately not `?? undefined`.
+            foregroundPackage: metrics.foregroundPackage || null,
+          }
+        : {}),
     },
   });
+
+  // The live half of the same reading — the checks and the ANR list, which are
+  // "how is this box right now" rather than history, and are replaced on every
+  // beat rather than written to a row.
+  recordReading(deviceId, metrics);
 
   // The row above is only ever "now". This is the history behind it, kept on
   // its own interval rather than one row per beat.
@@ -175,18 +197,26 @@ export async function trackedPackages(): Promise<string[]> {
 }
 
 /**
- * Push a changed tracked list to every box that is connected.
+ * Push a fresh `welcome` to every box that is connected.
  *
- * The list rides in `welcome`, which an agent otherwise only sees when it
- * connects — so without this, a package added in Settings would stay empty in
- * the fleet table until each box happened to reconnect. The agent takes a
- * `welcome` at any point and replaces its list with it.
+ * Two things ride in it that an agent otherwise only learns when it connects:
+ * the tracked package list, and what to monitor. Without this a package added
+ * in Settings would stay empty in the fleet table, and a monitor rule switched
+ * on would do nothing, until each box happened to reconnect. The agent takes a
+ * `welcome` at any point and replaces both with it.
+ *
+ * The monitor spec is per box rather than per fleet, because a rule can be
+ * scoped to a device group.
  */
-export async function broadcastTrackedPackages(): Promise<number> {
-  const packages = await trackedPackages();
+export async function broadcastWelcome(): Promise<number> {
+  const [packages, rules, settings] = await Promise.all([
+    trackedPackages(),
+    loadEnabledRules(),
+    getHubSettings(),
+  ]);
   const devices = await prisma.device.findMany({
     where: { id: { in: onlineDeviceIds() } },
-    select: { id: true, name: true, approved: true },
+    select: { id: true, name: true, approved: true, groupId: true },
   });
 
   let sent = 0;
@@ -196,12 +226,13 @@ export async function broadcastTrackedPackages(): Promise<number> {
       deviceId: device.id,
       name: device.name,
       approved: device.approved,
-      heartbeatSeconds: 20,
+      heartbeatSeconds: settings.heartbeatSeconds,
       trackedPackages: packages,
+      monitor: specFor(rules, device.groupId),
     });
     if (ok) sent += 1;
   }
 
-  log.info({ sent, packages }, "tracked packages pushed to the fleet");
+  log.info({ sent, packages, rules: rules.length }, "welcome pushed to the fleet");
   return sent;
 }

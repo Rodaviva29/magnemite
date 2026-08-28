@@ -38,7 +38,9 @@ apps/hub/src
 │   ├── jobs.ts           Per-device job lifecycle
 │   ├── artifacts.ts      Cache-once + sha256
 │   ├── autoUpdate.ts     The hands-off pipeline
-│   ├── rotom.ts          Disable/enable/restart, matching
+│   ├── monitor.ts        Rules, escalation, circuit breakers
+│   ├── notify.ts         Discord alerts
+│   ├── rotom.ts          Scanning state, matching, restart
 │   └── sources/          github.ts, mirror.ts, poller.ts
 └── ws/deviceSocket.ts    The protocol, server side
 ```

@@ -1,51 +1,60 @@
 ---
-title: Rotom (wip)
-description: Optional, and worth turning on, it makes the scanner coming back the success signal.
+title: Rotom
+description: The scanner's own view of each box, as a health signal Magnemite cannot produce on its own.
 icon: RadioTower
 ---
 
 Set `ROTOM_ENABLED=true`, `ROTOM_URL` (RotomNG's HTTP listener, usually
-`:7072`) and `ROTOM_SECRET`, and Rotom becomes part of the update itself rather
-than a status widget.
+`:7072`) and `ROTOM_SECRET`, and Magnemite starts asking Rotom what it thinks
+of each box once a minute.
 
-## What changes
+That matters because it is the one question Magnemite cannot answer for itself.
+A box can be online, heartbeating every twenty seconds, with the scanner
+process alive — and handing Rotom nothing. The agent has no way to see that;
+Rotom is the only thing that does.
+
+## What you get
 
 <Cards>
   <Card
-    title="Before an install"
-    description="The box is disabled in Rotom, so the controller stops handing it accounts instead of a scan dying mid-session."
+    title="A Scanner column"
+    description="On the fleet table, once at least one box is matched: whether Rotom has a live connection to it, and how many workers."
   />
   <Card
-    title="After it succeeds"
-    description="The box is enabled and the scanner restarted onto the new build, replacing the post-install hook you would otherwise write per group."
+    title="A monitoring signal"
+    description="`Rotom lost the box` becomes a rule you can act on — and the only signal that works on every box today, since the hub reads it rather than the agent."
   />
   <Card
-    title="The success signal"
-    description="The box reappearing in Rotom with live workers, not `pm` having printed Success. If it does not come back within five minutes, the job log says so."
+    title="Restart scanner"
+    description="On the device page, and as a remediation action a rule can take. Rotom kicks the scanner without a reboot."
   />
 </Cards>
 
-That third point is the reason to turn this on. An install can succeed and the
-scanner still fail to come up, a bad build, a wiped login, a hook that raced.
-Without Rotom, Magnemite calls that a success and moves to the next device.
-With it, the rollout stops.
-
-## Crash safety
-
-If the hub restarts mid-install, the next scheduler tick re-enables any box it
-had disabled for a job that is no longer running. Nothing is left parked out of
-the pool because a Node process went away.
+<Callout type="info" title="Rotom is no longer part of an install">
+  It used to be: the box was disabled before a rollout, re-enabled afterwards, and "did the update
+  work" was answered by it reappearing with live workers. That is gone. It made every rollout depend
+  on a second service being reachable and agreeing with us, and it left boxes parked out of the
+  scanning pool when a hub restarted mid-install. Installs verify themselves; Rotom watches. A hub
+  upgrading past that version re-enables anything the old code had disabled, once, on boot.
+</Callout>
 
 ## Matching devices
 
 Devices are matched to Rotom by `origin`, falling back to the serial, and then
-to an unambiguous public IP. Once at least one box is matched:
+to an unambiguous public IP. A box that never matches keeps working normally —
+it simply has no Scanner column and no Rotom-based rule.
 
-- the fleet table grows a **Scanner** column,
-- the device page gains a **Restart scanner** button.
+## The health composite
 
-A box that never matches keeps working normally, it simply uses its group's
-hooks instead.
+Rotom has no single "healthy" field, so the monitoring rule uses the composite
+its API implies — `enabled && is_connected && can_be_used` — plus how long ago
+it last saw the box, against **Rotom stale after** in
+[Settings → Monitoring](/docs/fleet/monitoring).
+
+One state is deliberately *not* a fault: a box somebody **disabled in Rotom on
+purpose**. Alerting on that would mean alerting on a decision that was already
+made. It is also now the only way a box ends up disabled, since Magnemite no
+longer does it around installs.
 
 ## Configuration
 

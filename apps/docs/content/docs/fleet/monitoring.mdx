@@ -1,0 +1,223 @@
+---
+title: Monitoring and automations
+description: Rules that watch a box, act when it stops working, and say so in Discord.
+icon: Siren
+---
+
+A box can be online, heartbeating every twenty seconds, and scanning nothing.
+The scanner died, Pokémon GO fell out of focus, an ANR dialog is sitting there
+waiting for somebody to press ENTER, the loop stalled. None of that shows up in
+the fleet table, because by every measure Magnemite had until now the box is
+fine.
+
+**Settings → Monitoring** turns those situations into rules. A rule is a signal,
+how many bad readings in a row it takes to count, and a ladder of what to do
+about it — soft first, hard second.
+
+The **Monitoring** page in the sidebar is the other half: what the rules
+actually saw and did, across the fleet, searchable and filterable by severity.
+That is where "why did that box reboot at 3am" gets answered — the settings tab
+is only where the rules are written.
+
+<Callout type="warn" title="Everything ships disabled">
+  A new fleet gets seven rules already written and every one of them switched off, along with the
+  master switch above them. This feature reboots hardware in someone's living room; nothing here
+  starts happening because a deploy went out.
+</Callout>
+
+## What it watches
+
+| Signal | Answered by | What it means |
+| --- | --- | --- |
+| **Service is down** | a probe, or the process list | The scanner's service is not running |
+| **App is not in focus** | the box | Something else owns the screen — usually the launcher |
+| **App is not responding** | the box | The package is sitting on an ANR dialog |
+| **Health check is failing** | a probe | The scanner is logging faults faster than work |
+| **Loop has stalled** | a probe | The scanner is alive and has stopped doing anything |
+| **Box is unreachable** | the hub | The socket has been gone longer than the alert delay |
+| **Rotom lost the box** | the hub | Rotom is not seeing it, or would not hand it work |
+
+The split in that middle column matters more than it looks. The first five are
+knowable only on the box, so they need an agent new enough to look — the tab
+says how many boxes are on one. The last two the hub can see for itself, and
+they work on every box in the fleet today.
+
+## The ladder
+
+The thing that makes this useful rather than annoying is that a rule does not
+do one thing. It does the gentle thing first, and the expensive thing only when
+the gentle thing did not work:
+
+```
+Scanner offline
+  failure 1 → restart the app
+  failure 2 → reboot the box
+```
+
+The counter resets the moment the signal goes good, so a box that recovers
+after the restart never reaches the reboot. A rung already spent is not spent
+again — a box that has proved a restart does not fix it is not restarted
+forever — with one exception: the **last** rung repeats at the cooldown, because
+once you are at the bottom of the ladder there is nothing stronger left to try.
+
+## Probes
+
+Three of the signals need the box to look at something, and what to look at is
+different for every MITM. So the probe is part of the rule, not part of
+Magnemite:
+
+- **Shell command** — runs as root and passes on exit 0, optionally also having
+  to match a pattern. `dumpsys activity services | grep -e MappingService` is
+  the whole "is the scanner up" check.
+- **Pattern in a log** — reads the last N lines of a file on the box and counts
+  matches. Optionally also fails when nothing has been written to the file for a
+  while, which is what a stalled loop looks like from outside.
+- **HTTP endpoint** — a GET from the box itself, 2xx is healthy.
+
+The log probe has one feature worth explaining, because it is the one that
+makes a health check work at all. Some faults are normal under load: ten "seconds
+since last ping" lines mean nothing next to a hundred completed jobs, and
+everything next to two. So a log probe can carry a **second** pattern for work
+getting done, and fail only when the faults outnumber it.
+
+```
+Log file          /data/local/tmp/atlas.log
+Lines to read     200
+A fault           \[HEALTH CHECK\] ([0-9]+) seconds since last ping\.
+Faults before     10
+Work looks like   I \| Worker
+```
+
+Probes run on the box every heartbeat, inside **half the beat**. Whatever does
+not finish in that budget reports nothing at all — never a failure. They are
+also skipped entirely while an install is running, because an install
+force-stops the scanner on purpose and every probe would faithfully report the
+damage Magnemite itself asked for.
+
+## What it can do
+
+| Action | What it runs |
+| --- | --- |
+| Only tell me | nothing |
+| Restart the app | `am force-stop {pkg}` then relaunch |
+| Kill the app | `am force-stop {pkg}` |
+| Clear the cache and restart | force-stop, delete `/data/data/{pkg}/cache`, relaunch |
+| Send ENTER | `input keyevent 66` — dismisses an ANR dialog |
+| Start the service | `am startservice …` |
+| Run a command | whatever you type |
+| Reboot the box | the same reboot the device page sends |
+| Restart the scanner in Rotom | Rotom's own `restart` action |
+
+Every shell-backed one has an **editable command**, pre-filled with the default
+above and with `{pkg}` standing in for the rule's package. The catalog exists so
+that an alert can say "cleared the cache and restarted" rather than quoting a
+command line; the editability exists because your MITM is not the one this was
+written against.
+
+## The refusals
+
+Most of this feature is things it will not do. Each one is a way a watchdog is
+known to turn into a fleet rebooting itself in a loop:
+
+<Cards>
+  <Card
+    title="Unknown is never a failure"
+    description="An agent too old to look, a probe that ran out of budget, a Rotom that has never seen the box — all of that is silence, and silence resets nothing and triggers nothing."
+  />
+  <Card
+    title="Nothing acts during an install"
+    description="The scanner is stopped on purpose and Rotom already has the box out of the pool."
+  />
+  <Card
+    title="Nothing acts just after a reboot"
+    description="A box takes minutes to come back. Without the grace, its own reboot reads as unreachable and it is rebooted again."
+  />
+  <Card
+    title="Nothing acts just after the hub restarts"
+    description="A restart drops every device socket at once. The startup grace is what stops a deploy — or a file save in development — looking like a fleet-wide outage."
+  />
+  <Card
+    title="Two ceilings per box"
+    description="Actions per hour, and reboots per day. Past either, the box gets one critical alert and is then left alone until the window rolls."
+  />
+  <Card
+    title="Quiet hours stop the action, not the alert"
+    description="Not rebooting a box at 3am is a reasonable policy. Hiding that it needs one is not."
+  />
+</Cards>
+
+## The settings, one by one
+
+Everything in the **Monitoring** card. The right-hand column is what goes wrong
+if the number is wrong, which is usually the faster way to pick one.
+
+| Setting | Default | What it does · what a bad value costs |
+| --- | --- | --- |
+| **Act on what it sees** | off | The master switch. Off, no probe is sent to any box and nothing is touched — rules can still be written and read. |
+| **Pass interval** | the heartbeat | Shown, not set. A pass reads what the boxes last said and they say it once per beat, so faster would re-read one reading and count a fault twice, and slower is only lag. Change the heartbeat in **Settings → Hub** if you want a different cadence. |
+| **Unreachable after** | 300s | How long a box may be gone before "Box is unreachable" fires. Must be at least the offline timeout, or a box is alerted about before it is even marked offline. Too low and every reboot, deploy and flaky uplink becomes an alert. |
+| **Rotom stale after** | 600s | How long since Rotom last saw a box before that counts as disconnected. Floored at 120s because the Rotom sync itself only runs once a minute — anything tighter alerts on the sync's own lag. |
+| **Grace after a reboot** | 600s | Nothing touches a box for this long after Magnemite rebooted it. Set it shorter than the box takes to boot and its own reboot reads as unreachable, so it gets rebooted again — forever. |
+| **Grace after a hub restart** | 180s | Nothing acts for this long after the hub starts. A restart drops every socket at once and the fleet reconnects over several seconds; without this, a deploy looks like a fleet-wide outage. |
+| **Max actions per box per hour** | 4 | Circuit breaker. Past it the box gets one critical alert and is then left alone until the hour rolls. This is what bounds a rule that turns out to be wrong. |
+| **Max reboots per box per day** | 6 | The same, for the expensive half of the ladder. Counted separately because a reboot costs a scanning session and the other actions do not. |
+| **Repeat an alert after** | 30 min | The same signal on the same box is not announced again inside this. The action still happens and is still recorded — only the Discord message is held. 0 announces every time. |
+| **Keep history for** | 30 days | How long the Monitoring page's feed is kept. 0 keeps it forever. |
+
+<Callout type="warn" title="The two graces and the two ceilings are the safety of this feature">
+  Everything else here is tuning. Those four are what stand between a useful watchdog and a fleet
+  rebooting itself in a loop, and every one of them exists because that has happened to somebody.
+</Callout>
+
+Three more live in the **Discord** card: the **webhook URL** (empty turns
+notifications off and leaves the rules running), the **minimum severity**
+(below it a rule acts and is recorded but not announced), and an optional
+**role to ping**, used on critical only.
+
+## Discord
+
+One webhook, from the channel's Integrations settings, and a minimum severity.
+Below that severity a rule still acts and is still recorded — the message is
+simply not sent. A role can be pinged, on critical only: a mention on every
+warning is how a channel gets muted, which costs you the alert that mattered.
+
+Individual rules can be silenced without being switched off. "Pogo not in
+focus" ships that way, because a box briefly on the launcher is common enough
+that announcing every one teaches people to ignore the channel.
+
+<Callout type="info">
+  A webhook that stops working never stops the remediation. The box is still restarted; the message
+  just does not arrive, and the **Monitoring** page records that it did not.
+</Callout>
+
+Press **Send test alert** before trusting any of it. It ignores the severity
+filter and the repeat window on purpose — somebody pressing that button wants to
+see a message, not to find out half an hour later that one was suppressed.
+
+## Scope
+
+A rule applies to every box, or to one device group. A group-scoped rule
+**replaces** the fleet-wide rule for the same signal and package rather than
+adding to it — otherwise two ladders would race over one fault and the box
+would be restarted twice for it. That is the seam for a fleet running Atlas at
+one site and Aegis at another: same signal, different probe, different command.
+
+## Where the defaults come from
+
+The seeded rules are not invented. Their thresholds and ladders are what
+[aconf](https://github.com/TechG3n/aconf)'s `atlas_monitor.sh` has been doing on
+this hardware for years — its `atlasdead` and `pogodead` counters are the same
+"once soft, twice hard" escalation, its health check is the same ratio, and its
+reboot-per-day ceiling is the same idea as the one here. The probe strings are
+Atlas's, which is exactly why they are editable rows.
+
+## Requirements
+
+The five box-answered signals need an agent from **0.2.0** or later. Boxes
+update themselves, so a fleet grows into them — see
+[updating the agent](/docs/fleet/agent-update). Until a box has, rules that
+depend on it skip it rather than acting on what it did not say, and the tab
+counts how many are still behind.
+
+The two hub-answered signals need nothing, and the Rotom one needs
+[Rotom turned on](/docs/fleet/rotom).

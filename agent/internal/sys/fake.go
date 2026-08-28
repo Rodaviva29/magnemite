@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,10 @@ import (
 //	                                  uninstall fallback gets exercised
 //	MAGNEMITE_FAKE_FREE_BYTES         override free space, to trip the gate
 //	MAGNEMITE_FAKE_INSTALL_MS         how long a commit pretends to take
+//	MAGNEMITE_FAKE_FOREGROUND         package the box claims is focused;
+//	                                  unset means the launcher, which is what
+//	                                  the "pogo not in focus" rule fires on
+//	MAGNEMITE_FAKE_ANR                package the box claims is not responding
 type Fake struct {
 	mu         sync.Mutex
 	serial     string
@@ -113,8 +118,29 @@ func (f *Fake) Prop(_ context.Context, name string) string {
 }
 
 func (f *Fake) Shell(ctx context.Context, script string) (string, error) {
-	// Hooks are recorded, not run: the point of fake mode is to avoid touching
-	// the host.
+	// The monitor probes are the one thing worth answering rather than
+	// swallowing: a fake fleet is how the escalation ladder gets exercised at
+	// all, and a box that always reports healthy can never demonstrate that a
+	// rule restarts anything. Everything else — hooks included — stays
+	// recorded and unrun, which is the point of fake mode.
+	switch {
+	case strings.Contains(script, "mFocusedApp"):
+		if pkg := os.Getenv("MAGNEMITE_FAKE_FOREGROUND"); pkg != "" {
+			return fmt.Sprintf("mFocusedApp=ActivityRecord{1a2b3c u0 %s/.MainActivity t42}", pkg), nil
+		}
+		return "mFocusedApp=null", nil
+
+	case strings.Contains(script, "Application Not Responding"):
+		if pkg := os.Getenv("MAGNEMITE_FAKE_ANR"); pkg != "" {
+			return "Application Not Responding: " + pkg, nil
+		}
+		return "", nil
+
+	case strings.Contains(script, "MAGNEMITE_FAKE_SHELL_FAIL"):
+		// A probe an operator can deliberately break from the dashboard, by
+		// pointing a shell check at this string.
+		return "", fmt.Errorf("fake shell failure")
+	}
 	return "", nil
 }
 

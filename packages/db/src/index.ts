@@ -169,7 +169,63 @@ const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
   deviceOfflineTimeoutSeconds: 70,
 };
 
-const HUB_SETTINGS_KEYS = Object.keys(HUB_SETTINGS_DEFAULTS) as (keyof HubSettingsValues)[];
+/**
+ * Fleet-wide settings, in groups.
+ *
+ * Everything lives in the one `Setting` table, so a group is just a key
+ * prefix: the hub knobs are unprefixed, because they were there first and
+ * their rows are already written; anything added since carries one.
+ *
+ * The type check below is the part that matters. It used to be a bare
+ * `typeof row.value === "number"`, which was right while every setting was a
+ * number and became a silent data-loss bug the moment one was not — a string
+ * webhook URL saved perfectly and then vanished on every read. Comparing
+ * against the default's own type keeps that honest for whatever gets added
+ * next, and doubles as the guard against a row left behind by an older shape.
+ */
+type SettingValue = number | string | boolean;
+
+function mergeGroup<T extends Record<string, SettingValue>>(
+  defaults: T,
+  prefix: string,
+  rows: { key: string; value: unknown }[],
+): T {
+  const values = { ...defaults };
+  for (const row of rows) {
+    const name = row.key.slice(prefix.length);
+    if (!(name in defaults)) continue;
+    if (typeof row.value !== typeof defaults[name]) continue;
+    values[name as keyof T] = row.value as T[keyof T];
+  }
+  return values;
+}
+
+async function readGroup<T extends Record<string, SettingValue>>(
+  defaults: T,
+  prefix: string,
+): Promise<T> {
+  const keys = Object.keys(defaults).map((name) => `${prefix}${name}`);
+  const rows = await prisma.setting.findMany({ where: { key: { in: keys } } });
+  return mergeGroup(defaults, prefix, rows);
+}
+
+async function writeGroup<T extends Record<string, SettingValue>>(
+  patch: Partial<T>,
+  prefix: string,
+): Promise<void> {
+  const entries = Object.entries(patch) as [string, SettingValue][];
+  if (entries.length === 0) return;
+
+  await prisma.$transaction(
+    entries.map(([name, value]) =>
+      prisma.setting.upsert({
+        where: { key: `${prefix}${name}` },
+        update: { value },
+        create: { key: `${prefix}${name}`, value },
+      }),
+    ),
+  );
+}
 
 /**
  * Always a read. The caller caches if it has reason to.
@@ -186,27 +242,11 @@ const HUB_SETTINGS_KEYS = Object.keys(HUB_SETTINGS_DEFAULTS) as (keyof HubSettin
  * also be told to drop the copy, which is the piece that makes caching safe.
  */
 export async function getHubSettings(): Promise<HubSettingsValues> {
-  const rows = await prisma.setting.findMany({ where: { key: { in: HUB_SETTINGS_KEYS } } });
-  const values = { ...HUB_SETTINGS_DEFAULTS };
-  for (const row of rows) {
-    if (typeof row.value === "number" && (row.key as keyof HubSettingsValues) in values) {
-      values[row.key as keyof HubSettingsValues] = row.value;
-    }
-  }
-  return values;
+  return readGroup(HUB_SETTINGS_DEFAULTS, "");
 }
 
 export async function updateHubSettings(patch: Partial<HubSettingsValues>): Promise<void> {
-  const entries = Object.entries(patch) as [keyof HubSettingsValues, number][];
-  await prisma.$transaction(
-    entries.map(([key, value]) =>
-      prisma.setting.upsert({
-        where: { key },
-        update: { value },
-        create: { key, value },
-      }),
-    ),
-  );
+  await writeGroup(patch, "");
 }
 
 /**
@@ -226,6 +266,86 @@ export async function seedMissingHubSettings(patch: Partial<HubSettingsValues>):
     skipDuplicates: true,
   });
   return count;
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring settings
+// ---------------------------------------------------------------------------
+
+/**
+ * The knobs behind Settings → Monitoring.
+ *
+ * A separate group from the hub settings above, under a `monitor.` prefix,
+ * because these are read by one service rather than by everything and because
+ * several of them are not numbers. They are what stands between a useful
+ * watchdog and a fleet that reboots itself in a loop, so most of what is here
+ * is a ceiling rather than a feature.
+ */
+export type MonitorSettingsValues = {
+  /** The master switch. Off, so upgrading a fleet changes nothing by itself. */
+  enabled: boolean;
+  /**
+   * Seconds a box may be unreachable before it is worth saying so. Distinct
+   * from `deviceOfflineTimeoutSeconds`, which only decides when a box is
+   * *marked* offline — a box can be offline for a minute during its own
+   * reboot without anyone needing to hear about it.
+   */
+  unreachableAlertSeconds: number;
+  /** Seconds since Rotom last saw a box before that counts as disconnected. */
+  rotomStaleSeconds: number;
+  /**
+   * No action on a box for this long after we rebooted it. Without this, a box
+   * taking three minutes to come back reads as unreachable and gets rebooted
+   * again, forever.
+   */
+  rebootGraceSeconds: number;
+  /**
+   * Nothing acts for this long after the hub starts.
+   *
+   * The hub runs under `tsx watch` in development, so every file save restarts
+   * it and drops every device socket at once. Without this, editing this
+   * repository reboots the fleet.
+   */
+  startupGraceSeconds: number;
+  /** Circuit breaker: past this, a box is alerted about and left alone. */
+  maxActionsPerDeviceHour: number;
+  /** The same, for the expensive half of the ladder. */
+  maxRebootsPerDeviceDay: number;
+  /** The same signal on the same box is not re-announced inside this. */
+  alertDedupeMinutes: number;
+  /** Days of monitor history to keep. 0 keeps it forever. */
+  eventRetentionDays: number;
+  /** Empty turns notifications off while leaving remediation running. */
+  discordWebhookUrl: string;
+  /** INFO, WARN or CRITICAL. Anything below it is acted on but not announced. */
+  discordMinLevel: string;
+  /** A role to ping on CRITICAL only. Empty pings nobody. */
+  discordMentionRoleId: string;
+};
+
+const MONITOR_SETTINGS_DEFAULTS: MonitorSettingsValues = {
+  enabled: false,
+  unreachableAlertSeconds: 300,
+  rotomStaleSeconds: 600,
+  rebootGraceSeconds: 600,
+  startupGraceSeconds: 180,
+  maxActionsPerDeviceHour: 4,
+  maxRebootsPerDeviceDay: 6,
+  alertDedupeMinutes: 30,
+  eventRetentionDays: 30,
+  discordWebhookUrl: "",
+  discordMinLevel: "WARN",
+  discordMentionRoleId: "",
+};
+
+export const MONITOR_SETTINGS_PREFIX = "monitor.";
+
+export async function getMonitorSettings(): Promise<MonitorSettingsValues> {
+  return readGroup(MONITOR_SETTINGS_DEFAULTS, MONITOR_SETTINGS_PREFIX);
+}
+
+export async function updateMonitorSettings(patch: Partial<MonitorSettingsValues>): Promise<void> {
+  await writeGroup(patch, MONITOR_SETTINGS_PREFIX);
 }
 
 // ---------------------------------------------------------------------------

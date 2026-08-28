@@ -11,14 +11,14 @@ small Caddy of our own (`edge`) in front of the hub. It uses **two domains**
 rather than path routing, because the agents and the dashboard are separate
 audiences.
 
-| Declared in the file    | Domain for                                                           | Routed to |
-| ----------------------- | -------------------------------------------------------------------- | --------- |
-| `SERVICE_URL_WEB_3000`  | the dashboard you log into                                           | Next      |
-| `SERVICE_URL_EDGE_8080` | what the boxes talk to — use a subdomain like `agents.<your-domain>` | Caddy     |
+| Service | Domain for                                                           | Container port |
+| ------- | -------------------------------------------------------------------- | -------------- |
+| `web`   | the dashboard you log into                                           | `3000`         |
+| `edge`  | what the boxes talk to — use a subdomain like `agents.<your-domain>` | `8080`         |
 
-The numeric suffix is the container port the proxy sends that domain to — see
-[the port lives in the variable
-name](#the-port-lives-in-the-variable-name).
+Neither is declared in the compose file. You add them in the Domains tab — see
+[adding the domains](#add-the-domains) and [why they are not in the
+file](#why-the-domains-are-not-in-the-file).
 
 ## Deploying
 
@@ -50,17 +50,44 @@ deploy](/docs/deployment/zero-downtime).
 
 <Step>
 
-### Set both domains
+### Add the domains
 
-In the **Domains** tab, give `web` your dashboard domain and `edge` the agents'
-subdomain — bare domains, no port:
+Two things have to line up here, and they are in different tabs. The **Domains**
+tab tells Coolify's proxy where to route; the **Environment** tab tells the apps
+what to call themselves.
 
+In the **Domains** tab, one domain per service, each with the container port as
+a `:suffix` — that suffix is the routing hint, not part of the public address:
+
+| Service | Domain                                      |
+| ------- | ------------------------------------------- |
+| `web`   | `https://magnemite.example.com:3000`        |
+| `edge`  | `https://agents.magnemite.example.com:8080` |
+| `docs`  | `https://docs.magnemite.example.com:3002`   |
+
+<Callout type="error" title="The edge port is the one that breaks quietly">
+  Miss `:8080` and Traefik routes the boxes' domain to a port Caddy never opened — the dashboard
+  keeps working, so nothing looks wrong, while every box gets a 502 on `/ws/device` and on every
+  download. `docs` only exists if you deployed `compose.coolify-docs.yml`.
+</Callout>
+
+Then, in the **Environment** tab, the two domains again **without** the port —
+these are what the boxes and the browser are handed, not routing hints — plus
+the database this stack does not run itself:
+
+```sh
+MAGNEMITE_PUBLIC_URL=https://agents.magnemite.example.com
+MAGNEMITE_DASHBOARD_URL=https://magnemite.example.com
+DATABASE_URL=mysql://magnemite:<password>@<db-host>:3306/magnemite
 ```
-https://agents.magnemite.example.com
-```
 
-The port is already carried by the variable names, so there is no `:8080` to
-remember here.
+`DATABASE_URL` points at a database you deploy separately — see [the database is
+not in the stack](#the-database-is-not-in-the-stack). Add `DB_PROVIDER` too if
+it is not MariaDB or MySQL.
+
+`MAGNEMITE_PUBLIC_URL` is the one to get right: every artifact URL a box is told
+to download from is built on it, so pointing it at the dashboard's domain
+enrolls a fleet that can never fetch anything.
 
 </Step>
 
@@ -123,12 +150,16 @@ your own.
 
 ## Things this file does differently
 
-### The database is MariaDB
+### The database is not in the stack
 
-Unlike `deploy/compose.yml`, which runs Postgres, this stack runs `mariadb:11`.
-Prisma reaches it through the **`mysql`** connector — there is no separate
-`mariadb` provider — so `DB_PROVIDER: mysql` appears twice per app service, and
-both are load-bearing:
+Unlike `deploy/compose.yml`, which runs its own Postgres, this file ships no
+database service and no data volume. It connects to one you deploy separately —
+its own Coolify resource, or anything else the containers can reach — over a
+single `DATABASE_URL`.
+
+`DB_PROVIDER` has to agree with that URL: **`mysql`** for MariaDB or MySQL
+(Prisma has no separate `mariadb` connector), `postgresql` for Postgres. It is
+interpolated in two places per app service, and both are load-bearing:
 
 - as a **build arg**, because the Prisma Client is generated into the hub and
   web images at build time and has to match the URL it will be given;
@@ -136,67 +167,55 @@ both are load-bearing:
 deploy`, and the provider is what selects `prisma/migrations-mysql` over
   `prisma/migrations`.
 
+Both read the same `${DB_PROVIDER:-mysql}`, so setting the variable once moves
+both and they cannot drift apart. Changing it means a **rebuild**, not just a
+restart — the client is inside the image.
+
+<Callout type="warn" title="The URL is resolved inside the container">
+  A Coolify database resource publishes an internal hostname on its own network and, optionally, a
+  public one. `DATABASE_URL` needs the internal one, and the database has to share a network with
+  this stack — a public URL works until Coolify's firewall or a restart moves it.
+</Callout>
+
 <Callout type="error" title="Providers do not migrate into each other">
-  The two migration histories are separate and nothing copies data between them. Editing this file
-  does not turn an existing Postgres deployment into a MariaDB one — it starts an empty database
-  next to it. Dump and restore by hand if you have a fleet already enrolled.
+  The two migration histories are separate and nothing copies data between them. Pointing this stack
+  at a database of the other kind starts an empty schema, it does not convert anything. Dump and
+  restore by hand if you have a fleet already enrolled.
 </Callout>
 
-### Valueless `SERVICE_*` entries
+### Why the domains are not in the file
 
-`edge` and `web` declare `SERVICE_URL_EDGE_8080:` and `SERVICE_URL_WEB_3000:`
-with no value at all. That is deliberate: Coolify fills them from the Domains
-tab, and writing `${SERVICE_URL_EDGE}` would make Compose interpolate a variable
-that does not exist yet and blank it out.
+Coolify can generate a domain for a service from a `SERVICE_URL_<name>_<port>`
+placeholder, and this file used to do that. It went wrong asymmetrically: `web`
+and `docs` came out as `…:3000` and `…:3002`, and `edge` came out as a bare
+`http://edge-….sslip.io` with no port at all — pointing the boxes at a port
+Caddy does not listen on.
 
-They are written in **map** form. The list form of the same thing
-(`- SERVICE_URL_EDGE_8080`) means exactly the same to Compose, but Coolify's own
-compose preview mis-converts it into a numeric key and the deploy fails with:
+The other half of the problem is that the generated values are not stable.
+Coolify keeps a port-carrying variable and a generic one for each service, and
+after a domain is edited in the UI the generic pair [is not always
+updated](https://github.com/coollabsio/coolify/issues/8912) — it keeps the
+autogenerated wildcard domain. `MAGNEMITE_PUBLIC_URL` was read from that generic
+variable, which is the worst possible thing to have go quietly stale: it is the
+host every box downloads from.
 
-```
-non-string key in services.edge.environment: 0
-```
-
-### The port lives in the variable name
-
-Coolify's proxy has to know which container port a domain belongs to, and the
-place that is written is the **numeric suffix on the name** — `_8080` on the
-edge, `_3000` on the dashboard. Declaring the plain `SERVICE_FQDN_EDGE` instead
-generates the domain but nothing to route it to, which is why that shape needed
-a `:8080` typed into the Domains tab by hand.
-
-One declaration produces four variables, and the difference between them is
-what the rest of the file relies on:
-
-| Variable                 | Value                        | Used for                                                                      |
-| ------------------------ | ---------------------------- | ----------------------------------------------------------------------------- |
-| `SERVICE_FQDN_EDGE`      | `agents.example.com`         | a bare host, no scheme — what the auth fallback accepts                       |
-| `SERVICE_URL_EDGE`       | `https://agents.example.com` | the absolute URL — `MAGNEMITE_PUBLIC_URL`, which artifact URLs are built from |
-| `SERVICE_FQDN_EDGE_8080` | the same, carrying `:8080`   | the proxy's own routing                                                       |
-| `SERVICE_URL_EDGE_8080`  | the same, carrying `:8080`   | the proxy's own routing                                                       |
-
-So `SERVICE_FQDN_EDGE` and `SERVICE_URL_EDGE` are not two ways of saying the
-same thing: the hub needs an absolute URL because it hands artifact URLs to the
-boxes, and the dashboard's auth fallback wants a bare host.
-
-<Callout type="warn" title="Change a domain from the UI and the generic pair goes stale">
-  Coolify updates the two port-carrying variables when you edit a domain in the Domains tab, but
-  [not always the generic `SERVICE_URL_*` /
-  `SERVICE_FQDN_*`](https://github.com/coollabsio/coolify/issues/8912) — they keep the autogenerated
-  wildcard domain. `MAGNEMITE_PUBLIC_URL` comes from the generic one, so a stale value points every
-  box at the wrong host for its downloads. After changing a domain, read the value back in the
-  **Environment** tab before deploying.
-</Callout>
+Setting the two domains by hand costs one extra field each and removes both
+failure modes. Nothing in the compose file interpolates a `SERVICE_URL_*` or
+`SERVICE_FQDN_*` any more; `SERVICE_PASSWORD_*`, `SERVICE_USER_*` and
+`SERVICE_BASE64_*` still work as before, because generating secrets is the part
+of that mechanism with nothing to get wrong.
 
 ### The auth URL fallback
 
-`BETTER_AUTH_URL` is set from `${SERVICE_URL_WEB}`, which Coolify does not
-always have populated by the time Compose interpolates — in which case the
-reference collapses to an empty string. Better Auth without a base URL derives
-the origin from the incoming `Host` header, which breaks callbacks behind a
-proxy. The app therefore falls back to the bare `SERVICE_FQDN_WEB` that Coolify
-injects, so keep that line even if you set the two explicitly. A bare host with
-no `https://` is accepted.
+Better Auth without a base URL derives the origin from the incoming `Host`
+header, which breaks callbacks behind a proxy. The app resolves one from
+`BETTER_AUTH_URL`, then `MAGNEMITE_DASHBOARD_URL`, then Coolify's own
+`SERVICE_FQDN_WEB` / `SERVICE_URL_WEB` if they happen to be in the environment.
+
+With the domains set by hand, the last two are not there — which makes
+**`MAGNEMITE_DASHBOARD_URL` required on this deployment**, not optional. Leave it
+out and logging in fails in ways that look like a cookie problem. A bare host
+with no `https://` is accepted.
 
 ### Why there is still a Caddy
 
@@ -218,14 +237,20 @@ changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
 
 ## Upgrading from an earlier version of this file
 
-The boxes' domain has moved twice, and neither move needs re-flashing — a box
-only ever knows the URL, so keeping the same domain value is enough:
+The boxes' domain has been generated three different ways, and none of the moves
+needs re-flashing — a box only ever knows the URL, so keeping the same domain
+value is enough:
 
 - `SERVICE_FQDN_HUB_3001` → `SERVICE_FQDN_EDGE`, when the edge gained its own
   service.
-- `SERVICE_FQDN_EDGE` → `SERVICE_URL_EDGE_8080`, moving the port out of the
-  Domains tab and into the name. Coming from that shape, **delete the `:8080`
-  suffix from the domain** when you upgrade; the name carries it now.
+- `SERVICE_FQDN_EDGE` → `SERVICE_URL_EDGE_8080`, briefly moving the port into
+  the variable name.
+- No placeholder at all, which is where it is now.
+
+Coming from either of the placeholder shapes: keep the domain, make sure it
+carries `:8080`, and **add `MAGNEMITE_PUBLIC_URL` and `MAGNEMITE_DASHBOARD_URL`
+to the Environment tab** — they used to come from the generated variables, and
+without them the hub boots with an empty public URL.
 
 ## Next
 

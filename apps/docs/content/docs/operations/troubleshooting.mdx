@@ -111,7 +111,7 @@ before the first fleet-wide update.
 | Check                  | How                                                                                     |
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | Right URL?             | `serverUrl` must be the **hub** domain (`MAGNEMITE_PUBLIC_URL`), not the dashboard's.   |
-| Right port on Coolify? | The edge is declared `SERVICE_URL_EDGE_8080`, which is what routes the domain to Caddy. |
+| Right port on Coolify? | The edge domain needs the `:8080` suffix in the Domains tab, or the proxy misses Caddy. |
 | Approved?              | With auto-approve off, a box sits as _pending approval_ and receives nothing.           |
 | Token still valid?     | A revoked enrollment token blocks _new_ enrollments; a revoked device is disconnected.  |
 | DNS?                   | See [DNS on Android](/docs/operations/troubleshooting#dns-on-android) above.            |

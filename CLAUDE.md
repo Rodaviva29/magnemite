@@ -103,8 +103,42 @@ defaults.
 
 Three of them are coupled and the form enforces it:
 `deviceOfflineTimeout ≥ 3 × heartbeat`, `metricsSampleSeconds ≥ heartbeat`.
-The heartbeat is the only setting that lives on the boxes — a box adopts it in
-the `welcome` on its **next connection**, not immediately.
+Monitoring adds one more: `monitor.unreachableAlertSeconds ≥
+deviceOfflineTimeout`. The monitor pass itself is **not** a setting — it runs
+once per heartbeat, because a pass reads what the boxes last said and they say
+it once per beat. There is one right answer, so there is nothing to configure.
+
+The heartbeat is **not** the only setting that lives on the boxes any more. The
+monitor spec — what to probe — rides the same `welcome`, so it too reaches a box
+on its **next connection**. The hub pushes a fresh `welcome` to everything
+connected when a rule is saved, which is what makes it feel immediate; a box
+that is offline picks it up when it comes back.
+
+Settings are two groups in the one `Setting` table: the hub knobs are
+unprefixed, monitoring is under `monitor.`. `getHubSettings` used to keep a row
+only when `typeof row.value === "number"`, which silently dropped the first
+string setting anyone added — it now compares against the default's type, so a
+string or a boolean survives. If you add a group, go through `readGroup`.
+
+## Monitoring will reboot your fleet if you let it
+
+`apps/hub/src/services/monitor.ts` runs shell commands and reboots on boxes in
+someone's living room, so most of it is refusals rather than logic. Three that
+are easy to break by accident:
+
+- **Unknown is not a failure.** A `null` reading — old agent, probe out of
+  budget, no Rotom match — must neither count nor reset. Returning `false` from
+  `readSignal` where you meant `null` turns silence into a healthy report.
+- **The startup grace exists because of `tsx watch`.** Every file save restarts
+  the hub and drops every socket at once. Without the grace, editing this repo
+  is indistinguishable from a fleet-wide outage, and the fleet gets rebooted.
+- **`monitorRan` is what makes an empty reading readable.** An absent
+  `foregroundPackage` means the launcher is up (a fault) *and* means the agent
+  never looked (leave it alone). Only the flag separates them.
+
+Seeded rules are written disabled and only when the table is empty. Keep it
+that way — an upgrade that starts rebooting boxes is the worst possible
+version of this feature.
 
 ## Version sources
 

@@ -64,9 +64,8 @@ docker compose up -d --no-deps hub edge
 </Callout>
 
 <Callout type="error" title="--no-deps is not optional">
-  Without it, Compose starts what `web` declares in `depends_on` — `mariadb` and `hub` — and
-  recreates them, because their image tags moved with the
-  commit. That is the exact restart this is meant to avoid.
+  Without it, Compose starts what `web` declares in `depends_on` — `hub` — and recreates it,
+  because its image tag moved with the commit. That is the exact restart this is meant to avoid.
 
 For the same reason, never add `--remove-orphans` or `--force-recreate`: both
 reach past the service you named.

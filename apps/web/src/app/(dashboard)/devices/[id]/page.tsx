@@ -16,6 +16,7 @@ import {
 import { DevicePackages, type DevicePackageRow } from "@/components/device-packages";
 import { DeviceHeartbeat, DeviceLastSeen } from "@/components/device-last-seen";
 import { DeviceLoadCard } from "@/components/device-load-card";
+import { RelativeTime } from "@/components/relative-time";
 import { loadRecentTrend } from "@/lib/metrics";
 import { formatDuration, formatRelative } from "@/lib/format";
 
@@ -37,6 +38,9 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           // not the whole life of the box.
           take: 50,
         },
+        // "Why did this box reboot at 3am" is a question asked of one box, so
+        // it needs answering here and not only fleet-wide in Settings.
+        monitorEvents: { orderBy: { at: "desc" }, take: 20 },
         jobs: {
           orderBy: { queuedAt: "desc" },
           // The table pages client-side, so this is a cap on how far back the
@@ -240,6 +244,42 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
         packages={packageRows}
         syncedAt={device.packagesSyncedAt?.toISOString() ?? null}
       />
+
+      {device.monitorEvents.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Automations</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {device.monitorEvents.map((event) => (
+              <div
+                key={event.id}
+                className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-2 text-sm last:border-0 last:pb-0"
+              >
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span>{event.message}</span>
+                    {event.action ? (
+                      <Badge variant={event.actionOk === false ? "danger" : "secondary"}>
+                        {event.action}
+                        {event.actionOk === false ? " failed" : ""}
+                      </Badge>
+                    ) : null}
+                  </p>
+                  {event.detail ? (
+                    <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                      {event.detail}
+                    </p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  <RelativeTime value={event.at.toISOString()} />
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

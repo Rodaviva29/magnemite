@@ -113,6 +113,10 @@ export const hub = {
     call<{ removed: number }>("/internal/versions/prune", { keepLatest }),
   /** Tell the hub its cached settings are stale. */
   refreshSettings: () => call<{ ok: boolean }>("/internal/settings"),
+  /** Prove the Discord webhook, ignoring the level filter and the dedupe window. */
+  testAlert: () => call<{ ok: boolean; error: string | null }>("/internal/monitor/test"),
+  /** Force an evaluation pass rather than waiting for the next tick. */
+  runMonitor: () => call<{ ok: boolean }>("/internal/monitor/run"),
   pollSources: () =>
     call<{
       ran: boolean;

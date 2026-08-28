@@ -12,6 +12,7 @@ import { resolveExec } from "../services/deviceCommands.js";
 import { dropStreams, failBundle, publishLogLines } from "../services/deviceLogs.js";
 import { applyMetrics, markOffline, markOnline, trackedPackages } from "../services/devices.js";
 import { ACTIVE_STATES, applyProgress, completeJob, logJobEvent } from "../services/jobs.js";
+import { specForDevice } from "../services/monitor.js";
 import { nudge } from "../services/scheduler.js";
 
 export const WS_PATH = "/ws/device";
@@ -153,6 +154,10 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
     // settings that never leave the server.
     heartbeatSeconds: (await getHubSettings()).heartbeatSeconds,
     trackedPackages: await trackedPackages(),
+    // What to watch, which depends on the box's group. Null for a fleet with
+    // monitoring off, which is also what stops an agent probing after the last
+    // rule is switched off.
+    monitor: await specForDevice(device.groupId),
   });
 
   await prisma.device.update({

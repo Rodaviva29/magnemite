@@ -6,15 +6,21 @@ import { log } from "../log.js";
 /**
  * RotomNG integration.
  *
- * Rotom is the thing that actually knows whether a box is scanning, so it is
- * worth more here than a status widget:
+ * Rotom is the thing that actually knows whether a box is scanning, which
+ * makes it a health signal Magnemite cannot produce on its own — a box can be
+ * online, heartbeating, and handing Rotom nothing.
  *
- *  - before an install the box is `disable`d in Rotom, so the controller stops
- *    handing it accounts instead of losing work mid-session;
- *  - afterwards it is `enable`d and the app `restart`ed, which replaces the
- *    hand-written post-install hook most people would otherwise need;
- *  - "did the update work" is then answered by the box reappearing in Rotom
- *    with live workers, not by `pm` having printed Success.
+ * That is now the whole of it. Rotom used to be wired into installs as well:
+ * the box was disabled before one and re-enabled after, and "did the update
+ * work" was answered by it reappearing with live workers. That coupling is
+ * gone. It made every rollout depend on a second service being reachable and
+ * agreeing, and the install pipeline has its own verification. What is left is
+ * three things, all read-only or operator-driven:
+ *
+ *  - `syncDevices` keeps each box's scanning state current, every minute;
+ *  - monitoring reads that state as the `ROTOM_DISCONNECTED` signal, and can
+ *    `restart` a scanner as a remediation;
+ *  - the device page offers the same actions by hand.
  *
  * API reference: https://github.com/UnownHash/RotomNG/blob/main/docs/RotomNG-API.md
  */
@@ -71,19 +77,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listDevices(): Promise<RotomDevice[]> {
   const body = await request<{ devices?: RotomDevice[] }>("/device");
   return body.devices ?? [];
-}
-
-export async function getDevice(rotomDeviceId: string): Promise<RotomDevice | null> {
-  try {
-    const body = await request<{ device?: RotomDevice } | RotomDevice>(
-      `/device/${encodeURIComponent(rotomDeviceId)}`,
-    );
-    // The single-device endpoint has been seen both wrapped and bare.
-    if (body && typeof body === "object" && "device" in body) return body.device ?? null;
-    return (body as RotomDevice) ?? null;
-  } catch {
-    return null;
-  }
 }
 
 export async function deviceAction(rotomDeviceId: string, action: RotomAction): Promise<boolean> {
@@ -163,6 +156,15 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
         rotomConnected: Boolean(rotomDevice.is_connected),
         rotomWorkerCount: rotomDevice.worker_count ?? null,
         rotomLastSeenAt: rotomDevice.last_seen_at_ms ? new Date(rotomDevice.last_seen_at_ms) : null,
+        // Rotom has no single "healthy" field; the composite is
+        // enabled && is_connected && can_be_used. These two are the half that
+        // was not stored, and without them a box somebody disabled in Rotom on
+        // purpose is indistinguishable from one Rotom lost — which is the
+        // difference between an alert worth having and an alert about a
+        // decision that was already made. Absent means true for `enabled`,
+        // since a Rotom too old to report it has no way to be disabled either.
+        rotomEnabled: rotomDevice.enabled ?? true,
+        rotomCanBeUsed: Boolean(rotomDevice.can_be_used),
       },
     });
     bus.publish({ kind: "device", deviceId });
@@ -174,7 +176,10 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
     select: { id: true },
   });
   for (const device of stale) {
-    await prisma.device.update({ where: { id: device.id }, data: { rotomConnected: false } });
+    await prisma.device.update({
+      where: { id: device.id },
+      data: { rotomConnected: false, rotomCanBeUsed: false },
+    });
     bus.publish({ kind: "device", deviceId: device.id });
   }
 
@@ -183,121 +188,44 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
 }
 
 // ---------------------------------------------------------------------------
-// Install lifecycle
+// Upgrading away from the install lifecycle
 // ---------------------------------------------------------------------------
 
 /**
- * Take the box out of the scanning pool before an install. Returns true when
- * Rotom accepted it, so the caller knows whether there is anything to undo.
+ * Undo what the old install lifecycle left behind, once, on boot.
+ *
+ * Magnemite used to disable a box in Rotom for the duration of an install and
+ * re-enable it afterwards, recording which job held it in `rotomDisabledBy`.
+ * That is gone: nothing sets the column any more.
+ *
+ * A box the old code had parked when the hub was upgraded would otherwise stay
+ * out of the scanning pool forever — no code left to re-enable it, and the
+ * monitoring rule deliberately reads a disabled box as somebody's decision
+ * rather than a fault, so it would not complain either. This runs once per
+ * boot, is a no-op the moment the column is empty, and exists only until every
+ * deployment has started once on this version.
  */
-export async function pauseForInstall(deviceId: string, jobId: string): Promise<boolean> {
-  if (!rotomEnabled()) return false;
-
-  const device = await prisma.device.findUnique({
-    where: { id: deviceId },
-    select: { rotomDeviceId: true },
-  });
-  if (!device?.rotomDeviceId) return false;
-
-  const ok = await deviceAction(device.rotomDeviceId, "disable");
-  if (ok) {
-    await prisma.device.update({ where: { id: deviceId }, data: { rotomDisabledBy: jobId } });
-  }
-  return ok;
-}
-
-/**
- * Put the box back to work: re-enable it and restart the scanner onto the
- * freshly installed build.
- */
-export async function resumeAfterInstall(
-  deviceId: string,
-  jobId: string,
-  opts: { restartApp: boolean },
-): Promise<boolean> {
-  if (!rotomEnabled()) return false;
-
-  const device = await prisma.device.findUnique({
-    where: { id: deviceId },
-    select: { rotomDeviceId: true, rotomDisabledBy: true },
-  });
-  if (!device?.rotomDeviceId) return false;
-  // Only undo what this job did, so two jobs cannot re-enable each other's box.
-  if (device.rotomDisabledBy && device.rotomDisabledBy !== jobId) return false;
-
-  const enabled = await deviceAction(device.rotomDeviceId, "enable");
-  if (opts.restartApp) await deviceAction(device.rotomDeviceId, "restart");
-
-  await prisma.device.update({ where: { id: deviceId }, data: { rotomDisabledBy: null } });
-  return enabled;
-}
-
-/**
- * Wait for the box to show up in Rotom again with a live worker. This is the
- * end-to-end proof that the update left a working scanner behind.
- */
-export async function confirmScanning(
-  deviceId: string,
-  opts: { timeoutMs?: number; intervalMs?: number } = {},
-): Promise<boolean | null> {
-  if (!rotomEnabled()) return null;
-
-  const device = await prisma.device.findUnique({
-    where: { id: deviceId },
-    select: { rotomDeviceId: true },
-  });
-  if (!device?.rotomDeviceId) return null;
-
-  const timeout = opts.timeoutMs ?? 5 * 60_000;
-  const interval = opts.intervalMs ?? 20_000;
-  const deadline = Date.now() + timeout;
-
-  while (Date.now() < deadline) {
-    const rotomDevice = await getDevice(device.rotomDeviceId);
-    if (rotomDevice?.is_connected && (rotomDevice.worker_count ?? 0) > 0) {
-      await prisma.device.update({
-        where: { id: deviceId },
-        data: { rotomConnected: true, rotomWorkerCount: rotomDevice.worker_count ?? null },
-      });
-      bus.publish({ kind: "device", deviceId });
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, interval));
-  }
-  return false;
-}
-
-/**
- * Safety net: re-enable any box we disabled for a job that is no longer
- * running. Without this, a hub restart mid-install would leave the box parked
- * out of the scanning pool indefinitely.
- */
-export async function releaseOrphanedDevices(): Promise<number> {
-  if (!rotomEnabled()) return 0;
-
+export async function releaseInstallHolds(): Promise<number> {
   const parked = await prisma.device.findMany({
     where: { rotomDisabledBy: { not: null } },
-    select: { id: true, rotomDeviceId: true, rotomDisabledBy: true, name: true },
+    select: { id: true, name: true, rotomDeviceId: true },
   });
   if (parked.length === 0) return 0;
 
   let released = 0;
   for (const device of parked) {
-    const job = await prisma.job.findUnique({
-      where: { id: device.rotomDisabledBy! },
-      select: { state: true },
-    });
-    const stillRunning =
-      job &&
-      ["QUEUED", "DISPATCHED", "DOWNLOADING", "EXTRACTING", "INSTALLING", "VERIFYING"].includes(
-        job.state,
-      );
-    if (stillRunning) continue;
-
-    if (device.rotomDeviceId) await deviceAction(device.rotomDeviceId, "enable");
+    // Clear the column even when Rotom is off or the box never matched: the
+    // record is meaningless now, and leaving it would re-run this every boot.
+    if (rotomEnabled() && device.rotomDeviceId) {
+      await deviceAction(device.rotomDeviceId, "enable");
+      released += 1;
+    }
     await prisma.device.update({ where: { id: device.id }, data: { rotomDisabledBy: null } });
-    released += 1;
-    log.warn({ device: device.name }, "re-enabled a box left disabled in rotom");
   }
+
+  log.warn(
+    { parked: parked.length, released },
+    "released boxes the old install lifecycle had disabled in rotom",
+  );
   return released;
 }

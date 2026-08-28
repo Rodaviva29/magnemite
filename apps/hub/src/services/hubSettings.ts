@@ -1,4 +1,9 @@
-import { getHubSettings as readHubSettings, type HubSettingsValues } from "@magnemite/db";
+import {
+  getHubSettings as readHubSettings,
+  getMonitorSettings as readMonitorSettings,
+  type HubSettingsValues,
+  type MonitorSettingsValues,
+} from "@magnemite/db";
 import { log } from "../log.js";
 
 /**
@@ -23,6 +28,7 @@ import { log } from "../log.js";
  * query every few seconds forever.
  */
 let cache: HubSettingsValues | null = null;
+let monitorCache: MonitorSettingsValues | null = null;
 
 export async function getHubSettings(): Promise<HubSettingsValues> {
   if (cache) return { ...cache };
@@ -31,8 +37,26 @@ export async function getHubSettings(): Promise<HubSettingsValues> {
   return { ...values };
 }
 
-/** Drop the copy, so the next read goes to the database. */
+/**
+ * The monitoring knobs, held the same way and for the same reason: the
+ * evaluation pass reads all of them, and most are ceilings it has to check
+ * before it is allowed to touch a box.
+ */
+export async function getMonitorSettings(): Promise<MonitorSettingsValues> {
+  if (monitorCache) return { ...monitorCache };
+  const values = await readMonitorSettings();
+  monitorCache = values;
+  return { ...values };
+}
+
+/**
+ * Drop both copies, so the next read goes to the database.
+ *
+ * One bell for both groups: the dashboard rings it after any save, and a
+ * cache that is dropped when it did not need to be costs one query.
+ */
 export function invalidateHubSettingsCache(): void {
   cache = null;
+  monitorCache = null;
   log.info("hub settings cache dropped");
 }

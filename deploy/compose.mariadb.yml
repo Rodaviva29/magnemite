@@ -1,7 +1,18 @@
-# Same stack as compose.yml, with MariaDB instead of Postgres. Prisma's
-# "mysql" connector speaks MariaDB's wire protocol too, so DB_PROVIDER=mysql
-# is all the hub and web images need to point at it instead — see
-# packages/db/prisma.config.ts.
+# Same stack as compose.yml, against a database you run somewhere else.
+#
+# compose.yml brings its own Postgres; this file brings none at all and
+# connects to an existing one over DATABASE_URL. The default provider is
+# "mysql", which is what Prisma uses for both MySQL and MariaDB -- there is no
+# separate mariadb connector. Set DB_PROVIDER to "postgresql" and the same file
+# serves an external Postgres.
+#
+# DATABASE_URL is resolved inside the container, so its host has to be one the
+# container can reach. The DATABASE_URL in .env.example points at a
+# host-published port for local development, which is exactly the value that
+# does not work here -- set it to the database's own address.
+#
+# Changing DB_PROVIDER needs a rebuild, not a restart: the Prisma Client is
+# generated into the hub and web images.
 #
 # Use it exactly like the default file:
 #   docker compose --env-file .env -f deploy/compose.mariadb.yml up -d --build
@@ -9,27 +20,6 @@
 name: magnemite
 
 services:
-  mariadb:
-    image: mariadb:11
-    container_name: magnemite-mariadb
-    restart: unless-stopped
-    environment:
-      MARIADB_USER: ${DB_USER}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
-      MARIADB_DATABASE: ${DB_NAME}
-      # Nothing here ever connects as root; a random one it is.
-      MARIADB_RANDOM_ROOT_PASSWORD: "1"
-    volumes:
-      - mariadbdata:/var/lib/mysql
-    ports:
-      # Host-only, so you can point Prisma Studio or a mysql client at it.
-      - "127.0.0.1:3307:3306"
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   hub:
     build:
       context: ..
@@ -37,18 +27,13 @@ services:
       # The Prisma Client baked into the image at build time has to match the
       # DATABASE_URL below, so this is a build arg, not just a runtime one.
       args:
-        DB_PROVIDER: mysql
+        DB_PROVIDER: ${DB_PROVIDER:-mysql}
     container_name: magnemite-hub
     restart: unless-stopped
-    depends_on:
-      mariadb:
-        condition: service_healthy
     environment:
       NODE_ENV: production
-      DB_PROVIDER: mysql
-      # Built from the DB_* vars rather than taken from .env, whose
-      # DATABASE_URL points at the host-mapped port for local development.
-      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
+      DB_PROVIDER: ${DB_PROVIDER:-mysql}
+      DATABASE_URL: ${DATABASE_URL}
       # Fixed, like ARTIFACT_DIR below and for the same reason: it is a port
       # inside the compose network, so nothing outside can see it and nothing
       # gains from moving it. Taking it from .env let HUB_PORT drift away from
@@ -78,20 +63,16 @@ services:
       # The Prisma Client baked into the image at build time has to match the
       # DATABASE_URL below, so this is a build arg, not just a runtime one.
       args:
-        DB_PROVIDER: mysql
+        DB_PROVIDER: ${DB_PROVIDER:-mysql}
     container_name: magnemite-web
     restart: unless-stopped
     depends_on:
-      mariadb:
-        condition: service_healthy
       hub:
         condition: service_started
     environment:
       NODE_ENV: production
-      DB_PROVIDER: mysql
-      # Built from the DB_* vars rather than taken from .env, whose
-      # DATABASE_URL points at the host-mapped port for local development.
-      DATABASE_URL: mysql://${DB_USER}:${DB_PASSWORD}@mariadb:3306/${DB_NAME}
+      DB_PROVIDER: ${DB_PROVIDER:-mysql}
+      DATABASE_URL: ${DATABASE_URL}
       AUTH_SECRET: ${AUTH_SECRET}
       # Behind Caddy the dashboard and the agents share one origin, so Better
       # Auth's origin check uses the same URL. The Coolify setup splits them.
@@ -127,7 +108,6 @@ services:
       - caddy_config:/config
 
 volumes:
-  mariadbdata:
   artifacts:
   caddy_data:
   caddy_config:

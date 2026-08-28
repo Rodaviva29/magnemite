@@ -8,6 +8,7 @@ import {
   KeyRound,
   Rss,
   SearchX,
+  Siren,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
@@ -16,7 +17,8 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { cn } from "@/lib/utils";
 
-export type SettingsSectionId = "hub" | "apps" | "sources" | "columns" | "groups" | "enrollment";
+export type SettingsSectionId =
+  "hub" | "monitoring" | "apps" | "sources" | "columns" | "groups" | "enrollment";
 
 export type SettingsSection = {
   id: SettingsSectionId;
@@ -53,6 +55,32 @@ const CATEGORIES: Category[] = [
       "health sample interval",
       "history retention",
       "metrics",
+    ],
+  },
+  {
+    id: "monitoring",
+    label: "Monitoring",
+    icon: Siren,
+    summary: "What counts as a box gone wrong, what to do about it, and who to tell.",
+    terms: [
+      "automations",
+      "discord webhook",
+      "alerts",
+      "notifications",
+      "rules",
+      "escalation",
+      "restart the scanner",
+      "reboot the box",
+      "pogo not in focus",
+      "anr",
+      "health check",
+      "loop stalled",
+      "unreachable",
+      "rotom disconnected",
+      "cooldown",
+      "quiet hours",
+      "actions per hour",
+      "reboots per day",
     ],
   },
   {

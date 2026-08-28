@@ -11,6 +11,7 @@ import {
   PanelLeft,
   Rocket,
   Settings,
+  Siren,
   Upload,
   X,
 } from "lucide-react";
@@ -38,6 +39,7 @@ const SECTIONS: { label?: string; links: NavLink[] }[] = [
   {
     label: "System",
     links: [
+      { href: "/monitoring", label: "Monitoring", icon: Siren },
       { href: "/status", label: "Status", icon: Activity },
       { href: "/settings", label: "Settings", icon: Settings },
     ],

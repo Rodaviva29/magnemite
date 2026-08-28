@@ -94,6 +94,28 @@ type DeviceMetrics struct {
 
 	// Per-app CPU and memory for the packages the hub asked to track.
 	Processes []ProcessStats `json:"processes,omitempty"`
+
+	// What the box saw running the monitor spec from its welcome. All of it is
+	// omitted by an agent from before monitoring existed, and the hub reads
+	// that absence as "unknown", never as "failing".
+	//
+	// MonitorRan is what makes the rest readable: an empty ForegroundPackage
+	// means the launcher is up, which is a fault, and it also means "this
+	// agent never looked", which is not. The flag separates them.
+	MonitorRan        bool          `json:"monitorRan,omitempty"`
+	ForegroundPackage string        `json:"foregroundPackage,omitempty"`
+	ANRPackages       []string      `json:"anrPackages,omitempty"`
+	Checks            []CheckResult `json:"checks,omitempty"`
+}
+
+// CheckResult is what one configured probe came back with. The agent applies
+// the thresholds itself: the alternative is shipping a window of the scanner's
+// log over the socket every twenty seconds.
+type CheckResult struct {
+	ID     string `json:"id"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+	Ms     int64  `json:"ms,omitempty"`
 }
 
 // --- agent -> hub ----------------------------------------------------------
@@ -191,6 +213,45 @@ type Welcome struct {
 	Approved         bool     `json:"approved"`
 	HeartbeatSeconds int      `json:"heartbeatSeconds"`
 	TrackedPackages  []string `json:"trackedPackages"`
+	// What to watch for, or nil for a fleet with monitoring off. Adopted the
+	// same way TrackedPackages is, so a changed spec takes effect on the next
+	// welcome rather than on a reconnect.
+	Monitor *MonitorSpec `json:"monitor,omitempty"`
+}
+
+// MonitorSpec is everything the box should look at on each beat.
+type MonitorSpec struct {
+	Foreground bool               `json:"foreground,omitempty"`
+	ANR        bool               `json:"anr,omitempty"`
+	Checks     []MonitorCheckSpec `json:"checks,omitempty"`
+}
+
+// MonitorCheckSpec is one probe. None of these strings are hard-coded on
+// either side: every MITM writes a different log and answers to a different
+// service name, so they are rows in the database an operator edits per fleet.
+type MonitorCheckSpec struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"` // "shell" | "http" | "logMatch"
+	// shell: the command · http: the URL · logMatch: the log file's path.
+	Target string `json:"target"`
+	// shell: a regex the output must match · logMatch: a regex counted as a fault.
+	Expect string `json:"expect,omitempty"`
+	// logMatch: how many trailing lines to read.
+	Lines int `json:"lines,omitempty"`
+	// logMatch: matches inside that window before the check fails.
+	FailAt int `json:"failAt,omitempty"`
+	// logMatch: a regex counted as a success, so the check can be a ratio
+	// rather than a count — some faults are normal under load and only mean
+	// something when they outnumber the work getting done.
+	SuccessPattern string `json:"successPattern,omitempty"`
+	// logMatch: fail when faults >= successes * this. Zero skips the ratio.
+	MaxRatio float64 `json:"maxRatio,omitempty"`
+	// logMatch: also fail when the file itself has not been written to for
+	// this long. The file's mtime, not a timestamp parsed out of a line: every
+	// MITM formats its log differently, and "nothing written for five minutes"
+	// is both format-independent and exactly what a stalled loop looks like.
+	MaxAgeSeconds  int `json:"maxAgeSeconds,omitempty"`
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 }
 
 type InstallJob struct {

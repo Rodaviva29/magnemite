@@ -13,7 +13,7 @@ The message set is small on purpose — it is implemented twice, in
 | Message               | When                                                                                 |
 | --------------------- | ------------------------------------------------------------------------------------ |
 | `hello`               | On connect: serial, model, Android version, installed Pokémon GO version, free space |
-| `heartbeat`           | Periodically, carrying the same live facts                                           |
+| `heartbeat`           | Periodically, carrying the same live facts, and what the monitor probes saw          |
 | `job_progress`        | Download percentage, install phase, log lines                                        |
 | `job_result`          | Success or failure, with the verified version and whether data was wiped             |
 | `agent_update_result` | Only on failure: the self-update did not happen, and why                             |
@@ -26,7 +26,7 @@ The message set is small on purpose — it is implemented twice, in
 
 | Message            | When                                                   |
 | ------------------ | ------------------------------------------------------ |
-| `welcome`          | Accepting the socket                                   |
+| `welcome`          | Accepting the socket, and what to monitor               |
 | `install_job`      | Artifact URL, sha256, target version, hooks, flags     |
 | `cancel_job`       | You cancelled it, or the scheduler re-queued it        |
 | `reboot`           | From the device page                                   |
@@ -36,6 +36,24 @@ The message set is small on purpose — it is implemented twice, in
 | `log_stream_stop`  | Nobody is watching any more                            |
 | `exec_command`     | Run this shell command as root and say what it printed |
 | `ping`             | Liveness                                               |
+
+## Monitoring rides both of those
+
+[Monitoring](/docs/fleet/monitoring) added no message of its own. It travels as
+optional fields on two that already existed, which is why a fleet running last
+month's agents keeps working while it updates itself:
+
+- `welcome` carries a **monitor spec** — whether to report the focused app and
+  any ANR, plus a list of probes to run. Like the heartbeat interval, a box
+  learns a changed spec on its next `welcome`, which the hub pushes on save
+  rather than waiting for a reconnect.
+- `heartbeat` and `hello` carry the answers, inside `metrics`:
+  `foregroundPackage`, `anrPackages` and one `checks` entry per probe.
+
+The load-bearing field is **`monitorRan`**. An empty `foregroundPackage` means
+the launcher is on screen, which is a fault worth acting on; it also means "this
+agent has never heard of monitoring", which must be left alone. The flag is what
+separates the two, and without it the hub cannot read any of the rest.
 
 ## Properties worth knowing
 

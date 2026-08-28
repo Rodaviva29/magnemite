@@ -17,7 +17,8 @@ import {
 } from "./services/agentRelease.js";
 import { ensureArtifactDir } from "./services/artifacts.js";
 import { sweepOffline } from "./services/devices.js";
-import { rotomEnabled, syncDevices } from "./services/rotom.js";
+import { markMonitorStart, seedDefaultMonitorRules } from "./services/monitor.js";
+import { releaseInstallHolds, rotomEnabled, syncDevices } from "./services/rotom.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { startPolling, stopPolling } from "./services/sources/poller.js";
 import { attachDeviceSocket } from "./ws/deviceSocket.js";
@@ -61,6 +62,16 @@ async function main() {
   await syncAdminFromEnv();
   await adoptLegacyEnvSettings();
   await ensureArtifactDir();
+  // Rotom is no longer part of an install, so anything the old lifecycle had
+  // parked out of the scanning pool has nothing left to re-enable it. Once,
+  // on boot, and a no-op on every fleet that never ran that version.
+  await releaseInstallHolds().catch((err) =>
+    log.error({ err }, "could not release boxes disabled by the old install lifecycle"),
+  );
+  // Writes the default monitor rules on a fleet that has none, all disabled —
+  // upgrading into a running watchdog would start rebooting boxes before
+  // anyone had read the settings.
+  await seedDefaultMonitorRules();
   // Publishes the agent binaries this image was built with, so boxes on an
   // older build are updated as they reconnect.
   await loadAgentRelease();
@@ -99,6 +110,12 @@ async function main() {
     { port: env.HUB_PORT, artifactBase: `${env.MAGNEMITE_PUBLIC_URL.replace(/\/$/, "")}/files/` },
     "hub listening",
   );
+
+  // Starts the monitoring grace period. Every device socket is dropped by a
+  // restart and the whole fleet reconnects over the next few seconds, so
+  // nothing is allowed to act on what it sees until that has settled — which
+  // under `tsx watch` is what stops editing this repository rebooting boxes.
+  markMonitorStart();
 
   startScheduler();
   startPolling();

@@ -7,7 +7,6 @@ import {
 } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
-import { confirmScanning, resumeAfterInstall, rotomEnabled } from "./rotom.js";
 
 /** States the agent moves through while it is actually working on a job. */
 export const ACTIVE_STATES: JobState[] = [
@@ -64,39 +63,6 @@ export async function applyProgress(
 
   if (message) await logJobEvent(jobId, message, { phase: state });
   publishJob(updated);
-}
-
-/**
- * Put the box back into Rotom's scanning pool now that the job is over, and —
- * when the install worked — check that the scanner actually came back. That
- * check runs detached: it takes minutes, and nothing downstream waits on it.
- */
-async function releaseRotom(
-  job: { id: string; deviceId: string; rolloutId: string },
-  outcome: "success" | "failed",
-) {
-  if (!rotomEnabled()) return;
-
-  await resumeAfterInstall(job.deviceId, job.id, { restartApp: outcome === "success" }).catch(
-    (err) => log.warn({ err, jobId: job.id }, "rotom resume failed"),
-  );
-
-  if (outcome !== "success") return;
-
-  void (async () => {
-    const scanning = await confirmScanning(job.deviceId).catch(() => null);
-    if (scanning === null) return;
-    if (scanning) {
-      await logJobEvent(job.id, "scanner reconnected to rotom");
-    } else {
-      await logJobEvent(
-        job.id,
-        "installed, but the scanner has not reappeared in rotom — check the box",
-        { level: "WARN" },
-      );
-    }
-    publishJob(job);
-  })();
 }
 
 export type JobOutcome = {
@@ -164,11 +130,6 @@ export async function completeJob(jobId: string, outcome: JobOutcome) {
     publishJob(updated);
   }
 
-  // A job that is going round again keeps the box parked in Rotom — putting it
-  // back into the pool only to pull it out seconds later would be churn.
-  const goingAgain = !outcome.ok && job.attempt < job.rollout.maxAttempts;
-  if (!goingAgain) await releaseRotom(job, outcome.ok ? "success" : "failed");
-
   await recomputeRollout(job.rolloutId);
 }
 
@@ -219,7 +180,6 @@ export async function cancelJob(jobId: string) {
   });
   await logJobEvent(jobId, "cancelled", { phase: "CANCELLED" });
   publishJob(updated);
-  await releaseRotom(job, "failed");
   await recomputeRollout(job.rolloutId);
   return updated;
 }
@@ -253,7 +213,6 @@ export async function requeueStalled(stallTimeoutSeconds: number) {
       level: "WARN",
     });
     publishJob(job);
-    if (!canRetry) await releaseRotom(job, "failed");
     await recomputeRollout(job.rolloutId);
   }
 

@@ -9,10 +9,12 @@ import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
 import { cacheVersion, pruneArtifacts } from "../services/artifacts.js";
 import { execOnDevice } from "../services/deviceCommands.js";
-import { broadcastTrackedPackages } from "../services/devices.js";
+import { broadcastWelcome } from "../services/devices.js";
 import { normaliseLogPath, requestBundle, subscribeToLogs } from "../services/deviceLogs.js";
 import { collectHealth } from "../services/health.js";
 import { cancelJob, retryFailedJobs, retryJob } from "../services/jobs.js";
+import { evaluate } from "../services/monitor.js";
+import { sendTestAlert } from "../services/notify.js";
 import { cancelRollout, createRollout, resumeRollout } from "../services/rollouts.js";
 import { type RotomAction, deviceAction, rotomEnabled, syncDevices } from "../services/rotom.js";
 import { nudge } from "../services/scheduler.js";
@@ -182,13 +184,29 @@ export async function internalRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Tell every connected box what to report versions for. Called by the
-   * dashboard when the watched package list changes, so a new column fills in
-   * on the next heartbeat rather than whenever each box next reconnects.
+   * Tell every connected box what to report versions for, and what to watch.
+   * Called by the dashboard when the watched package list or a monitor rule
+   * changes, so a new column fills in — and a rule starts being probed — on
+   * the next heartbeat rather than whenever each box next reconnects.
    */
   app.post("/internal/tracked-packages/refresh", async () => ({
-    sent: await broadcastTrackedPackages(),
+    sent: await broadcastWelcome(),
   }));
+
+  // --- monitoring ----------------------------------------------------------
+
+  /**
+   * Prove the Discord webhook before anyone trusts it. Bypasses the level
+   * filter and the dedupe window: somebody pressing "Send test alert" wants to
+   * see a message, not to find out later that one was suppressed.
+   */
+  app.post("/internal/monitor/test", async () => sendTestAlert());
+
+  /** Force an evaluation pass, for the dashboard's "Run now" and for testing. */
+  app.post("/internal/monitor/run", async () => {
+    await evaluate();
+    return { ok: true };
+  });
 
   // --- devices -------------------------------------------------------------
 

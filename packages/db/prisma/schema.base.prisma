@@ -144,9 +144,27 @@ model Device {
   rotomConnected   Boolean   @default(false)
   rotomWorkerCount Int?
   rotomLastSeenAt  DateTime?
-  /// Set while Magnemite has the box disabled in Rotom for an install, so a
-  /// crash mid-job cannot leave it parked out of the scanning pool forever.
+  /// Legacy, and never written any more. Magnemite used to disable a box in
+  /// Rotom for the duration of an install and record which job held it; that
+  /// coupling is gone and Rotom is a monitoring signal only. The column
+  /// survives one release so the hub can re-enable, once on boot, anything the
+  /// old lifecycle had parked — after which it can be dropped.
   rotomDisabledBy  String?
+  /// Whether Rotom itself has the box enabled. A box someone disabled there on
+  /// purpose is not a box Rotom lost, and monitoring must not confuse the two.
+  rotomEnabled     Boolean   @default(true)
+  /// Rotom's own verdict on whether it would hand this box work.
+  rotomCanBeUsed   Boolean   @default(false)
+
+  // --- Monitoring ----------------------------------------------------------
+  /// The package owning the focused activity, as of the last heartbeat that
+  /// reported one. Null on a box that has never been asked, or that is on the
+  /// launcher.
+  foregroundPackage String?
+  /// When a heartbeat last carried monitor fields at all. Null means the box
+  /// runs an agent from before monitoring existed, which is why the rules that
+  /// depend on the agent skip it rather than reading its silence as a fault.
+  monitorReportedAt DateTime?
 
   notes   String?
   groupId String?
@@ -158,6 +176,8 @@ model Device {
   logBundles     DeviceLogBundle[]
   metricSamples  DeviceMetricSample[]
   packageSamples DevicePackageMetricSample[]
+  monitorStates  MonitorState[]
+  monitorEvents  MonitorEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -349,7 +369,8 @@ model DeviceGroup {
   /// for boxes in this group, e.g. to protect a site on a thin uplink.
   maxConcurrency Int?
 
-  devices Device[]
+  devices      Device[]
+  monitorRules MonitorRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -709,4 +730,167 @@ model Setting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring
+// ---------------------------------------------------------------------------
+
+/// What a rule watches for.
+///
+/// The signals split into two kinds, and the difference decides what happens
+/// when the answer is missing. The hub can see AGENT_OFFLINE and
+/// ROTOM_DISCONNECTED for itself; the rest are only knowable on the box, and
+/// an agent old enough not to report them says nothing at all. Silence there
+/// is unknown, never a fault.
+enum MonitorSignal {
+  AGENT_OFFLINE // the socket has been gone longer than the alert delay
+  SERVICE_DOWN // a tracked package has no processes on the box
+  APP_NOT_FOREGROUND // something else owns the screen
+  APP_ANR // the package is sitting on an ANR dialog
+  HEALTH_CHECK_FAILED // a configured probe came back bad
+  LOOP_STALLED // the scanner is alive but has stopped doing anything
+  ROTOM_DISCONNECTED // Rotom stopped seeing the box, or has no workers on it
+}
+
+/// What a rule does about it. Everything except REBOOT and ROTOM_RESTART is a
+/// shell command with an editable default — the catalog exists so an alert can
+/// say "cleared the cache and restarted" instead of quoting a command line.
+enum MonitorAction {
+  NOTIFY_ONLY
+  RESTART_APP
+  KILL_APP
+  CLEAR_CACHE_RESTART
+  SEND_KEYEVENT
+  START_SERVICE
+  SHELL
+  REBOOT
+  ROTOM_RESTART
+}
+
+enum MonitorLevel {
+  INFO
+  WARN
+  CRITICAL
+}
+
+/// One thing worth watching, and what to do about it.
+///
+/// Rules are rows rather than code because every MITM setup answers to
+/// different service names and writes differently formatted logs. The same
+/// reason drives the group override: a fleet with two sites running different
+/// scanners needs two answers to the same question.
+model MonitorRule {
+  id      String  @id @default(cuid())
+  name    String
+  /// Seeded rules arrive disabled. Upgrading a fleet must never silently start
+  /// rebooting it.
+  enabled Boolean @default(false)
+
+  /// Null is fleet-wide. A group-scoped rule for the same signal and package
+  /// replaces the fleet-wide one for that group's boxes — it does not stack,
+  /// or a box would be restarted twice for one fault.
+  groupId String?
+  group   DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  signal MonitorSignal
+  /// The package the signal and its actions are about. Null for the signals
+  /// that are about the box itself.
+  packageName String?
+  /// Per-signal knobs — the probe command, the patterns, the thresholds. The
+  /// shape follows `signal`, and the probe half is what the box is sent.
+  config      Json
+
+  /// Consecutive bad samples before the ladder starts. 1 acts immediately.
+  threshold       Int @default(1)
+  /// Seconds after an action before this rule may act on that box again.
+  cooldownSeconds Int @default(300)
+
+  /// Act only inside this window, "HH:MM". Alerts still go out outside it:
+  /// quiet hours are about not rebooting a box at 3am, not about hiding that
+  /// it needs it.
+  windowStart String?
+  windowEnd   String?
+
+  notifyLevel MonitorLevel @default(WARN)
+  /// Whether this rule announces itself at all. A signal that fires often
+  /// enough to be noise is still worth acting on quietly.
+  notify      Boolean      @default(true)
+
+  position  Int           @default(0)
+  steps     MonitorStep[]
+  states    MonitorState[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([enabled, signal])
+  @@index([groupId])
+}
+
+/// One rung of the escalation ladder: soft first, hard second.
+model MonitorStep {
+  id     String      @id @default(cuid())
+  ruleId String
+  rule   MonitorRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  /// Which consecutive failure this answers — 1 is the first, 2 the second.
+  /// "Offline once, restart it; offline twice, reboot the box."
+  atFailure Int
+  action    MonitorAction
+  /// The shell this action runs, with `{pkg}` substituted. Null uses the
+  /// catalog default, so a rule reads as an action rather than a command line.
+  command   String?
+
+  @@unique([ruleId, atFailure])
+}
+
+/// Per-box, per-rule counter.
+///
+/// The only mutable state the engine keeps, and it is in the database rather
+/// than in memory on purpose: the hub restarts on every deploy, and a ladder
+/// that reset to zero each time would keep softly restarting a box that has
+/// already proved a restart does not fix it.
+model MonitorState {
+  deviceId String
+  ruleId   String
+  device   Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  rule     MonitorRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  failures      Int       @default(0)
+  firstFailedAt DateTime?
+  lastActionAt  DateTime?
+  /// The rung last fired, so an escalation never repeats a step it has
+  /// already spent.
+  lastStepFired Int?
+
+  @@id([deviceId, ruleId])
+  @@index([ruleId])
+}
+
+/// What the engine actually did, so "why did this box reboot at 3am" has an
+/// answer. Pruned on the same clock as the metric samples.
+model MonitorEvent {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  /// Null once the rule that caused it has been deleted; the history stays.
+  ruleId   String?
+
+  signal   MonitorSignal
+  level    MonitorLevel
+  message  String
+  action   MonitorAction?
+  /// Null for an event that took no action — a recovery, or a notify-only rule.
+  actionOk Boolean?
+  /// A probe's detail line, or a command's output. The one field here that
+  /// needs more than the 191 characters a String gets on MySQL: the agent caps
+  /// a detail at 512 bytes, and a truncated explanation is worse than none.
+  detail   String?        @db.Text
+  /// Whether this went to Discord, so a silent hour is explicable.
+  notified Boolean        @default(false)
+
+  at DateTime @default(now())
+
+  @@index([deviceId, at])
+  @@index([at])
 }
