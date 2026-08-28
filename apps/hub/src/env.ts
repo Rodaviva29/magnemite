@@ -11,6 +11,13 @@ const schema = z.object({
   HUB_INTERNAL_SECRET: z.string().min(8),
   /** Base URL agents see. Artifact URLs are built from this. */
   MAGNEMITE_PUBLIC_URL: z.string().url(),
+  /**
+   * Where a person reaches the dashboard. Only alert links are built from it,
+   * and it is optional because a single-domain deployment has nowhere else to
+   * point them -- but on Coolify the two are different hosts, and the agents'
+   * one serves four routes and 404s everything else.
+   */
+  MAGNEMITE_DASHBOARD_URL: z.string().url().optional(),
   ARTIFACT_DIR: z.string().default("/data/artifacts"),
   /**
    * Serve /files/* from the hub itself. Off in production, where Caddy does

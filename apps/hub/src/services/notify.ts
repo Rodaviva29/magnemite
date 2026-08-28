@@ -88,9 +88,18 @@ export async function notify(alert: AlertInput): Promise<boolean> {
   return post(settings.discordWebhookUrl, buildPayload(alert, settings.discordMentionRoleId));
 }
 
-/** The link back to the box, so an alert is one click from doing something. */
+/**
+ * The link back to the box, so an alert is one click from doing something.
+ *
+ * `/devices/:id` is a dashboard page, so it is built on the dashboard's origin
+ * -- not `MAGNEMITE_PUBLIC_URL`, which is the address the *boxes* use. Where
+ * the two are separate hosts (Coolify) that domain is Caddy, which answers
+ * `/files/*`, `/ws/device`, `/api/enroll` and `/healthz` and 404s the rest.
+ * The fallback is for the single-domain deployments, where they are the same.
+ */
 function deviceUrl(deviceId: string): string {
-  return `${env.MAGNEMITE_PUBLIC_URL.replace(/\/$/, "")}/devices/${deviceId}`;
+  const base = env.MAGNEMITE_DASHBOARD_URL ?? env.MAGNEMITE_PUBLIC_URL;
+  return `${base.replace(/\/$/, "")}/devices/${deviceId}`;
 }
 
 function buildPayload(alert: AlertInput, mentionRoleId: string): unknown {

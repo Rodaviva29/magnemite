@@ -41,6 +41,9 @@ services:
       HUB_PORT: 3001
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
+      # Alert links point at a dashboard page, so they are built on the
+      # dashboard's origin. One domain here, so it is the same value.
+      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL:-${MAGNEMITE_PUBLIC_URL}}
       # Container path, deliberately not taken from .env — it has to match the
       # volume mounted into caddy as /srv/artifacts.
       ARTIFACT_DIR: /data/artifacts
@@ -77,7 +80,7 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       # Behind Caddy the dashboard and the agents share one origin, so Better
       # Auth's origin check uses the same URL. The Coolify setup splits them.
-      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_PUBLIC_URL}
+      MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL:-${MAGNEMITE_PUBLIC_URL}}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
       HUB_URL: http://hub:3001
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
