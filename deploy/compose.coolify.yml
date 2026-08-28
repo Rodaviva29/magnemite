@@ -35,14 +35,18 @@ services:
     environment:
       POSTGRES_USER: ${SERVICE_USER_POSTGRES:-magnemite}
       POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
-      POSTGRES_DB: ${POSTGRES_DB:-magnemite}
+      # DB_NAME is the documented name, in .env.example like every other
+      # setting. POSTGRES_DB stays as a fallback so a deployment that already
+      # set it keeps pointing at the same database instead of quietly starting
+      # an empty one under the default name.
+      POSTGRES_DB: ${DB_NAME:-${POSTGRES_DB:-magnemite}}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${SERVICE_USER_POSTGRES:-magnemite} -d ${POSTGRES_DB:-magnemite}",
+          "pg_isready -U ${SERVICE_USER_POSTGRES:-magnemite} -d ${DB_NAME:-${POSTGRES_DB:-magnemite}}",
         ]
       interval: 5s
       timeout: 5s
@@ -58,7 +62,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${DB_NAME:-${POSTGRES_DB:-magnemite}}?schema=public
       HUB_PORT: 3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
       # Artifact URLs handed to the boxes are built from this, so it has to be
@@ -157,15 +161,12 @@ services:
       # service's comment.
       SERVICE_FQDN_WEB:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-magnemite}?schema=public
-      # Better Auth signs and validates cookies against these two.
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES:-magnemite}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${DB_NAME:-${POSTGRES_DB:-magnemite}}?schema=public
       AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
-      BETTER_AUTH_URL: ${SERVICE_URL_WEB}
       MAGNEMITE_PUBLIC_URL: ${SERVICE_URL_EDGE}
       MAGNEMITE_DASHBOARD_URL: ${SERVICE_URL_WEB}
       HUB_URL: http://hub:3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@magnemite.com}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
       interval: 15s

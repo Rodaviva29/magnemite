@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatRelative } from "@/lib/format";
+import { formatDuration, formatRelative } from "@/lib/format";
 
 /**
- * The age of the last check-in, ticking.
+ * Whether the box is here, and if not, roughly how long it has been gone.
  *
- * The page itself is server-rendered, so its copy of "now" is frozen at the
- * moment of the render — the seconds counter would sit still until something
- * refreshed the route. When you are watching a box come back, a counter that
- * does not move is worse than no counter, so this one runs on its own clock.
+ * Presence only — the exact age of the last check-in is {@link DeviceHeartbeat}
+ * right below it. Cramming both into one line ("now (6s)") read as a
+ * contradiction: it is either now or it is six seconds ago.
  */
 export function DeviceLastSeen({
   lastSeenAt,
@@ -18,6 +17,26 @@ export function DeviceLastSeen({
   lastSeenAt: string | null;
   online: boolean;
 }) {
+  if (!lastSeenAt) return <>never</>;
+  if (online) return <>now</>;
+  // Rendered on the server, so this reads the server's clock; the label rounds
+  // to the minute anyway, which is all the precision an absent box needs.
+  return <span suppressHydrationWarning>{formatRelative(new Date(lastSeenAt))}</span>;
+}
+
+/**
+ * The age of the last heartbeat, ticking.
+ *
+ * The page itself is server-rendered, so its copy of "now" is frozen at the
+ * moment of the render — the counter would sit still until something refreshed
+ * the route. When you are watching a box come back, a counter that does not
+ * move is worse than no counter, so this one runs on its own clock.
+ *
+ * The exact age, not the rounded label: a box that beats every 20 seconds is
+ * either on schedule or it is not, and "2m ago" covers anything from 61 to 119
+ * seconds.
+ */
+export function DeviceHeartbeat({ lastSeenAt }: { lastSeenAt: string | null }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -28,17 +47,9 @@ export function DeviceLastSeen({
 
   if (!lastSeenAt) return <>never</>;
 
-  const then = new Date(lastSeenAt);
-  const seconds = Math.max(0, Math.round((now - then.getTime()) / 1000));
-
-  // The relative label rounds hard — "2m ago" covers anything from 61 to 119
-  // seconds — and when you are watching a box come back the exact age is the
-  // whole point.
   return (
     // The server and the browser read their own clocks, so the first paint can
     // differ by a second; the interval corrects it either way.
-    <span suppressHydrationWarning>
-      {online ? "now" : formatRelative(then)} ({seconds}s)
-    </span>
+    <span suppressHydrationWarning>{formatDuration(new Date(lastSeenAt), new Date(now))} ago</span>
   );
 }

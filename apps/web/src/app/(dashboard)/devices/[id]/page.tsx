@@ -14,7 +14,7 @@ import {
   type DeviceJobRow,
 } from "@/components/device-history";
 import { DevicePackages, type DevicePackageRow } from "@/components/device-packages";
-import { DeviceLastSeen } from "@/components/device-last-seen";
+import { DeviceHeartbeat, DeviceLastSeen } from "@/components/device-last-seen";
 import { DeviceLoadCard } from "@/components/device-load-card";
 import { loadRecentTrend } from "@/lib/metrics";
 import { formatDuration, formatRelative } from "@/lib/format";
@@ -178,24 +178,16 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
                 />
               }
             />
+            {/* Same timestamp as above, read the other way: presence is what
+                the row above answers, and this is how late the beat is. A box
+                that says ONLINE while this climbs past the heartbeat interval
+                is a box whose socket is open and whose agent is stuck. */}
+            <Field
+              label="Last heartbeat"
+              value={<DeviceHeartbeat lastSeenAt={device.lastSeenAt?.toISOString() ?? null} />}
+            />
           </CardContent>
         </Card>
-
-        <DeviceLoadCard
-          load={{
-            deviceId: device.id,
-            loadAvg1: device.loadAvg1,
-            loadAvg5: device.loadAvg5,
-            loadAvg15: device.loadAvg15,
-            cpuCount: device.cpuCount,
-            memTotalBytes: device.memTotalBytes === null ? null : Number(device.memTotalBytes),
-            memAvailableBytes:
-              device.memAvailableBytes === null ? null : Number(device.memAvailableBytes),
-            freeBytes: device.freeBytes === null ? null : Number(device.freeBytes),
-            totalBytes: device.totalBytes === null ? null : Number(device.totalBytes),
-          }}
-          trend={trend}
-        />
 
         <Card>
           <CardHeader>
@@ -226,6 +218,22 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
             {device.rotomOrigin ? <Field label="Rotom origin" value={device.rotomOrigin} /> : null}
           </CardContent>
         </Card>
+
+        <DeviceLoadCard
+          load={{
+            deviceId: device.id,
+            loadAvg1: device.loadAvg1,
+            loadAvg5: device.loadAvg5,
+            loadAvg15: device.loadAvg15,
+            cpuCount: device.cpuCount,
+            memTotalBytes: device.memTotalBytes === null ? null : Number(device.memTotalBytes),
+            memAvailableBytes:
+              device.memAvailableBytes === null ? null : Number(device.memAvailableBytes),
+            freeBytes: device.freeBytes === null ? null : Number(device.freeBytes),
+            totalBytes: device.totalBytes === null ? null : Number(device.totalBytes),
+          }}
+          trend={trend}
+        />
       </div>
 
       <DevicePackages

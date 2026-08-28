@@ -384,97 +384,94 @@ export function ManualInstall({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-64 flex-1 flex-col gap-1.5">
-              <Label htmlFor="file">File</Label>
-              {/* The browser's own file control cannot be sized or centred
-                  reliably — its button is a pseudo-element whose metrics differ
-                  per engine — so the input is hidden and a real Button drives
-                  it. Same height and same styling as every other field here. */}
-              <div
-                className={cn(
-                  "flex h-9 w-full items-center gap-2.5 rounded-lg border border-input bg-card pl-1.5 pr-3",
-                  (!canOperate || uploading) && "opacity-40",
-                )}
-              >
-                <Button
-                  asChild
-                  variant="secondary"
-                  size="sm"
-                  className="h-7 shrink-0"
-                  disabled={!canOperate || uploading}
-                >
-                  <label htmlFor="file" className="cursor-pointer">
-                    Choose file
-                  </label>
-                </Button>
-                <span className="truncate text-sm text-muted-foreground">
-                  {file ? `${file.name} · ${formatBytes(file.size)}` : "No file selected"}
-                </span>
-                {file && !uploading ? (
-                  <button
-                    type="button"
-                    onClick={clearFile}
-                    aria-label="Remove the chosen file"
-                    className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : null}
-              </div>
-              {/* Which build this is, answered before a few hundred megabytes
-                  of upload rather than after — the commonest mistake here is
-                  picking the wrong file out of a folder of near-identical
-                  names. Read from the manifest, not the file name, so it is
-                  the version that will actually be stored. */}
-              {file ? (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                  {reading ? (
-                    <span className="text-muted-foreground">Reading the manifest…</span>
-                  ) : detectedVersion ? (
-                    <>
-                      <span className="text-muted-foreground">Version</span>
-                      <span className="font-mono font-medium text-foreground">
-                        {detectedVersion}
-                      </span>
-                      {info?.versionName && info.versionCode ? (
-                        <span className="font-mono text-muted-foreground">
-                          · build {info.versionCode}
-                        </span>
-                      ) : null}
-                      {/* The package the file declares, flagged only when it
-                          disagrees with the one chosen above — that mismatch
-                          is the mistake worth catching. */}
-                      {info?.packageName && info.packageName !== packageName ? (
-                        <span className="font-mono text-warning">· {info.packageName}</span>
-                      ) : info?.packageName ? (
-                        <span className="font-mono text-muted-foreground">
-                          · {info.packageName}
-                        </span>
-                      ) : null}
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Could not read a version out of this file — the hub will try again on upload.
-                    </span>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+                <Label htmlFor="file">File</Label>
+                {/* The browser's own file control cannot be sized or centred
+                    reliably — its button is a pseudo-element whose metrics differ
+                    per engine — so the input is hidden and a real Button drives
+                    it. Same height and same styling as every other field here. */}
+                <div
+                  className={cn(
+                    "flex h-9 w-full items-center gap-2.5 rounded-lg border border-input bg-card pl-1.5 pr-3",
+                    (!canOperate || uploading) && "opacity-40",
                   )}
+                >
+                  <Button
+                    asChild
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 shrink-0"
+                    disabled={!canOperate || uploading}
+                  >
+                    <label htmlFor="file" className="cursor-pointer">
+                      Choose file
+                    </label>
+                  </Button>
+                  <span className="truncate text-sm text-muted-foreground">
+                    {file ? `${file.name} · ${formatBytes(file.size)}` : "No file selected"}
+                  </span>
+                  {file && !uploading ? (
+                    <button
+                      type="button"
+                      onClick={clearFile}
+                      aria-label="Remove the chosen file"
+                      className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
                 </div>
-              ) : null}
-
-              <input
-                id="file"
-                ref={fileInput}
-                type="file"
-                accept=".apk,.apkm,.xapk,.zip"
-                disabled={!canOperate || uploading}
-                onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
-                className="sr-only"
-              />
+                <input
+                  id="file"
+                  ref={fileInput}
+                  type="file"
+                  accept=".apk,.apkm,.xapk,.zip"
+                  disabled={!canOperate || uploading}
+                  onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
+                  className="sr-only"
+                />
+              </div>
+              <Button onClick={upload} disabled={!canUpload}>
+                <Upload />
+                {uploading ? `Uploading ${uploadPct}%` : "Upload"}
+              </Button>
             </div>
-            <Button onClick={upload} disabled={!canUpload}>
-              <Upload />
-              {uploading ? `Uploading ${uploadPct}%` : "Upload"}
-            </Button>
+            {/* Which build this is, answered before a few hundred megabytes
+                of upload rather than after — the commonest mistake here is
+                picking the wrong file out of a folder of near-identical
+                names. Read from the manifest, not the file name, so it is
+                the version that will actually be stored. */}
+            {file ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                {reading ? (
+                  <span className="text-muted-foreground">Reading the manifest…</span>
+                ) : detectedVersion ? (
+                  <>
+                    <span className="text-muted-foreground">Version</span>
+                    <span className="font-mono font-medium text-foreground">{detectedVersion}</span>
+                    {info?.versionName && info.versionCode ? (
+                      <span className="font-mono text-muted-foreground">
+                        · build {info.versionCode}
+                      </span>
+                    ) : null}
+                    {/* The package the file declares, flagged only when it
+                        disagrees with the one chosen above — that mismatch
+                        is the mistake worth catching. */}
+                    {info?.packageName && info.packageName !== packageName ? (
+                      <span className="font-mono text-warning">· {info.packageName}</span>
+                    ) : info?.packageName ? (
+                      <span className="font-mono text-muted-foreground">· {info.packageName}</span>
+                    ) : null}
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">
+                    Could not read a version out of this file — the hub will try again on upload.
+                  </span>
+                )}
+              </div>
+            ) : null}
           </div>
 
           {uploading ? <Progress value={uploadPct ?? 0} /> : null}

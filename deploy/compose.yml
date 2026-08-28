@@ -34,7 +34,11 @@ services:
       # Built from the DB_* vars rather than taken from .env, whose
       # DATABASE_URL points at the host-mapped port for local development.
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
-      HUB_PORT: ${HUB_PORT:-3001}
+      # Fixed, like ARTIFACT_DIR below and for the same reason: it is a port
+      # inside the compose network, so nothing outside can see it and nothing
+      # gains from moving it. Taking it from .env let HUB_PORT drift away from
+      # the `expose` and the Caddyfile, both of which say 3001 outright.
+      HUB_PORT: 3001
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
       # Container path, deliberately not taken from .env — it has to match the
@@ -72,9 +76,8 @@ services:
       # Behind Caddy the dashboard and the agents share one origin, so Better
       # Auth's origin check uses the same URL. The Coolify setup splits them.
       MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_PUBLIC_URL}
-      BETTER_AUTH_URL: ${MAGNEMITE_PUBLIC_URL}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
-      HUB_URL: http://hub:${HUB_PORT:-3001}
+      HUB_URL: http://hub:3001
       HUB_INTERNAL_SECRET: ${HUB_INTERNAL_SECRET}
     expose:
       - "3000"
@@ -92,7 +95,7 @@ services:
       - web
       - hub
     environment:
-      HUB_PORT: ${HUB_PORT:-3001}
+      HUB_PORT: 3001
     ports:
       # Plain HTTP: your own reverse proxy terminates TLS and forwards here.
       - "${EDGE_PORT:-8080}:8080"
