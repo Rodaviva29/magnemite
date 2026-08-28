@@ -35,6 +35,31 @@ build/start commands, so keep it at `/deploy`.
 
 <Step>
 
+### Set two switches before the first deploy
+
+Both live outside the Environment tab, and both are easier to set now than to
+diagnose later.
+
+| Where             | Switch                        | Set it to               |
+| ----------------- | ----------------------------- | ----------------------- |
+| **Advanced**      | Connect to Predefined Network | on                      |
+| **General → Git** | Auto deploy                   | Manual deployments only |
+
+**Connect to Predefined Network** puts these containers on Coolify's shared
+network instead of a private one of their own. That is what makes the database
+resource resolvable by the internal hostname `DATABASE_URL` uses — without it
+the hub boots, fails to connect, and the migration never runs.
+
+**Manual deployments only** stops a push to the default branch from
+redeploying. A deploy recreates `hub` and takes every device socket with it, so
+the fleet should drop when _you_ decide, not when a commit lands — see
+[deploying without dropping the
+fleet](#deploying-without-dropping-the-fleet).
+
+</Step>
+
+<Step>
+
 ### Add the domains
 
 In the **Domains** tab, one per service, each with the container port as a
@@ -152,10 +177,11 @@ because it selects which migration history `prisma migrate deploy` applies.
 Changing it is a rebuild, not a restart.
 
 <Callout type="warn">
-  The URL is resolved inside the container, so it needs the database's **internal** hostname on a
-  shared network — a public one works until Coolify's firewall or a restart moves it. And the two
-  migration histories do not convert into each other: pointing this stack at a database of the other
-  kind starts an empty schema rather than migrating anything.
+  The URL is resolved inside the container, so it needs the database's **internal** hostname, which
+  only resolves with [Connect to Predefined Network](#set-two-switches-before-the-first-deploy) on —
+  a public one works until Coolify's firewall or a restart moves it. And the two migration histories
+  do not convert into each other: pointing this stack at a database of the other kind starts an
+  empty schema rather than migrating anything.
 </Callout>
 
 ## Why the domains are typed by hand
