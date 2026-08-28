@@ -5,6 +5,7 @@ import { env } from "../env.js";
 import { log } from "../log.js";
 import { isOnline, sendTo } from "../registry.js";
 import { ACTIVE_STATES, logJobEvent, recomputeRollout, requeueStalled } from "./jobs.js";
+import { pruneMetrics } from "./metrics.js";
 import { pauseForInstall, releaseOrphanedDevices, rotomEnabled } from "./rotom.js";
 
 const TICK_MS = 5_000;
@@ -48,6 +49,8 @@ async function tick() {
     const settings = await getHubSettings();
     await promoteSoakingRollouts();
     await requeueStalled(settings.jobStallTimeoutSeconds);
+    // Keeps its own hourly clock, so riding the 5-second tick costs nothing.
+    await pruneMetrics();
     // A hub restart mid-install would otherwise leave a box disabled in Rotom
     // for good.
     await releaseOrphanedDevices();

@@ -56,9 +56,10 @@ resource's **Environment** tab; the rest have defaults.
 | `AGENT_BIN_DIR`            | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
 
 <Callout type="info">
-  Max concurrent jobs, job stall timeout, source poll interval, and the auto-update cooldown are not
-  env vars — they live in **Settings → Hub settings**, editable at runtime with no restart. See
-  [rollouts](/docs/fleet/rollouts) and [auto-update](/docs/fleet/auto-update).
+  Max concurrent jobs, job stall timeout, source poll interval, the auto-update cooldown, and the
+  health sample interval and retention are not env vars — they live in **Settings → Hub settings**,
+  editable at runtime with no restart. See [rollouts](/docs/fleet/rollouts),
+  [auto-update](/docs/fleet/auto-update) and [health history](/docs/fleet/health).
 </Callout>
 
 ## Version sources

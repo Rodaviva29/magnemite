@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import {
   generateToken,
   hashToken,
@@ -29,7 +30,7 @@ export async function updateHubSettings(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireOperator();
+  const user = await requireOperator();
 
   const int = (name: string, min: number) => {
     const parsed = Number(formData.get(name));
@@ -41,14 +42,25 @@ export async function updateHubSettings(
   const jobStallTimeoutSeconds = int("jobStallTimeoutSeconds", 1);
   const sourcePollMinutes = int("sourcePollMinutes", 1);
   const updateCooldownMinutes = int("updateCooldownMinutes", 0);
+  // Floored at the 20-second heartbeat: a shorter interval cannot produce more
+  // points, it just stores every beat.
+  const metricsSampleSeconds = int("metricsSampleSeconds", 20);
+  // 0 is meaningful here — it turns health recording off and drops what is
+  // already stored on the next prune.
+  const metricsRetentionDays = int("metricsRetentionDays", 0);
 
   if (
     maxConcurrentJobs === null ||
     jobStallTimeoutSeconds === null ||
     sourcePollMinutes === null ||
-    updateCooldownMinutes === null
+    updateCooldownMinutes === null ||
+    metricsSampleSeconds === null ||
+    metricsRetentionDays === null
   ) {
-    return { error: "All fields need a valid, non-negative number." };
+    return {
+      error:
+        "Every field needs a whole number — 1 or more, except the cooldown and the history retention. The sample interval starts at 20.",
+    };
   }
 
   const patch: Partial<HubSettingsValues> = {
@@ -56,55 +68,17 @@ export async function updateHubSettings(
     jobStallTimeoutSeconds,
     sourcePollMinutes,
     updateCooldownMinutes,
+    metricsSampleSeconds,
+    metricsRetentionDays,
   };
   await updateHubSettingsInDb(patch);
-
-  revalidatePath("/settings");
-  return { ok: true, message: "Saved." };
-}
-
-/** Auto-update policy for one app target. */
-export async function updateAutoUpdate(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  const user = await requireOperator();
-  const id = String(formData.get("appTargetId") ?? "");
-  if (!id) return { error: "Missing app target." };
-
-  const windowStart = String(formData.get("windowStart") ?? "").trim();
-  const windowEnd = String(formData.get("windowEnd") ?? "").trim();
-  if (windowStart && !TIME_RE.test(windowStart)) return { error: "Start time must be HH:MM." };
-  if (windowEnd && !TIME_RE.test(windowEnd)) return { error: "End time must be HH:MM." };
-  if (Boolean(windowStart) !== Boolean(windowEnd)) {
-    return { error: "Set both ends of the window, or neither." };
-  }
-
-  const int = (name: string, fallback: number) => {
-    const parsed = Number(formData.get(name));
-    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
-  };
-
-  await prisma.appTarget.update({
-    where: { id },
-    data: {
-      autoUpdateEnabled: formData.get("autoUpdateEnabled") === "on",
-      autoApprove: formData.get("autoApprove") === "on",
-      canaryCount: int("canaryCount", 1),
-      soakMinutes: int("soakMinutes", 30),
-      maxAttempts: Math.max(1, int("maxAttempts", 3)),
-      windowStart: windowStart || null,
-      windowEnd: windowEnd || null,
-    },
-  });
 
   await prisma.auditLog.create({
     data: {
       userId: user.id,
       userEmail: user.email,
-      action: "settings.autoUpdate",
-      targetType: "AppTarget",
-      targetId: id,
+      action: "settings.hub",
+      meta: patch,
     },
   });
 
@@ -158,11 +132,23 @@ export async function createGroup(_prev: ActionState, formData: FormData): Promi
  * null, so they simply have no group until reassigned.
  */
 export async function deleteGroup(id: string): Promise<ActionState> {
-  await requireOperator();
-  const group = await prisma.deviceGroup.findUnique({ where: { id } });
-  if (!group) return { error: "Group not found." };
+  const user = await requireOperator();
+  const group = await prisma.deviceGroup.findUnique({ where: { id }, select: { name: true } });
+  if (!group) return { error: "That group is already gone." };
 
   await prisma.deviceGroup.delete({ where: { id } });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "deviceGroup.delete",
+      targetType: "DeviceGroup",
+      targetId: id,
+      meta: { name: group.name },
+    },
+  });
+
   revalidatePath("/settings");
   return { ok: true, message: `Removed "${group.name}".` };
 }
@@ -175,7 +161,7 @@ export async function createAppTarget(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireOperator();
+  const user = await requireOperator();
   const packageName = String(formData.get("packageName") ?? "").trim();
   const displayName = String(formData.get("displayName") ?? "").trim();
 
@@ -187,12 +173,192 @@ export async function createAppTarget(
   const existing = await prisma.appTarget.findUnique({ where: { packageName } });
   if (existing) return { error: `"${packageName}" is already configured.` };
 
-  await prisma.appTarget.create({ data: { packageName, displayName } });
+  const feedIds = formData.getAll("sourceIds").map(String).filter(Boolean);
+  if (feedIds.length === 0) {
+    return { error: "Pick at least one version source — a target with none is never polled." };
+  }
+  // Guard against a stale form naming a feed that has since been removed:
+  // `createMany` on the join would fail on the foreign key with nothing useful
+  // to show.
+  const feeds = await prisma.sourceFeed.findMany({
+    where: { id: { in: feedIds } },
+    select: { id: true },
+  });
+  if (feeds.length !== feedIds.length) {
+    return { error: "One of those version sources no longer exists — reload and try again." };
+  }
+
+  const target = await prisma.appTarget.create({
+    data: {
+      packageName,
+      displayName,
+      sources: { create: feeds.map((feed) => ({ feedId: feed.id })) },
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "appTarget.create",
+      targetType: "AppTarget",
+      targetId: target.id,
+      meta: { packageName, displayName, feedIds },
+    },
+  });
 
   revalidatePath("/settings");
   revalidatePath("/versions");
   revalidatePath("/");
   return { ok: true, message: `Created "${displayName}".` };
+}
+
+/**
+ * Everything about one app target: what it is, where it is polled from, and
+ * how its rollouts start.
+ *
+ * One action because it is one card and one Save. Changing the package name
+ * only changes what Magnemite polls and installs — the versions each box has
+ * already reported are keyed by the old package string and stay where they
+ * are, so the fleet columns go quiet until the boxes report the new one.
+ */
+export async function updateAppTarget(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireOperator();
+  const id = String(formData.get("appTargetId") ?? "");
+  if (!id) return { error: "Missing app target." };
+
+  const packageName = String(formData.get("packageName") ?? "").trim();
+  const displayName = String(formData.get("displayName") ?? "").trim();
+
+  if (!packageName || !PACKAGE_NAME.test(packageName)) {
+    return { error: "Package name looks wrong — expected something like com.example.app." };
+  }
+  if (!displayName) return { error: "Give it a display name." };
+
+  const clash = await prisma.appTarget.findUnique({ where: { packageName } });
+  if (clash && clash.id !== id) return { error: `"${packageName}" is already configured.` };
+
+  const feedIds = formData.getAll("sourceIds").map(String).filter(Boolean);
+  if (feedIds.length === 0) {
+    return { error: "Pick at least one version source — a target with none is never polled." };
+  }
+  const feeds = await prisma.sourceFeed.findMany({
+    where: { id: { in: feedIds } },
+    select: { id: true },
+  });
+  if (feeds.length !== feedIds.length) {
+    return { error: "One of those version sources no longer exists — reload and try again." };
+  }
+
+  // A disabled field submits nothing at all, and the card greys the policy out
+  // whenever automatic rollouts are off. Absence therefore has to mean "leave
+  // this as it was": read as a value, an unsent canary count is `Number(null)`
+  // — zero, not the default — so turning the switch off would quietly reset
+  // the policy that turning it back on is supposed to restore.
+  const sent = (name: string) => formData.get(name) !== null;
+
+  const data: Prisma.AppTargetUpdateInput = {
+    packageName,
+    displayName,
+    // Switches are the exception: an unticked one sends nothing either, and
+    // there absence is the value.
+    autoUpdateEnabled: formData.get("autoUpdateEnabled") === "on",
+    autoApprove: formData.get("autoApprove") === "on",
+  };
+
+  const int = (name: string, fallback: number) => {
+    const parsed = Number(formData.get(name));
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+  };
+
+  if (sent("canaryCount")) data.canaryCount = int("canaryCount", 1);
+  if (sent("soakMinutes")) data.soakMinutes = int("soakMinutes", 30);
+  if (sent("maxAttempts")) data.maxAttempts = Math.max(1, int("maxAttempts", 3));
+
+  if (sent("windowStart") || sent("windowEnd")) {
+    const windowStart = String(formData.get("windowStart") ?? "").trim();
+    const windowEnd = String(formData.get("windowEnd") ?? "").trim();
+    if (windowStart && !TIME_RE.test(windowStart)) return { error: "Start time must be HH:MM." };
+    if (windowEnd && !TIME_RE.test(windowEnd)) return { error: "End time must be HH:MM." };
+    if (Boolean(windowStart) !== Boolean(windowEnd)) {
+      return { error: "Set both ends of the window, or neither." };
+    }
+    data.windowStart = windowStart || null;
+    data.windowEnd = windowEnd || null;
+  }
+
+  // The pairing is replaced wholesale: the form posts the full set every time,
+  // so anything missing from it was unticked. Versions already discovered keep
+  // pointing at the feed that listed them.
+  await prisma.$transaction([
+    prisma.appTargetSource.deleteMany({ where: { appTargetId: id, feedId: { notIn: feedIds } } }),
+    prisma.appTargetSource.createMany({
+      data: feeds.map((feed) => ({ appTargetId: id, feedId: feed.id })),
+      skipDuplicates: true,
+    }),
+    prisma.appTarget.update({ where: { id }, data }),
+  ]);
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "appTarget.update",
+      targetType: "AppTarget",
+      targetId: id,
+      meta: { packageName, displayName, feedIds },
+    },
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/versions");
+  revalidatePath("/");
+  return { ok: true, message: "Saved." };
+}
+
+/**
+ * Remove the app target, and every version discovered for it.
+ *
+ * Versions cascade with the target, but a rollout pins the version it shipped
+ * (`onDelete: Restrict`), so the database refuses outright once there is any
+ * history. That is worth saying plainly rather than surfacing as a foreign key
+ * error from a delete that looked like it should work.
+ */
+export async function deleteAppTarget(id: string): Promise<ActionState> {
+  const user = await requireOperator();
+  const target = await prisma.appTarget.findUnique({
+    where: { id },
+    select: { displayName: true, packageName: true },
+  });
+  if (!target) return { error: "That app target is already gone." };
+
+  const rollouts = await prisma.rollout.count({ where: { appVersion: { appTargetId: id } } });
+  if (rollouts > 0) {
+    return {
+      error: `"${target.displayName}" has ${rollouts} rollout${rollouts === 1 ? "" : "s"} behind it. Removing it would take the versions they shipped, so it cannot be deleted while that history exists.`,
+    };
+  }
+
+  await prisma.appTarget.delete({ where: { id } });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "appTarget.delete",
+      targetType: "AppTarget",
+      targetId: id,
+      meta: { packageName: target.packageName, displayName: target.displayName },
+    },
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/versions");
+  revalidatePath("/");
+  return { ok: true, message: `Removed "${target.displayName}".` };
 }
 
 /**
@@ -351,18 +517,48 @@ export async function updateSourceFeed(
   if (baseUrl && !isHttpUrl(baseUrl)) return { error: "The base URL must be http(s)." };
 
   const parsedPriority = Number(formData.get("priority"));
+  const enabled = formData.get("enabled") === "on";
+
+  const before = await prisma.sourceFeed.findUnique({
+    where: { id },
+    select: { indexUrl: true, baseUrl: true, enabled: true },
+  });
+  if (!before) return { error: "That source is already gone." };
 
   await prisma.sourceFeed.update({
     where: { id },
     data: {
       indexUrl,
       baseUrl: baseUrl || null,
-      enabled: formData.get("enabled") === "on",
+      enabled,
       ...(Number.isFinite(parsedPriority) && parsedPriority > 0
         ? { priority: Math.floor(parsedPriority) }
         : {}),
     },
   });
+
+  // Where a build is downloaded from is built from these two, and it is stored
+  // on the version at discovery time. Editing them and leaving every known
+  // build pointing at the old URL is the kind of change that looks like it did
+  // nothing — so re-poll now rather than at the top of the next interval,
+  // which rewrites those URLs (and un-fails anything that failed on the old
+  // one). Priority is not in here: it only decides ties between feeds and
+  // changes no URL.
+  const rePoint =
+    before.indexUrl !== indexUrl ||
+    (before.baseUrl ?? "") !== baseUrl ||
+    (!before.enabled && enabled);
+
+  // A hub that is down must not make the save look like it failed: the setting
+  // is stored either way, and the scheduled poll will catch up.
+  let polled = true;
+  if (rePoint) {
+    try {
+      await hub.pollSources();
+    } catch {
+      polled = false;
+    }
+  }
 
   await prisma.auditLog.create({
     data: {
@@ -376,7 +572,15 @@ export async function updateSourceFeed(
 
   revalidatePath("/settings");
   revalidatePath("/status");
-  return { ok: true, message: "Saved." };
+  revalidatePath("/versions");
+  return {
+    ok: true,
+    message: rePoint
+      ? polled
+        ? "Saved — re-checking the source now, which repoints the builds it already found."
+        : "Saved, but the hub could not be reached to re-check now. Known builds keep their old URLs until the next poll."
+      : "Saved.",
+  };
 }
 
 /**

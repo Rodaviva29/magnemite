@@ -1,9 +1,10 @@
 import { getHubSettings, prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
-import { AutoUpdateForm } from "@/components/settings/auto-update-form";
+import { AppTargetCard, type FeedChoice } from "@/components/settings/app-target-card";
 import { CreateAppTargetForm } from "@/components/settings/create-app-target-form";
 import { GroupsSection } from "@/components/settings/groups-section";
 import { HubSettingsForm } from "@/components/settings/hub-settings-form";
+import { SettingsShell, type SettingsSection } from "@/components/settings/settings-shell";
 import { SourcesSection } from "@/components/settings/sources-section";
 import { WatchedPackagesSection } from "@/components/settings/watched-packages-section";
 import { EnrollmentSection } from "@/components/settings/enrollment-section";
@@ -17,7 +18,14 @@ export default async function SettingsPage() {
   const [hubSettings, targets, feeds, watched, deviceCount, reporting, groups, tokens] =
     await Promise.all([
       getHubSettings(),
-      prisma.appTarget.findMany({ orderBy: { displayName: "asc" } }),
+      // Manual uploads create a target of their own to hang the artifact off.
+      // Those are a record of an upload, not configuration, so settings only
+      // ever deals with the watched one.
+      prisma.appTarget.findMany({
+        where: { manual: false },
+        orderBy: { displayName: "asc" },
+        include: { sources: { select: { feedId: true } } },
+      }),
       prisma.sourceFeed.findMany({
         orderBy: { priority: "asc" },
         include: { _count: { select: { versions: true } } },
@@ -40,98 +48,155 @@ export default async function SettingsPage() {
 
   const publicUrl = process.env.MAGNEMITE_PUBLIC_URL ?? "https://your.host";
   const reportingCounts = new Map(reporting.map((row) => [row.packageName, row._count._all]));
+  // Which targets each feed serves, and which of them it is the only source
+  // for. Removing a feed unpairs it everywhere, and a target left with none is
+  // never polled again — the sources section warns about exactly that.
+  const targetsByFeed = new Map<string, string[]>();
+  const soleSourceByFeed = new Map<string, string[]>();
+  for (const target of targets) {
+    for (const link of target.sources) {
+      targetsByFeed.set(link.feedId, [
+        ...(targetsByFeed.get(link.feedId) ?? []),
+        target.displayName,
+      ]);
+      if (target.sources.length === 1) {
+        soleSourceByFeed.set(link.feedId, [
+          ...(soleSourceByFeed.get(link.feedId) ?? []),
+          target.displayName,
+        ]);
+      }
+    }
+  }
 
-  return (
-    <div className="flex flex-col gap-8">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Auto-update policy, where versions are discovered, per-group install hooks, and the tokens
-          new boxes enroll with.
-        </p>
-      </header>
+  // The pickable sources, in the order the sources section lists them.
+  const feedChoices: FeedChoice[] = feeds.map((feed) => ({
+    id: feed.id,
+    name: feed.name,
+    enabled: feed.enabled,
+  }));
 
-      <HubSettingsForm settings={hubSettings} disabled={!canOperate} />
+  // Everything is still fetched in the one pass above — the shell only decides
+  // which of these is on screen, so switching category costs no round trip.
+  const sections: SettingsSection[] = [
+    {
+      id: "hub",
+      content: <HubSettingsForm settings={hubSettings} disabled={!canOperate} />,
+    },
+    {
+      id: "apps",
+      count: targets.length,
+      content: (
+        <>
+          {/* Nothing configured yet, but the card still shows what a target
+              gets you — greyed out and unsubmittable — so the tab reads as a
+              place waiting to be filled rather than an empty one. */}
+          {targets.length === 0 ? (
+            <AppTargetCard target={null} feeds={feedChoices} disabled />
+          ) : null}
 
-      {targets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No app target configured yet — add one below to start tracking versions and rollouts.
-        </p>
-      ) : null}
+          {targets.map((target) => (
+            <AppTargetCard
+              key={target.id}
+              target={{
+                id: target.id,
+                displayName: target.displayName,
+                packageName: target.packageName,
+                autoUpdateEnabled: target.autoUpdateEnabled,
+                autoApprove: target.autoApprove,
+                canaryCount: target.canaryCount,
+                soakMinutes: target.soakMinutes,
+                maxAttempts: target.maxAttempts,
+                windowStart: target.windowStart,
+                windowEnd: target.windowEnd,
+                sourceIds: target.sources.map((link) => link.feedId),
+              }}
+              feeds={feedChoices}
+              disabled={!canOperate}
+            />
+          ))}
 
-      {targets.map((target) => (
-        <AutoUpdateForm
-          key={target.id}
-          target={{
-            id: target.id,
-            displayName: target.displayName,
-            packageName: target.packageName,
-            autoUpdateEnabled: target.autoUpdateEnabled,
-            autoApprove: target.autoApprove,
-            canaryCount: target.canaryCount,
-            soakMinutes: target.soakMinutes,
-            maxAttempts: target.maxAttempts,
-            windowStart: target.windowStart,
-            windowEnd: target.windowEnd,
-          }}
+          {canOperate ? <CreateAppTargetForm feeds={feedChoices} /> : null}
+        </>
+      ),
+    },
+    {
+      id: "sources",
+      count: feeds.length,
+      content: (
+        <SourcesSection
+          feeds={feeds.map((feed) => ({
+            id: feed.id,
+            name: feed.name,
+            indexUrl: feed.indexUrl,
+            baseUrl: feed.baseUrl,
+            enabled: feed.enabled,
+            priority: feed.priority,
+            versionCount: feed._count.versions,
+            targetCount: targetsByFeed.get(feed.id)?.length ?? 0,
+            orphanedTargets: soleSourceByFeed.get(feed.id) ?? [],
+          }))}
           disabled={!canOperate}
         />
-      ))}
+      ),
+    },
+    {
+      id: "columns",
+      count: watched.length,
+      content: (
+        <WatchedPackagesSection
+          packages={watched.map((row) => ({
+            id: row.id,
+            packageName: row.packageName,
+            label: row.label,
+            // How many boxes have answered for it, which is the difference
+            // between "nothing has it installed" and "nobody has reported yet".
+            reporting: reportingCounts.get(row.packageName) ?? 0,
+          }))}
+          deviceCount={deviceCount}
+          disabled={!canOperate}
+        />
+      ),
+    },
+    {
+      id: "groups",
+      count: groups.length,
+      content: (
+        <GroupsSection
+          groups={groups.map((g) => ({
+            id: g.id,
+            name: g.name,
+            preInstallHook: g.preInstallHook,
+            postInstallHook: g.postInstallHook,
+            maxConcurrency: g.maxConcurrency,
+            deviceCount: g._count.devices,
+          }))}
+          disabled={!canOperate}
+        />
+      ),
+    },
+    {
+      id: "enrollment",
+      // Revoked tokens stay in the table as history; the count is what a box
+      // could still enrol with today.
+      count: tokens.filter((t) => !t.revoked).length,
+      content: (
+        <EnrollmentSection
+          tokens={tokens.map((t) => ({
+            id: t.id,
+            label: t.label,
+            prefix: t.prefix,
+            autoApprove: t.autoApprove,
+            uses: t.uses,
+            maxUses: t.maxUses,
+            revoked: t.revoked,
+            createdAt: t.createdAt.toISOString(),
+          }))}
+          publicUrl={publicUrl}
+          disabled={!canOperate}
+        />
+      ),
+    },
+  ];
 
-      {!canOperate ? null : <CreateAppTargetForm />}
-
-      <SourcesSection
-        feeds={feeds.map((feed) => ({
-          id: feed.id,
-          name: feed.name,
-          indexUrl: feed.indexUrl,
-          baseUrl: feed.baseUrl,
-          enabled: feed.enabled,
-          priority: feed.priority,
-          versionCount: feed._count.versions,
-        }))}
-        disabled={!canOperate}
-      />
-
-      <WatchedPackagesSection
-        packages={watched.map((row) => ({
-          id: row.id,
-          packageName: row.packageName,
-          label: row.label,
-          // How many boxes have answered for it, which is the difference
-          // between "nothing has it installed" and "nobody has reported yet".
-          reporting: reportingCounts.get(row.packageName) ?? 0,
-        }))}
-        deviceCount={deviceCount}
-        disabled={!canOperate}
-      />
-
-      <GroupsSection
-        groups={groups.map((g) => ({
-          id: g.id,
-          name: g.name,
-          preInstallHook: g.preInstallHook,
-          postInstallHook: g.postInstallHook,
-          maxConcurrency: g.maxConcurrency,
-          deviceCount: g._count.devices,
-        }))}
-        disabled={!canOperate}
-      />
-
-      <EnrollmentSection
-        tokens={tokens.map((t) => ({
-          id: t.id,
-          label: t.label,
-          prefix: t.prefix,
-          autoApprove: t.autoApprove,
-          uses: t.uses,
-          maxUses: t.maxUses,
-          revoked: t.revoked,
-          createdAt: t.createdAt.toISOString(),
-        }))}
-        publicUrl={publicUrl}
-        disabled={!canOperate}
-      />
-    </div>
-  );
+  return <SettingsShell sections={sections} />;
 }

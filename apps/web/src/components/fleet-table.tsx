@@ -48,7 +48,8 @@ import {
 } from "@/components/ui/table";
 import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { ACTIVE_JOB_STATES, JobStateBadge, OnlineDot } from "@/components/status";
-import { formatBytes, formatRelative } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
 import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,10 @@ export type DeviceRow = {
 
 export type VersionOption = {
   id: string;
+  /** The app this build belongs to. A rollout ships exactly one of them. */
+  targetId: string;
+  targetName: string;
+  targetPackage: string;
   version: string;
   source: VersionSource;
   sizeBytes: number;
@@ -476,7 +481,7 @@ function DeviceRowView({
       </TableCell>
 
       <TableCell className="text-xs text-muted-foreground">
-        {row.online ? "now" : formatRelative(row.lastSeenAt)}
+        {row.online ? "now" : <RelativeTime value={row.lastSeenAt} />}
       </TableCell>
 
       <TableCell>
@@ -542,7 +547,30 @@ function RolloutDialog({
   const [forceClean, setForceClean] = useState(false);
   const [skipUpToDate, setSkipUpToDate] = useState(true);
 
-  const targetLabel =
+  // Only apps with something cached can be rolled out at all, so the list is
+  // derived from the versions rather than from every configured target — a
+  // target with nothing on disk would be a dead end in the picker.
+  const apps = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; packageName: string }>();
+    for (const version of versions) {
+      if (!seen.has(version.targetId)) {
+        seen.set(version.targetId, {
+          id: version.targetId,
+          name: version.targetName,
+          packageName: version.targetPackage,
+        });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [versions]);
+
+  const [appTargetId, setAppTargetId] = useState("");
+  // Falls back to the first app until one is picked, so the version list is
+  // never empty on open.
+  const activeAppId = appTargetId || (apps[0]?.id ?? "");
+  const appVersions = versions.filter((version) => version.targetId === activeAppId);
+
+  const deviceLabel =
     deviceIds.length > 0 ? `${deviceIds.length} selected device(s)` : "every approved device";
 
   return (
@@ -558,7 +586,7 @@ function RolloutDialog({
         <DialogHeader>
           <DialogTitle>Start a rollout</DialogTitle>
           <DialogDescription>
-            Targets {targetLabel}. Devices that are offline keep their job queued and pick it up
+            Targets {deviceLabel}. Devices that are offline keep their job queued and pick it up
             when they reconnect.
           </DialogDescription>
         </DialogHeader>
@@ -576,13 +604,30 @@ function RolloutDialog({
             <input type="hidden" name="deviceIds" value={deviceIds.join(",")} />
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="appVersionId">Version</Label>
+              <Label htmlFor="rolloutAppTarget">App</Label>
               <Select
+                id="rolloutAppTarget"
+                aria-label="App to roll out"
+                value={activeAppId}
+                onValueChange={setAppTargetId}
+                options={apps.map((app) => ({ value: app.id, label: app.name }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                A rollout ships one app. Only apps with a version cached on this server are listed.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="appVersionId">Version</Label>
+              {/* Remounted per app so the default lands on that app's newest
+                  build instead of keeping the previous app's selection. */}
+              <Select
+                key={activeAppId}
                 id="appVersionId"
                 name="appVersionId"
                 required
-                defaultValue={versions[0]?.id}
-                options={versions.map((v) => ({
+                defaultValue={appVersions[0]?.id}
+                options={appVersions.map((v) => ({
                   value: v.id,
                   label:
                     `${v.version} · ${v.source.toLowerCase()} · ${formatBytes(v.sizeBytes)}` +

@@ -45,9 +45,12 @@ export default async function FleetPage() {
       orderBy: [{ status: "asc" }, { name: "asc" }],
     }),
     prisma.deviceGroup.findMany({ orderBy: { name: "asc" } }),
+    // Every watched app, not just the primary one: a rollout picks its app in
+    // the dialog, and only builds already cached here can be shipped.
     prisma.appVersion.findMany({
-      where: { status: "READY", appTargetId: target?.id },
+      where: { status: "READY", appTarget: { enabled: true, manual: false } },
       orderBy: { discoveredAt: "desc" },
+      include: { appTarget: { select: { id: true, displayName: true, packageName: true } } },
     }),
   ]);
 
@@ -91,16 +94,25 @@ export default async function FleetPage() {
   });
 
   const versionOptions: VersionOption[] = versions
+    // Newest first within each app; the dialog groups by app, so ordering
+    // across apps does not matter.
     .sort((a, b) => compareVersions(b.version, a.version))
     .map((v) => ({
       id: v.id,
+      targetId: v.appTarget.id,
+      targetName: v.appTarget.displayName,
+      targetPackage: v.appTarget.packageName,
       version: v.version,
       source: v.source,
       sizeBytes: Number(v.sizeBytes),
       approved: v.approved,
     }));
 
-  const latestVersion = versionOptions[0]?.version ?? null;
+  // The "outdated" filter compares against the app whose version the table's
+  // own column shows, so this stays scoped to the primary target rather than
+  // picking up whichever app happens to sort first.
+  const latestVersion =
+    versionOptions.find((option) => option.targetId === target?.id)?.version ?? null;
 
   const watchedColumns: WatchedColumn[] = watched.map((row) => ({
     packageName: row.packageName,

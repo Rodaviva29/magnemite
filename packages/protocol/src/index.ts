@@ -58,6 +58,30 @@ export const deviceInfoSchema = z.object({
   localIp: z.string().nullish(),
 });
 
+/**
+ * What one tracked app is costing the box right now.
+ *
+ * Summed across every process the package owns — an app with a `:remote`
+ * service is two entries in /proc and one line here — because what an operator
+ * asks is "what is the scanner costing me", not "what is each of its processes
+ * costing me".
+ */
+export const processStatsSchema = z.object({
+  packageName: z.string(),
+  /**
+   * Share of a *single* core, so 200 means two cores pinned. Deliberately not
+   * normalised against the core count: this is the number `top` shows, and a
+   * value above 100 is the honest way to say an app is using more than one
+   * core. The dashboard divides by cpuCount when it wants a box-wide share.
+   */
+  cpuPercent: z.number().nonnegative().nullish(),
+  /** Resident set size, summed across the app's processes. */
+  rssBytes: z.number().nonnegative().nullish(),
+  /** How many processes the package had running when this was read. */
+  processCount: z.number().int().nonnegative().nullish(),
+});
+export type ProcessStats = z.infer<typeof processStatsSchema>;
+
 export const deviceMetricsSchema = z.object({
   /** Free bytes on /data — the partition the install session writes to. */
   freeBytes: z.number().nonnegative().nullish(),
@@ -82,6 +106,22 @@ export const deviceMetricsSchema = z.object({
   cpuCount: z.number().int().positive().nullish(),
   memTotalBytes: z.number().nonnegative().nullish(),
   memAvailableBytes: z.number().nonnegative().nullish(),
+
+  /**
+   * Degrees Celsius off the box's thermal zones. Not every ROM exposes one —
+   * plenty of TV boxes ship with an empty /sys/class/thermal — so null here
+   * means "this box cannot say", which the dashboard shows as an absent chart
+   * rather than as a flat line at zero.
+   */
+  cpuTempC: z.number().nullish(),
+  batteryTempC: z.number().nullish(),
+
+  /**
+   * Per-app CPU and memory for the tracked packages, sampled the same beat as
+   * everything above. Empty on agents old enough not to gather it, and empty
+   * for an app that simply is not running.
+   */
+  processes: z.array(processStatsSchema).default([]),
 });
 
 // ---------------------------------------------------------------------------

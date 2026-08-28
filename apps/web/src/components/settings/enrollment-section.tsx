@@ -18,7 +18,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatRelative } from "@/lib/format";
+
+import { RelativeTime } from "@/components/relative-time";
 
 export type TokenRow = {
   id: string;
@@ -53,7 +54,10 @@ export function EnrollmentSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Enrollment tokens</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="h-4 w-4 text-muted-foreground" />
+          Enrollment tokens
+        </CardTitle>
         <CardDescription>
           A new box presents one of these once and gets a token of its own back. Only the hash is
           stored, so a token is shown exactly one time.
@@ -117,7 +121,7 @@ export function EnrollmentSection({
                     )}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatRelative(token.createdAt)}
+                    <RelativeTime value={token.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     {!token.revoked && !disabled ? (

@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"magnemite/agent/internal/proto"
@@ -38,6 +39,14 @@ type System interface {
 	// Memory reports total and available bytes out of /proc/meminfo.
 	Memory() (total uint64, available uint64)
 	CPUCount() int
+	// Temperatures reports degrees Celsius for the SoC and the battery. Zero
+	// means the box exposes no such sensor, which is common enough on TV
+	// hardware that it is a normal answer rather than an error.
+	Temperatures() (cpuC float64, batteryC float64)
+	// ProcessStats reports what each named package is currently costing, summed
+	// over its processes. CPU is a rate, so it needs two readings: the first
+	// call for a package establishes the baseline and reports no CPU figure.
+	ProcessStats(packages []string) []proto.ProcessStats
 	PackageInfo(ctx context.Context, pkg string) (proto.PackageInfo, error)
 	// ThirdPartyPackages lists everything installed that did not ship with the
 	// ROM. One `pm` call, no dumpsys per package — see Metrics for why.
@@ -54,7 +63,22 @@ type System interface {
 
 // Android is the real implementation. The agent is started by the Magisk
 // service.sh, so it already runs as root and never needs to shell out to su.
-type Android struct{}
+type Android struct {
+	// CPU time is a counter, not a gauge: a percentage only exists between two
+	// readings. These carry the previous one from beat to beat.
+	cpuMu   sync.Mutex
+	lastCPU map[string]cpuReading
+	// Resolved package -> pids, kept so the common case skips the /proc walk.
+	// Validated against each pid's own cmdline before use, because pids are
+	// recycled and an app that was killed and restarted gets a new one.
+	pidCache map[string][]int
+}
+
+type cpuReading struct {
+	// Sum of utime+stime across the package's processes, in clock ticks.
+	ticks uint64
+	at    time.Time
+}
 
 func NewAndroid() *Android { return &Android{} }
 
@@ -405,6 +429,286 @@ func (a *Android) CPUCount() int {
 	return runtime.NumCPU()
 }
 
+// --- Temperature -----------------------------------------------------------
+
+// scaleTemp turns whatever a thermal node printed into degrees Celsius.
+//
+// The kernel's thermal framework documents millidegrees, and most SoCs follow
+// it — but Amlogic and Rockchip boxes, which is most of this fleet, ship nodes
+// in deci-degrees or in plain degrees depending on the vendor tree. Reading a
+// 45000 as 45000 °C is worse than reading nothing, so the magnitude picks the
+// divisor: anything a box could survive is under 150 °C.
+func scaleTemp(raw float64) (float64, bool) {
+	for _, divisor := range []float64{1, 10, 1000} {
+		value := raw / divisor
+		// -30 rather than 0: a box in an unheated shed in winter is plausible,
+		// and a sensor reporting a hard zero usually means "not wired up".
+		if value >= -30 && value <= 150 && value != 0 {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+// Temperatures reads the box's thermal zones.
+//
+// Zones are unlabelled on plenty of ROMs and there is no portable "the CPU
+// one", so this prefers a zone whose type names the SoC and falls back to the
+// hottest zone it found. The hottest is the honest fallback: whatever is
+// closest to throttling is what an operator wants to see.
+func (a *Android) Temperatures() (float64, float64) {
+	entries, err := os.ReadDir("/sys/class/thermal")
+	var cpu, hottest float64
+	var haveCPU, haveHottest bool
+
+	if err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasPrefix(name, "thermal_zone") {
+				continue
+			}
+			base := "/sys/class/thermal/" + name
+			raw, parseErr := strconv.ParseFloat(strings.TrimSpace(readProc(base+"/temp")), 64)
+			if parseErr != nil {
+				continue
+			}
+			value, ok := scaleTemp(raw)
+			if !ok {
+				continue
+			}
+
+			if !haveHottest || value > hottest {
+				hottest, haveHottest = value, true
+			}
+
+			// tsens is Qualcomm's name for the SoC sensor; the others are what
+			// the Amlogic and Rockchip trees use for the same thing.
+			zoneType := strings.ToLower(strings.TrimSpace(readProc(base + "/type")))
+			isCPU := strings.Contains(zoneType, "cpu") ||
+				strings.Contains(zoneType, "tsens") ||
+				strings.Contains(zoneType, "soc") ||
+				strings.Contains(zoneType, "ap_therm")
+			if isCPU && (!haveCPU || value > cpu) {
+				cpu, haveCPU = value, true
+			}
+		}
+	}
+
+	if !haveCPU && haveHottest {
+		cpu = hottest
+	}
+
+	// Battery is its own subsystem and always deci-degrees, but a mains-powered
+	// TV box usually has no battery node at all — hence the same scale-or-drop
+	// treatment rather than trusting the unit.
+	var battery float64
+	if raw, parseErr := strconv.ParseFloat(
+		strings.TrimSpace(readProc("/sys/class/power_supply/battery/temp")), 64,
+	); parseErr == nil {
+		if value, ok := scaleTemp(raw); ok {
+			battery = value
+		}
+	}
+
+	return cpu, battery
+}
+
+// --- Per-app CPU and memory ------------------------------------------------
+
+// Linux exports process CPU time in USER_HZ, which is 100 on every Android
+// kernel that ships. Go has no sysconf(_SC_CLK_TCK), and getting this wrong
+// only scales the percentage, so the constant is the pragmatic answer.
+const clockTicksPerSecond = 100
+
+// ownsProcess reports whether a /proc cmdline belongs to pkg.
+//
+// Android names an app's process after its package, and its extra processes
+// after the package plus a colon suffix (`com.example:remote`). Matching the
+// prefix alone would also catch `com.example.other`, which is a different app,
+// so the suffix has to be a colon.
+func ownsProcess(cmdline, pkg string) bool {
+	if cmdline == pkg {
+		return true
+	}
+	return strings.HasPrefix(cmdline, pkg+":")
+}
+
+// processName is /proc/<pid>/cmdline's first NUL-separated argument, which for
+// an Android app is the process name rather than a path.
+func processName(pid int) string {
+	raw := readProc("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if raw == "" {
+		return ""
+	}
+	if i := strings.IndexByte(raw, 0); i >= 0 {
+		raw = raw[:i]
+	}
+	return strings.TrimSpace(raw)
+}
+
+// pidsFor finds every live pid belonging to each package, in one walk of /proc.
+//
+// The walk is the expensive part — a few hundred small reads — so the resolved
+// pids are cached and the walk only happens when a cached pid has died or
+// belongs to something else now. In the steady state, where the scanner has
+// been up for days, this costs one cmdline read per process per beat.
+func (a *Android) pidsFor(packages []string) map[string][]int {
+	a.cpuMu.Lock()
+	found := make(map[string][]int, len(packages))
+	var stale bool
+	for _, pkg := range packages {
+		cached := a.pidCache[pkg]
+		if len(cached) == 0 {
+			stale = true
+			continue
+		}
+		live := make([]int, 0, len(cached))
+		for _, pid := range cached {
+			if ownsProcess(processName(pid), pkg) {
+				live = append(live, pid)
+			}
+		}
+		if len(live) != len(cached) {
+			// A process came or went, so the cache no longer describes the box.
+			stale = true
+			continue
+		}
+		found[pkg] = live
+	}
+	a.cpuMu.Unlock()
+
+	if !stale {
+		return found
+	}
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return found
+	}
+	fresh := make(map[string][]int, len(packages))
+	for _, entry := range entries {
+		pid, convErr := strconv.Atoi(entry.Name())
+		if convErr != nil {
+			continue // /proc/self, /proc/meminfo and friends
+		}
+		name := processName(pid)
+		if name == "" {
+			continue
+		}
+		for _, pkg := range packages {
+			if ownsProcess(name, pkg) {
+				fresh[pkg] = append(fresh[pkg], pid)
+				break
+			}
+		}
+	}
+
+	a.cpuMu.Lock()
+	a.pidCache = fresh
+	a.cpuMu.Unlock()
+	return fresh
+}
+
+// procCPUTicks is utime+stime out of /proc/<pid>/stat.
+//
+// The stat line cannot be split on spaces from the left: field 2 is the
+// executable name in parentheses and may itself contain spaces. Everything
+// after the closing parenthesis is safe, and utime/stime are fields 14 and 15
+// overall — the 12th and 13th of that remainder.
+func procCPUTicks(pid int) (uint64, bool) {
+	line := readProc("/proc/" + strconv.Itoa(pid) + "/stat")
+	end := strings.LastIndexByte(line, ')')
+	if end < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(line[end+1:])
+	if len(fields) < 13 {
+		return 0, false
+	}
+	utime, err1 := strconv.ParseUint(fields[11], 10, 64)
+	stime, err2 := strconv.ParseUint(fields[12], 10, 64)
+	if err1 != nil || err2 != nil {
+		return 0, false
+	}
+	return utime + stime, true
+}
+
+// procRSSBytes is the resident set out of /proc/<pid>/statm, whose second
+// field is resident pages.
+func procRSSBytes(pid int) uint64 {
+	fields := strings.Fields(readProc("/proc/" + strconv.Itoa(pid) + "/statm"))
+	if len(fields) < 2 {
+		return 0
+	}
+	pages, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return pages * uint64(os.Getpagesize())
+}
+
+func (a *Android) ProcessStats(packages []string) []proto.ProcessStats {
+	if len(packages) == 0 {
+		return nil
+	}
+
+	pids := a.pidsFor(packages)
+	now := time.Now()
+	stats := make([]proto.ProcessStats, 0, len(packages))
+
+	a.cpuMu.Lock()
+	defer a.cpuMu.Unlock()
+	if a.lastCPU == nil {
+		a.lastCPU = map[string]cpuReading{}
+	}
+
+	for _, pkg := range packages {
+		live := pids[pkg]
+		if len(live) == 0 {
+			// Not running. Drop the baseline too, so the first beat after it
+			// comes back does not bill it for the whole time it was dead.
+			delete(a.lastCPU, pkg)
+			continue
+		}
+
+		var ticks, rss uint64
+		var readAny bool
+		for _, pid := range live {
+			if t, ok := procCPUTicks(pid); ok {
+				ticks += t
+				readAny = true
+			}
+			rss += procRSSBytes(pid)
+		}
+		if !readAny {
+			continue
+		}
+
+		count := len(live)
+		entry := proto.ProcessStats{
+			PackageName:  pkg,
+			RSSBytes:     rss,
+			ProcessCount: &count,
+		}
+
+		// A rate needs two readings. The first beat for a package reports
+		// memory only rather than inventing a number from uptime, which would
+		// read as a long-run average and not as "right now".
+		if prev, ok := a.lastCPU[pkg]; ok && ticks >= prev.ticks {
+			elapsed := now.Sub(prev.at).Seconds()
+			if elapsed > 0 {
+				used := float64(ticks-prev.ticks) / clockTicksPerSecond
+				entry.CPUPercent = used / elapsed * 100
+			}
+		}
+		a.lastCPU[pkg] = cpuReading{ticks: ticks, at: now}
+
+		stats = append(stats, entry)
+	}
+
+	return stats
+}
+
 // `pm list packages -3 --show-versioncode` prints one line per third-party
 // package: "package:com.example.app versionCode:1234". That is the whole
 // inventory in a single call — the alternative, a dumpsys per package, is
@@ -584,6 +888,7 @@ func Metrics(ctx context.Context, s System, packages []string, withInventory boo
 	free, total, _ := s.Disk("/data")
 	one, five, fifteen := s.LoadAvg()
 	memTotal, memAvailable := s.Memory()
+	cpuTemp, batteryTemp := s.Temperatures()
 
 	m := proto.DeviceMetrics{
 		FreeBytes:         free,
@@ -595,6 +900,12 @@ func Metrics(ctx context.Context, s System, packages []string, withInventory boo
 		CPUCount:          s.CPUCount(),
 		MemTotalBytes:     memTotal,
 		MemAvailableBytes: memAvailable,
+		CPUTempC:          cpuTemp,
+		BatteryTempC:      batteryTemp,
+		// Same cost class as the readings above — a handful of small /proc
+		// reads for the tracked apps — so it rides every beat rather than
+		// waiting for the inventory pass.
+		Processes: s.ProcessStats(packages),
 	}
 
 	seen := map[string]bool{}

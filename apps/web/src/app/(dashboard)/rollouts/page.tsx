@@ -9,7 +9,13 @@ export default async function RolloutsPage() {
 
   const rollouts = await prisma.rollout.findMany({
     include: {
-      appVersion: { select: { version: true, source: true } },
+      appVersion: {
+        select: {
+          version: true,
+          source: true,
+          appTarget: { select: { displayName: true, packageName: true } },
+        },
+      },
       createdBy: { select: { email: true, name: true } },
       jobs: { select: { state: true } },
     },
@@ -21,6 +27,8 @@ export default async function RolloutsPage() {
     const startedAt = rollout.startedAt ?? rollout.createdAt;
     return {
       id: rollout.id,
+      targetName: rollout.appVersion.appTarget.displayName,
+      targetPackage: rollout.appVersion.appTarget.packageName,
       version: rollout.appVersion.version,
       source: rollout.appVersion.source,
       status: rollout.status,

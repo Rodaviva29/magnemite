@@ -111,7 +111,15 @@ export const hub = {
   cacheVersion: (id: string) => call(`/internal/versions/${id}/cache`),
   pruneVersions: (keepLatest?: number) =>
     call<{ removed: number }>("/internal/versions/prune", { keepLatest }),
-  pollSources: () => call("/internal/sources/poll"),
+  pollSources: () =>
+    call<{
+      ran: boolean;
+      targets: number;
+      feeds: number;
+      listed: number;
+      discovered: number;
+      errors: { feed: string; error: string }[];
+    }>("/internal/sources/poll"),
   /** Integration probes for the Status page. `force` skips the hub's cache. */
   health: (force = false) => call<HubHealth>("/internal/health", { force }),
 };

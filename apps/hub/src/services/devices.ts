@@ -4,6 +4,7 @@ import { prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
 import { onlineDeviceIds, sendTo } from "../registry.js";
+import { recordSample } from "./metrics.js";
 
 type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 type DeviceMetrics = z.infer<typeof deviceMetricsSchema>;
@@ -70,9 +71,15 @@ export async function applyMetrics(deviceId: string, metrics: DeviceMetrics) {
       cpuCount: metrics.cpuCount ?? undefined,
       memTotalBytes: toBigInt(metrics.memTotalBytes) ?? undefined,
       memAvailableBytes: toBigInt(metrics.memAvailableBytes) ?? undefined,
+      cpuTempC: metrics.cpuTempC ?? undefined,
+      batteryTempC: metrics.batteryTempC ?? undefined,
       ...(isInventory ? { packagesSyncedAt: new Date() } : {}),
     },
   });
+
+  // The row above is only ever "now". This is the history behind it, kept on
+  // its own interval rather than one row per beat.
+  await recordSample(deviceId, metrics);
 
   // Every box in the fleet beats every 20 seconds, so this runs constantly:
   // read the rows once and write only the ones that actually changed, rather

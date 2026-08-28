@@ -43,13 +43,39 @@ export async function setVersionApproval(
 
 export async function pollSources(): Promise<ActionState> {
   await requireOperator();
+
+  let result: Awaited<ReturnType<typeof hub.pollSources>>;
   try {
-    await hub.pollSources();
+    // The hub runs the poll before answering, so this waits for real work and
+    // comes back with what was found rather than "started".
+    result = await hub.pollSources();
   } catch (err) {
     return { error: toMessage(err) };
   }
   revalidatePath("/versions");
-  return { ok: true, message: "Checking both sources." };
+
+  if (!result.ran) {
+    return { ok: true, message: "A check was already running — it will finish on its own." };
+  }
+
+  const checked = `Checked ${result.feeds} source${result.feeds === 1 ? "" : "s"} across ${result.targets} app${result.targets === 1 ? "" : "s"}`;
+  // "Nothing new" on its own reads identically whether the feeds returned 40
+  // builds you already had or nothing at all, which is the difference between
+  // working and broken. So the count of what was listed comes first.
+  const listed = `${result.listed} build${result.listed === 1 ? "" : "s"} listed`;
+  const found =
+    result.discovered === 0
+      ? "none of them new"
+      : `${result.discovered} new version${result.discovered === 1 ? "" : "s"}`;
+
+  if (result.errors.length > 0) {
+    // A feed that is down is the thing worth reading, so it wins the message
+    // over the count that did work.
+    const failed = result.errors.map((e) => `${e.feed} (${e.error})`).join("; ");
+    return { ok: true, message: `${checked} — ${listed}, ${found}. Failed: ${failed}` };
+  }
+
+  return { ok: true, message: `${checked} — ${listed}, ${found}.` };
 }
 
 export async function pruneVersions(keepLatest: number): Promise<ActionState> {

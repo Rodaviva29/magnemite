@@ -8,8 +8,14 @@ export const dynamic = "force-dynamic";
 export default async function VersionsPage() {
   const user = await requireUser();
 
-  const target = await prisma.appTarget.findFirst({ where: { enabled: true, manual: false } });
-  if (!target) {
+  // Every watched target, not just the first one: the fleet can track several
+  // apps and each has its own versions, which is what the Target column is for.
+  const targets = await prisma.appTarget.findMany({
+    where: { enabled: true, manual: false },
+    orderBy: { displayName: "asc" },
+  });
+
+  if (targets.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
         No app target configured. Add one from Settings.
@@ -17,27 +23,43 @@ export default async function VersionsPage() {
     );
   }
 
+  const targetIds = targets.map((t) => t.id);
+  const packageNames = targets.map((t) => t.packageName);
+
   const [versions, installed] = await Promise.all([
     prisma.appVersion.findMany({
-      where: { appTargetId: target.id },
+      where: { appTargetId: { in: targetIds } },
       orderBy: { discoveredAt: "desc" },
-      include: { feed: { select: { name: true } } },
+      include: {
+        feed: { select: { name: true } },
+        appTarget: { select: { displayName: true, packageName: true } },
+      },
     }),
+    // One pass for every watched package rather than a query each: the count
+    // is per (package, version), since two apps can share a version string.
     prisma.devicePackage.groupBy({
-      by: ["versionName"],
-      where: { packageName: target.packageName, device: { approved: true } },
+      by: ["packageName", "versionName"],
+      where: { packageName: { in: packageNames }, device: { approved: true } },
       _count: { _all: true },
     }),
   ]);
 
   const installCounts = new Map(
-    installed.map((row) => [row.versionName ?? "", row._count._all] as const),
+    installed.map((row) => [`${row.packageName}|${row.versionName ?? ""}`, row._count._all]),
   );
 
   const rows: VersionRow[] = versions
-    .sort((a, b) => compareVersions(b.version, a.version))
+    // Grouped by app, newest build first inside each — the same order the
+    // Target column sorts by, so the default view already reads that way.
+    .sort(
+      (a, b) =>
+        a.appTarget.displayName.localeCompare(b.appTarget.displayName) ||
+        compareVersions(b.version, a.version),
+    )
     .map((v) => ({
       id: v.id,
+      targetName: v.appTarget.displayName,
+      targetPackage: v.appTarget.packageName,
       version: v.version,
       buildCode: v.buildCode,
       source: v.source,
@@ -52,14 +74,10 @@ export default async function VersionsPage() {
       error: v.error,
       publishedAt: v.publishedAt?.toISOString() ?? null,
       discoveredAt: v.discoveredAt.toISOString(),
-      devicesOnThis: installCounts.get(v.version) ?? 0,
+      devicesOnThis: installCounts.get(`${v.appTarget.packageName}|${v.version}`) ?? 0,
     }));
 
   return (
-    <VersionsTable
-      rows={rows}
-      packageName={target.packageName}
-      canOperate={user.role !== "VIEWER"}
-    />
+    <VersionsTable rows={rows} targetCount={targets.length} canOperate={user.role !== "VIEWER"} />
   );
 }

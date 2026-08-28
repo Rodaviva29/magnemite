@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useTransition } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Columns3, Plus, Trash2 } from "lucide-react";
 import { createWatchedPackage, deleteWatchedPackage } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,10 @@ export function WatchedPackagesSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Fleet columns</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Columns3 className="h-4 w-4 text-muted-foreground" />
+          Fleet columns
+        </CardTitle>
         <CardDescription>
           Extra packages to show the installed version of, one column each. Nothing here is updated
           by Magnemite — each box simply reports what it has on every heartbeat, and the column is

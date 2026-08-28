@@ -72,7 +72,9 @@ export function ThemeToggle({
             onClick={() => setTheme(value)}
             className={cn(
               "flex h-6 flex-1 items-center justify-center rounded-[6px] transition-colors",
-              active ? "bg-emphasis text-foreground" : "text-muted-foreground hover:text-foreground",
+              active
+                ? "bg-emphasis text-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Icon className="h-3.5 w-3.5" />

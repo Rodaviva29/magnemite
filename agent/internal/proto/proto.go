@@ -54,6 +54,18 @@ type DeviceInfo struct {
 	LocalIp string `json:"localIp,omitempty"`
 }
 
+// ProcessStats is what one tracked app costs the box, summed over every
+// process the package owns. See the matching doc comment on the TypeScript
+// side for why CPUPercent is a share of one core rather than of the whole box.
+type ProcessStats struct {
+	PackageName string  `json:"packageName"`
+	CPUPercent  float64 `json:"cpuPercent,omitempty"`
+	RSSBytes    uint64  `json:"rssBytes,omitempty"`
+	// Pointer so a running app with a genuine zero never looks like an app the
+	// agent could not read. omitempty on a plain int would drop both.
+	ProcessCount *int `json:"processCount,omitempty"`
+}
+
 type DeviceMetrics struct {
 	FreeBytes     uint64        `json:"freeBytes"`
 	TotalBytes    uint64        `json:"totalBytes"`
@@ -73,6 +85,15 @@ type DeviceMetrics struct {
 	CPUCount          int     `json:"cpuCount,omitempty"`
 	MemTotalBytes     uint64  `json:"memTotalBytes,omitempty"`
 	MemAvailableBytes uint64  `json:"memAvailableBytes,omitempty"`
+
+	// Degrees Celsius. Plenty of TV boxes expose no thermal zone at all, so
+	// omitempty here means "this box cannot say" — which the hub stores as
+	// null and the dashboard renders as an absent chart, not a zero.
+	CPUTempC     float64 `json:"cpuTempC,omitempty"`
+	BatteryTempC float64 `json:"batteryTempC,omitempty"`
+
+	// Per-app CPU and memory for the packages the hub asked to track.
+	Processes []ProcessStats `json:"processes,omitempty"`
 }
 
 // --- agent -> hub ----------------------------------------------------------

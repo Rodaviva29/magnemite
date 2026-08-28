@@ -359,8 +359,14 @@ export async function internalRoutes(app: FastifyInstance) {
     return { ok: true, removed };
   });
 
-  app.post("/internal/sources/poll", async () => {
-    void pollAllSources().catch((err) => log.error({ err }, "manual poll failed"));
-    return { ok: true };
+  // Awaited, unlike the scheduled pass: a person pressed a button and is
+  // watching, so the answer is what the poll found rather than "accepted".
+  app.post("/internal/sources/poll", async (_request, reply) => {
+    try {
+      return await pollAllSources();
+    } catch (err) {
+      log.error({ err }, "manual poll failed");
+      return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 }

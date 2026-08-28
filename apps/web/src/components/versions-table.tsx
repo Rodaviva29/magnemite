@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Check, Download, ExternalLink, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, Download, ExternalLink, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import type { VersionSource, VersionStatus } from "@magnemite/db";
 import { cacheVersion, pollSources, pruneVersions, setVersionApproval } from "@/actions/versions";
 import { Badge } from "@/components/ui/badge";
@@ -19,14 +19,18 @@ import {
 } from "@/components/ui/table";
 import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { VersionStatusBadge } from "@/components/status";
-import { formatBytes, formatRelative } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
 import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 
-type SortKey = "version" | "source" | "status" | "size" | "devices" | "published";
+type SortKey = "version" | "target" | "source" | "status" | "size" | "devices" | "published";
 
 export type VersionRow = {
   id: string;
+  /** Which app target this build belongs to — the fleet tracks several. */
+  targetName: string;
+  targetPackage: string;
   version: string;
   buildCode: string | null;
   source: VersionSource;
@@ -69,20 +73,27 @@ function sourceLabel(row: VersionRow): string {
 
 export function VersionsTable({
   rows,
-  packageName,
+  targetCount,
   canOperate,
 }: {
   rows: VersionRow[];
-  packageName: string;
+  /** How many targets these versions span, for the count line. */
+  targetCount: number;
   canOperate: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  // Which button is in flight, so only that one spins — `pending` is shared by
+  // every action on this page, including the per-row Cache and Approve.
+  const [running, setRunning] = useState<"poll" | "prune" | null>(null);
   const [query, setQuery] = useState("");
 
   const { headProps, sort, sortRows } = useTableSort<SortKey, VersionRow>(
     {
       version: (r) => r.version,
+      // Grouping by app is what makes a multi-target list readable, so the
+      // version is the tiebreak inside each one rather than a second sort.
+      target: (r) => `${r.targetName}|${r.version}`,
       source: (r) => sourceLabel(r),
       status: (r) => r.status,
       size: (r) => r.sizeBytes,
@@ -98,6 +109,8 @@ export function VersionsTable({
       ? rows.filter(
           (row) =>
             row.version.toLowerCase().includes(q) ||
+            row.targetName.toLowerCase().includes(q) ||
+            row.targetPackage.toLowerCase().includes(q) ||
             sourceLabel(row).toLowerCase().includes(q) ||
             row.arch.toLowerCase().includes(q) ||
             row.status.toLowerCase().includes(q) ||
@@ -115,11 +128,13 @@ export function VersionsTable({
   const visible = pagination.rows;
   const cached = rows.filter((r) => r.status === "READY").length;
 
-  function run(fn: () => Promise<{ error?: string; message?: string }>) {
+  function run(fn: () => Promise<{ error?: string; message?: string }>, which?: "poll" | "prune") {
     setMessage(null);
+    setRunning(which ?? null);
     startTransition(async () => {
       const result = await fn();
       setMessage(result?.error ?? result?.message ?? null);
+      setRunning(null);
     });
   }
 
@@ -129,19 +144,33 @@ export function VersionsTable({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Versions</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {packageName} · {rows.length} known · {cached} cached on this server
+            {targetCount} app{targetCount === 1 ? "" : "s"} · {rows.length} known · {cached} cached
+            on this server
           </p>
         </div>
 
         {canOperate ? (
           <div className="flex gap-2">
-            <Button variant="outline" disabled={pending} onClick={() => run(pollSources)}>
-              <RefreshCw />
-              Check sources
+            {/* A poll reaches every feed before it answers, which can take a
+                few seconds — long enough that a button which only greys out
+                reads as broken. */}
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => run(pollSources, "poll")}
+              className="min-w-[9.5rem]"
+            >
+              {running === "poll" ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              {running === "poll" ? "Checking…" : "Check sources"}
             </Button>
-            <Button variant="ghost" disabled={pending} onClick={() => run(() => pruneVersions(3))}>
-              <Trash2 />
-              Free old bundles
+            <Button
+              variant="ghost"
+              disabled={pending}
+              onClick={() => run(() => pruneVersions(3), "prune")}
+              className="min-w-[10.5rem]"
+            >
+              {running === "prune" ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              {running === "prune" ? "Freeing…" : "Free old bundles"}
             </Button>
           </div>
         ) : null}
@@ -154,7 +183,7 @@ export function VersionsTable({
       <SearchInput
         value={query}
         onChange={setQuery}
-        placeholder="Search version, build, source, arch…"
+        placeholder="Search version, app, build, source, arch…"
         className="max-w-md"
       />
 
@@ -163,6 +192,7 @@ export function VersionsTable({
           <TableHeader>
             <TableRow>
               <TableSortHead {...headProps("version")}>Version</TableSortHead>
+              <TableSortHead {...headProps("target")}>Target</TableSortHead>
               <TableSortHead {...headProps("source")}>Source</TableSortHead>
               <TableSortHead {...headProps("status")}>On disk</TableSortHead>
               <TableSortHead {...headProps("size")} align="right">
@@ -178,7 +208,7 @@ export function VersionsTable({
           <TableBody>
             {visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                   No versions match this search.
                 </TableCell>
               </TableRow>
@@ -193,6 +223,13 @@ export function VersionsTable({
                   <div className="text-xs text-muted-foreground">
                     {row.buildCode ? `build ${row.buildCode} · ` : ""}
                     {row.arch}
+                  </div>
+                </TableCell>
+
+                <TableCell className="min-w-36 text-sm">
+                  <div className="truncate font-medium">{row.targetName}</div>
+                  <div className="truncate font-mono text-xs text-muted-foreground">
+                    {row.targetPackage}
                   </div>
                 </TableCell>
 
@@ -221,7 +258,7 @@ export function VersionsTable({
                 </TableCell>
 
                 <TableCell className="text-xs text-muted-foreground">
-                  {formatRelative(row.publishedAt ?? row.discoveredAt)}
+                  <RelativeTime value={row.publishedAt ?? row.discoveredAt} />
                 </TableCell>
 
                 <TableCell>

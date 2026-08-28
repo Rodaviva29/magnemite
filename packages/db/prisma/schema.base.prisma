@@ -125,6 +125,11 @@ model Device {
   cpuCount          Int?
   memTotalBytes     BigInt?
   memAvailableBytes BigInt?
+  /// Degrees Celsius off the box's thermal zones. Null on boxes whose ROM
+  /// exposes no sensor at all, which is common on TV hardware — "cannot say"
+  /// rather than "cold".
+  cpuTempC          Float?
+  batteryTempC      Float?
   /// When the agent last sent a full third-party package list, as opposed to
   /// just the tracked apps.
   packagesSyncedAt  DateTime?
@@ -147,10 +152,12 @@ model Device {
   groupId String?
   group   DeviceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
-  packages     DevicePackage[]
-  jobs         Job[]
-  agentUpdates AgentUpdate[]
-  logBundles   DeviceLogBundle[]
+  packages       DevicePackage[]
+  jobs           Job[]
+  agentUpdates   AgentUpdate[]
+  logBundles     DeviceLogBundle[]
+  metricSamples  DeviceMetricSample[]
+  packageSamples DevicePackageMetricSample[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -242,6 +249,75 @@ model WatchedPackage {
   updatedAt DateTime @updatedAt
 }
 
+/// One point on a box's health timeline.
+///
+/// The `Device` row only ever holds the latest reading, which answers "is this
+/// box hot right now" but not "was it hot all night" — and the second question
+/// is the one that explains a box that stopped scanning. This is that history:
+/// one row per box per `metricsSampleSeconds`, pruned past
+/// `metricsRetentionDays` (both in Settings, because how much history is worth
+/// its disk is a per-fleet answer).
+///
+/// Deliberately *not* one row per heartbeat: boxes beat every 20 seconds and
+/// nobody reads a chart at that resolution, so the hub samples on an interval
+/// and drops the beats in between.
+model DeviceMetricSample {
+  /// An autoincrement, not a cuid: this is the highest-volume table in the
+  /// schema and a 25-character random string per row is both bigger than the
+  /// data it identifies and worse to index.
+  id       Int    @id @default(autoincrement())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  at DateTime @default(now())
+
+  loadAvg1          Float?
+  loadAvg5          Float?
+  loadAvg15         Float?
+  /// Copied onto every sample rather than read off the Device: a load average
+  /// only means something against the core count of the box *at the time*, and
+  /// a re-flashed box can come back with a different one.
+  cpuCount          Int?
+  memTotalBytes     BigInt?
+  memAvailableBytes BigInt?
+  freeBytes         BigInt?
+  totalBytes        BigInt?
+  cpuTempC          Float?
+  batteryTempC      Float?
+
+  /// The chart's own query: one box, one time window.
+  @@index([deviceId, at])
+  /// The prune's query, which is fleet-wide and has no device to narrow by.
+  @@index([at])
+}
+
+/// What one tracked app cost the box at one point in time.
+///
+/// Split from DeviceMetricSample rather than widened into it because the row
+/// count differs by the number of tracked packages, and because an app that is
+/// not running has no row at all — which is what makes "the scanner was dead
+/// from 3am" visible as a gap rather than as a flat zero.
+model DevicePackageMetricSample {
+  id          Int    @id @default(autoincrement())
+  deviceId    String
+  device      Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packageName String
+
+  at DateTime @default(now())
+
+  /// Share of a single core, so 200 means two cores pinned. See the protocol's
+  /// processStatsSchema for why this is not normalised against the core count.
+  cpuPercent   Float?
+  rssBytes     BigInt?
+  processCount Int?
+
+  /// Building the package filter: which apps have any data in this window.
+  @@index([deviceId, at])
+  /// One box, one app, one window — the series behind a selected package.
+  @@index([deviceId, packageName, at])
+  @@index([at])
+}
+
 /// Installed version of each package we track, refreshed on every heartbeat.
 model DevicePackage {
   id          String  @id @default(cuid())
@@ -317,6 +393,12 @@ model AppTarget {
 
   versions AppVersion[]
 
+  /// Which feeds are polled for this package. A target with none selected is
+  /// never polled — the feeds are indexes of many apps, so "all of them" is a
+  /// choice worth making per target rather than a default that quietly picks
+  /// up whatever is added later.
+  sources AppTargetSource[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -340,9 +422,27 @@ model SourceFeed {
   priority Int     @default(100)
 
   versions AppVersion[]
+  targets  AppTargetSource[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Which feeds a target is polled from.
+///
+/// An explicit join rather than an implicit many-to-many so the pairing can
+/// grow a column later — a per-target override of the feed's priority is the
+/// obvious one — without a migration that rewrites the table Prisma owns.
+model AppTargetSource {
+  appTargetId String
+  appTarget   AppTarget  @relation(fields: [appTargetId], references: [id], onDelete: Cascade)
+  feedId      String
+  feed        SourceFeed @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([appTargetId, feedId])
+  @@index([feedId])
 }
 
 model AppVersion {

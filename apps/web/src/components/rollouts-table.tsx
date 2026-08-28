@@ -20,12 +20,16 @@ import {
 } from "@/components/ui/table";
 import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { RolloutStatusBadge } from "@/components/status";
-import { formatDuration, formatRelative } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
 import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 
 export type RolloutRow = {
   id: string;
+  /** Which app this rollout shipped — the fleet tracks several. */
+  targetName: string;
+  targetPackage: string;
   version: string;
   source: VersionSource;
   status: RolloutStatus;
@@ -40,7 +44,8 @@ export type RolloutRow = {
   finishedAt: string | null;
 };
 
-type SortKey = "version" | "status" | "progress" | "startedBy" | "startedAt" | "duration";
+type SortKey =
+  "version" | "target" | "status" | "progress" | "startedBy" | "startedAt" | "duration";
 
 const OPEN_STATUSES: RolloutStatus[] = ["PENDING", "CANARY", "SOAKING", "RUNNING", "PAUSED"];
 
@@ -51,6 +56,9 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
   const { headProps, sort, sortRows } = useTableSort<SortKey, RolloutRow>(
     {
       version: (r) => r.version,
+      // Grouping by app is what makes a multi-target list readable, so the
+      // start time is the tiebreak inside each one rather than a second sort.
+      target: (r) => `${r.targetName}|${r.startedAt}`,
       status: (r) => r.status,
       progress: (r) => (r.total === 0 ? 0 : (r.done + r.failed) / r.total),
       startedBy: (r) => r.startedBy,
@@ -68,6 +76,8 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
       if (!q) return true;
       return (
         row.version.toLowerCase().includes(q) ||
+        row.targetName.toLowerCase().includes(q) ||
+        row.targetPackage.toLowerCase().includes(q) ||
         row.source.toLowerCase().includes(q) ||
         row.status.toLowerCase().includes(q) ||
         row.startedBy.toLowerCase().includes(q)
@@ -100,7 +110,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="Search version, status, who started it…"
+          placeholder="Search app, version, status, who started it…"
         />
         <Select
           aria-label="Filter by status"
@@ -122,6 +132,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
           <TableHeader>
             <TableRow>
               <TableSortHead {...headProps("version")}>Version</TableSortHead>
+              <TableSortHead {...headProps("target")}>Target</TableSortHead>
               <TableSortHead {...headProps("status")}>Status</TableSortHead>
               <TableSortHead {...headProps("progress")} className="min-w-52">
                 Progress
@@ -135,7 +146,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
           <TableBody>
             {visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                   No rollouts match this search.
                 </TableCell>
               </TableRow>
@@ -159,6 +170,14 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
                         {rollout.forceClean ? " · clean install" : ""}
                       </div>
                     </TableCell>
+
+                    <TableCell className="min-w-36 text-sm">
+                      <div className="truncate font-medium">{rollout.targetName}</div>
+                      <div className="truncate font-mono text-xs text-muted-foreground">
+                        {rollout.targetPackage}
+                      </div>
+                    </TableCell>
+
                     <TableCell>
                       <RolloutStatusBadge status={rollout.status} />
                     </TableCell>
@@ -179,7 +198,7 @@ export function RolloutsTable({ rows }: { rows: RolloutRow[] }) {
                       {rollout.startedBy}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatRelative(rollout.startedAt)}
+                      <RelativeTime value={rollout.startedAt} />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatDuration(

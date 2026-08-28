@@ -120,6 +120,19 @@ export type HubSettingsValues = {
    * ships as soon as it's found, the historical behavior.
    */
   updateCooldownMinutes: number;
+  /**
+   * Seconds between stored health samples. Boxes beat every 20 seconds and no
+   * chart is read at that resolution, so the hub keeps one beat per interval
+   * and drops the rest. Floored at the heartbeat interval — asking for less
+   * than 20 just stores every beat.
+   */
+  metricsSampleSeconds: number;
+  /**
+   * Days of health history to keep. 0 turns recording off entirely and drops
+   * what is already stored on the next prune, for a fleet that would rather
+   * not spend the disk.
+   */
+  metricsRetentionDays: number;
 };
 
 const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
@@ -127,11 +140,30 @@ const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
   jobStallTimeoutSeconds: 900,
   sourcePollMinutes: 15,
   updateCooldownMinutes: 0,
+  metricsSampleSeconds: 60,
+  metricsRetentionDays: 7,
 };
 
 const HUB_SETTINGS_KEYS = Object.keys(HUB_SETTINGS_DEFAULTS) as (keyof HubSettingsValues)[];
 
+/**
+ * Briefly cached. The scheduler reads these on every tick *and* on every
+ * nudge — a job finishing, a box reconnecting — so during a rollout this is
+ * the hottest read in the system, for four numbers that change about never.
+ *
+ * The TTL is short enough that a change from the dashboard is picked up
+ * within seconds, which is what matters: the hub reads its own copy, and the
+ * Next server that writes them is a different process.
+ */
+const HUB_SETTINGS_TTL_MS = 5_000;
+let hubSettingsCache: { at: number; value: HubSettingsValues } | null = null;
+
 export async function getHubSettings(): Promise<HubSettingsValues> {
+  const now = Date.now();
+  if (hubSettingsCache && now - hubSettingsCache.at < HUB_SETTINGS_TTL_MS) {
+    return { ...hubSettingsCache.value };
+  }
+
   const rows = await prisma.setting.findMany({ where: { key: { in: HUB_SETTINGS_KEYS } } });
   const values = { ...HUB_SETTINGS_DEFAULTS };
   for (const row of rows) {
@@ -139,7 +171,9 @@ export async function getHubSettings(): Promise<HubSettingsValues> {
       values[row.key as keyof HubSettingsValues] = row.value;
     }
   }
-  return values;
+
+  hubSettingsCache = { at: now, value: values };
+  return { ...values };
 }
 
 export async function updateHubSettings(patch: Partial<HubSettingsValues>): Promise<void> {
@@ -153,6 +187,9 @@ export async function updateHubSettings(patch: Partial<HubSettingsValues>): Prom
       }),
     ),
   );
+  // So the process that just wrote them re-renders with the new values rather
+  // than its own stale copy.
+  hubSettingsCache = null;
 }
 
 // ---------------------------------------------------------------------------

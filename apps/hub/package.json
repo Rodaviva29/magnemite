@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@magnemite/apk": "workspace:*",
     "@magnemite/db": "workspace:*",
     "@magnemite/protocol": "workspace:*",
     "@prisma/client": "^6.3.1",

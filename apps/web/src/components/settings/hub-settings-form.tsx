@@ -1,29 +1,22 @@
 "use client";
 
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+import { SlidersHorizontal } from "lucide-react";
 import { updateHubSettings } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SaveButton } from "@/components/ui/save-button";
 
 export type HubSettingsRow = {
   maxConcurrentJobs: number;
   jobStallTimeoutSeconds: number;
   sourcePollMinutes: number;
   updateCooldownMinutes: number;
+  metricsSampleSeconds: number;
+  metricsRetentionDays: number;
 };
-
-function Save() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? "Saving…" : "Save"}
-    </Button>
-  );
-}
 
 export function HubSettingsForm({
   settings,
@@ -37,7 +30,10 @@ export function HubSettingsForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Hub settings</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+          Hub settings
+        </CardTitle>
         <CardDescription>
           Fleet-wide operational knobs. Changes take effect within a few seconds, no restart needed.
         </CardDescription>
@@ -106,16 +102,45 @@ export function HubSettingsForm({
                 allowed to start. 0 updates as soon as a new version is discovered.
               </p>
             </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="metricsSampleSeconds">Health sample interval (seconds)</Label>
+              <Input
+                id="metricsSampleSeconds"
+                name="metricsSampleSeconds"
+                type="number"
+                min={20}
+                defaultValue={settings.metricsSampleSeconds}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                How often a box's CPU, memory, storage, temperature and per-app usage are kept for
+                the history charts. Boxes beat every 20s; anything shorter just stores every beat.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="metricsRetentionDays">Health history retention (days)</Label>
+              <Input
+                id="metricsRetentionDays"
+                name="metricsRetentionDays"
+                type="number"
+                min={0}
+                defaultValue={settings.metricsRetentionDays}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                How long those samples are kept before the hub prunes them. 0 turns recording off
+                and drops what is already stored.
+              </p>
+            </div>
           </div>
 
           {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-          {state.ok && state.message ? (
-            <p className="text-sm text-success">{state.message}</p>
-          ) : null}
 
           {!disabled ? (
             <div className="flex justify-end">
-              <Save />
+              <SaveButton state={state} />
             </div>
           ) : null}
         </form>

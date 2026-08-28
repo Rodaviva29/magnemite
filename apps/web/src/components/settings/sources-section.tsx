@@ -1,15 +1,16 @@
 "use client";
 
-import { useActionState, useTransition } from "react";
-import { useFormStatus } from "react-dom";
-import { Plus, Trash2 } from "lucide-react";
+import { useActionState, useState, useTransition } from "react";
+import { Plus, Rss, Trash2 } from "lucide-react";
 import { createSourceFeed, deleteSourceFeed, updateSourceFeed } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Label } from "@/components/ui/label";
+import { SaveButton } from "@/components/ui/save-button";
 import { Switch } from "@/components/ui/switch";
 
 export type SourceFeedRow = {
@@ -20,16 +21,11 @@ export type SourceFeedRow = {
   enabled: boolean;
   priority: number;
   versionCount: number;
+  /** App targets polled from this feed. */
+  targetCount: number;
+  /** Targets this feed is the *only* source for — they stop being polled. */
+  orphanedTargets: string[];
 };
-
-function Save() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" size="sm" disabled={pending}>
-      {pending ? "Saving…" : "Save"}
-    </Button>
-  );
-}
 
 /**
  * Where builds are discovered.
@@ -43,7 +39,10 @@ export function SourcesSection({ feeds, disabled }: { feeds: SourceFeedRow[]; di
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Version sources</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Rss className="h-4 w-4 text-muted-foreground" />
+          Version sources
+        </CardTitle>
         <CardDescription>
           Any index in the shape <code className="font-mono text-xs">mirror.unownhash.com</code>{" "}
           publishes works here — a flat JSON array of builds with{" "}
@@ -76,6 +75,8 @@ export function SourcesSection({ feeds, disabled }: { feeds: SourceFeedRow[]; di
 function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean }) {
   const [state, formAction] = useActionState<ActionState, FormData>(updateSourceFeed, {});
   const [pending, startTransition] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   return (
     <form action={formAction} className="flex flex-col gap-3 rounded-md border border-border p-4">
@@ -86,7 +87,8 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
           <h3 className="text-sm font-medium">{feed.name}</h3>
           {feed.enabled ? null : <Badge variant="secondary">disabled</Badge>}
           <span className="text-xs text-muted-foreground">
-            {feed.versionCount} version{feed.versionCount === 1 ? "" : "s"} discovered
+            {feed.versionCount} version{feed.versionCount === 1 ? "" : "s"} discovered ·{" "}
+            {feed.targetCount} target{feed.targetCount === 1 ? "" : "s"}
           </span>
         </div>
 
@@ -96,14 +98,7 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
             variant="ghost"
             size="sm"
             disabled={pending}
-            onClick={() => {
-              // Removing a source stops the polling; the builds it already
-              // found stay, cached artifacts and rollout history included.
-              if (!confirm(`Remove "${feed.name}"? Versions it already found are kept.`)) return;
-              startTransition(async () => {
-                await deleteSourceFeed(feed.id);
-              });
-            }}
+            onClick={() => setConfirmOpen(true)}
           >
             <Trash2 className="h-4 w-4" />
             Remove
@@ -161,13 +156,46 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
           </Label>
         </div>
 
-        {!disabled ? <Save /> : null}
+        {!disabled ? <SaveButton state={state} size="sm" /> : null}
       </div>
 
       {state.error ? <p className="text-xs text-destructive">{state.error}</p> : null}
-      {state.ok && state.message ? (
-        <p className="text-xs text-muted-foreground">{state.message}</p>
-      ) : null}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Remove ${feed.name}?`}
+        description="Polling stops. The builds it already found stay, cached artifacts and rollout history included."
+        pending={pending}
+        error={removeError}
+        onConfirm={() => {
+          startTransition(async () => {
+            const result = await deleteSourceFeed(feed.id);
+            setRemoveError(result.error ?? null);
+            if (!result.error) setConfirmOpen(false);
+          });
+        }}
+      >
+        {/* A target polls only the feeds it is paired with, and removing this
+            one unpairs it everywhere. A target left with none goes quiet
+            without ever saying so, which is the trap worth naming here. */}
+        {feed.orphanedTargets.length > 0 ? (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs">
+            <span>
+              This is the only source for{" "}
+              <span className="font-medium">{feed.orphanedTargets.join(", ")}</span>. Without it
+              {feed.orphanedTargets.length === 1 ? " that target" : " those targets"} will never
+              discover a new version again — give
+              {feed.orphanedTargets.length === 1 ? " it" : " them"} another source first.
+            </span>
+          </div>
+        ) : feed.targetCount > 0 ? (
+          <p className="rounded-md border border-border bg-subtle px-3 py-2 text-xs text-muted-foreground">
+            {feed.targetCount} target{feed.targetCount === 1 ? "" : "s"} polled from it and will
+            stop, but each keeps at least one other source.
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </form>
   );
 }

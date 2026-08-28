@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { HubHealth, IntegrationCheck, IntegrationState } from "@/lib/hub";
 import { formatRelative } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
 import { cn } from "@/lib/utils";
 
 const ICONS: Record<string, typeof Server> = {
@@ -99,7 +100,12 @@ export function StatusBoard({ health, error }: { health: HubHealth | null; error
                 : `${failing.length} integration${failing.length === 1 ? "" : "s"} need${
                     failing.length === 1 ? "s" : ""
                   } a look.`}
-            {health ? ` Checked ${formatRelative(health.checkedAt)}.` : ""}
+            {health ? (
+              <>
+                {" Checked "}
+                <RelativeTime value={health.checkedAt} />.
+              </>
+            ) : null}
           </p>
         </div>
 
@@ -176,7 +182,9 @@ function IntegrationCard({ check }: { check: IntegrationCheck }) {
             {check.facts.map((fact) => (
               <div key={fact.label} className="flex items-baseline justify-between gap-3">
                 <dt className="shrink-0 text-muted-foreground">{fact.label}</dt>
-                <dd className="truncate font-mono" title={fact.value}>
+                {/* `when` reads the clock, so the server's copy and the
+                    browser's can differ by a second at hydration. */}
+                <dd className="truncate font-mono" title={fact.value} suppressHydrationWarning>
                   {ISO.test(fact.value) ? when(fact.value) : fact.value}
                 </dd>
               </div>

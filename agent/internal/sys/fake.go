@@ -259,6 +259,41 @@ func (f *Fake) Memory() (uint64, uint64) {
 
 func (f *Fake) CPUCount() int { return 4 }
 
+// A warm box that tracks its own load, so the temperature chart in the
+// dashboard shows something with the same shape as the CPU one — which is what
+// makes a wrongly-scaled axis obvious during a load test.
+func (f *Fake) Temperatures() (float64, float64) {
+	one, _, _ := f.LoadAvg()
+	return round2(42 + one*6), round2(31 + one*2)
+}
+
+// Per-app usage for the fake fleet: one busy app and the rest idling, so the
+// per-package charts have a clear shape to check rather than N identical
+// lines. Deterministic per package name, so a given box's series stays put
+// across beats instead of jittering at random.
+func (f *Fake) ProcessStats(packages []string) []proto.ProcessStats {
+	if len(packages) == 0 {
+		return nil
+	}
+	seconds := time.Since(f.started).Seconds()
+	stats := make([]proto.ProcessStats, 0, len(packages))
+
+	for i, pkg := range packages {
+		// The first tracked package is the scanner: busy, and growing its heap
+		// the way a long-running app does.
+		phase := float64(i) * 1.7
+		weight := 1.0 / float64(i+1)
+		count := 1 + i%2
+		stats = append(stats, proto.ProcessStats{
+			PackageName:  pkg,
+			CPUPercent:   round2((25 + math.Abs(math.Sin(seconds/45+phase))*55) * weight),
+			RSSBytes:     uint64((180 + math.Abs(math.Cos(seconds/120+phase))*140) * weight * 1024 * 1024),
+			ProcessCount: &count,
+		})
+	}
+	return stats
+}
+
 func (f *Fake) ThirdPartyPackages(_ context.Context) ([]proto.PackageInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

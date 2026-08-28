@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Package, Trash2, Upload, Wand2, X } from "lucide-react";
 import { deleteManualVersion, startManualInstall } from "@/actions/manual";
+import { readApkInfoFromFile, type ApkInfo } from "@/lib/apk-info";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +25,8 @@ import {
   TableSortHead,
 } from "@/components/ui/table";
 import { OnlineDot } from "@/components/status";
-import { formatBytes, formatRelative } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
 import { useTableSort } from "@/lib/table-sort";
 import { cn } from "@/lib/utils";
 
@@ -98,8 +100,11 @@ export function ManualInstall({
   const [customPackage, setCustomPackage] = useState("");
   const packageName = choice === CUSTOM ? customPackage.trim() : choice;
 
-  const [versionLabel, setVersionLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // What the file says about itself, read in the browser by the same parser
+  // the hub runs on the upload. Null while it is being read.
+  const [info, setInfo] = useState<ApkInfo | null>(null);
+  const [reading, setReading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -180,8 +185,26 @@ export function ManualInstall({
     });
   }
 
+  /**
+   * Read the manifest as soon as a file is chosen. Only a few kilobytes are
+   * touched — the zip's tail and the one entry holding the manifest — so this
+   * costs nothing even on a 250 MB bundle.
+   */
+  function chooseFile(picked: File | null) {
+    setFile(picked);
+    setUploadError(null);
+    setInfo(null);
+    if (!picked) return;
+
+    setReading(true);
+    void readApkInfoFromFile(picked)
+      .then((read) => setInfo(read))
+      .finally(() => setReading(false));
+  }
+
   function clearFile() {
     setFile(null);
+    setInfo(null);
     setUploadError(null);
     // The input keeps its own value, so without this the same file cannot be
     // chosen again — the change event never fires for an unchanged path.
@@ -198,11 +221,11 @@ export function ManualInstall({
     setUploadError(null);
     setUploadPct(0);
 
-    // Both are optional: the hub reads the package name and version out of the
-    // file's own manifest, and only falls back to these when they are given.
+    // The version always comes out of the file's own manifest — it is the one
+    // thing about a build nobody should be able to mistype. The package name
+    // stays a hint the hub falls back on when the manifest does not name one.
     const query = new URLSearchParams({ filename: file.name });
     if (packageName) query.set("packageName", packageName);
-    if (versionLabel.trim()) query.set("version", versionLabel.trim());
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/manual/upload?${query.toString()}`);
@@ -286,6 +309,8 @@ export function ManualInstall({
 
   const uploading = uploadPct !== null;
   const canUpload = Boolean(file) && !uploading && canOperate;
+  // The version the hub will store, since it parses the same bytes.
+  const detectedVersion = info?.versionName ?? info?.versionCode ?? null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -343,21 +368,6 @@ export function ManualInstall({
               />
             ) : null}
           </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="version">Version label (optional)</Label>
-            <Input
-              id="version"
-              value={versionLabel}
-              onChange={(e) => setVersionLabel(e.target.value)}
-              placeholder="read from the file"
-            />
-            <p className="text-xs text-muted-foreground">
-              Left empty, the version inside the APK is used. Fill it in to name a build something
-              the file cannot say — &ldquo;2026-08-27 hotfix&rdquo;. Re-using a label replaces that
-              build.
-            </p>
-          </div>
         </CardContent>
       </Card>
 
@@ -411,13 +421,52 @@ export function ManualInstall({
                   </button>
                 ) : null}
               </div>
+              {/* Which build this is, answered before a few hundred megabytes
+                  of upload rather than after — the commonest mistake here is
+                  picking the wrong file out of a folder of near-identical
+                  names. Read from the manifest, not the file name, so it is
+                  the version that will actually be stored. */}
+              {file ? (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  {reading ? (
+                    <span className="text-muted-foreground">Reading the manifest…</span>
+                  ) : detectedVersion ? (
+                    <>
+                      <span className="text-muted-foreground">Version</span>
+                      <span className="font-mono font-medium text-foreground">
+                        {detectedVersion}
+                      </span>
+                      {info?.versionName && info.versionCode ? (
+                        <span className="font-mono text-muted-foreground">
+                          · build {info.versionCode}
+                        </span>
+                      ) : null}
+                      {/* The package the file declares, flagged only when it
+                          disagrees with the one chosen above — that mismatch
+                          is the mistake worth catching. */}
+                      {info?.packageName && info.packageName !== packageName ? (
+                        <span className="font-mono text-warning">· {info.packageName}</span>
+                      ) : info?.packageName ? (
+                        <span className="font-mono text-muted-foreground">
+                          · {info.packageName}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Could not read a version out of this file — the hub will try again on upload.
+                    </span>
+                  )}
+                </div>
+              ) : null}
+
               <input
                 id="file"
                 ref={fileInput}
                 type="file"
                 accept=".apk,.apkm,.xapk,.zip"
                 disabled={!canOperate || uploading}
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
                 className="sr-only"
               />
             </div>
@@ -475,7 +524,7 @@ export function ManualInstall({
                     <span className="font-mono">{build.version}</span>
                     <span className="truncate text-xs text-muted-foreground">
                       {build.packageName} · {formatBytes(build.sizeBytes)} ·{" "}
-                      {formatRelative(build.uploadedAt)}
+                      <RelativeTime value={build.uploadedAt} />
                     </span>
                     <div className="ml-auto flex items-center gap-1">
                       <Button
@@ -621,7 +670,7 @@ export function ManualInstall({
                       </TableCell>
 
                       <TableCell className="text-xs text-muted-foreground">
-                        {device.lastSeenAt ? formatRelative(device.lastSeenAt) : "never"}
+                        <RelativeTime value={device.lastSeenAt} />
                       </TableCell>
                     </TableRow>
                   );

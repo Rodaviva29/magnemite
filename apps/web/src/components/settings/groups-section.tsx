@@ -1,14 +1,15 @@
 "use client";
 
-import { useActionState, useTransition } from "react";
-import { useFormStatus } from "react-dom";
-import { Plus, Trash2 } from "lucide-react";
+import { useActionState, useState, useTransition } from "react";
+import { Boxes, Plus, Trash2 } from "lucide-react";
 import { createGroup, deleteGroup, updateGroup } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Label } from "@/components/ui/label";
+import { SaveButton } from "@/components/ui/save-button";
 
 export type GroupRow = {
   id: string;
@@ -19,20 +20,14 @@ export type GroupRow = {
   deviceCount: number;
 };
 
-function Save() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" size="sm" disabled={pending}>
-      {pending ? "Saving…" : "Save"}
-    </Button>
-  );
-}
-
 export function GroupsSection({ groups, disabled }: { groups: GroupRow[]; disabled: boolean }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Device groups</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Boxes className="h-4 w-4 text-muted-foreground" />
+          Device groups
+        </CardTitle>
         <CardDescription>
           Hooks run as root on the box, around the install. The usual pair is stopping the scanner
           before and starting it again after. Without that, the app is killed mid-scan.
@@ -60,6 +55,8 @@ export function GroupsSection({ groups, disabled }: { groups: GroupRow[]; disabl
 function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) {
   const [state, formAction] = useActionState<ActionState, FormData>(updateGroup, {});
   const [pending, startTransition] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   return (
     <form action={formAction} className="flex flex-col gap-3 rounded-md border border-border p-4">
@@ -77,19 +74,7 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
               variant="ghost"
               size="sm"
               disabled={pending}
-              onClick={() => {
-                // Devices in the group are not deleted — they just lose their
-                // group and can be reassigned afterward.
-                if (
-                  !confirm(
-                    `Remove "${group.name}"? ${group.deviceCount} device${group.deviceCount === 1 ? "" : "s"} will lose this group.`,
-                  )
-                )
-                  return;
-                startTransition(async () => {
-                  await deleteGroup(group.id);
-                });
-              }}
+              onClick={() => setConfirmOpen(true)}
             >
               <Trash2 className="h-4 w-4" />
               Remove
@@ -139,13 +124,41 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
       </div>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      {state.message ? <p className="text-sm text-success">{state.message}</p> : null}
 
       {!disabled ? (
         <div className="flex justify-end">
-          <Save />
+          <SaveButton state={state} size="sm" />
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Remove ${group.name}?`}
+        description={
+          group.deviceCount === 0
+            ? "Nothing is in this group, so nothing else changes."
+            : `${group.deviceCount} device${group.deviceCount === 1 ? "" : "s"} will lose this group.`
+        }
+        pending={pending}
+        error={removeError}
+        onConfirm={() => {
+          startTransition(async () => {
+            const result = await deleteGroup(group.id);
+            setRemoveError(result.error ?? null);
+            if (!result.error) setConfirmOpen(false);
+          });
+        }}
+      >
+        {/* The devices themselves are untouched — worth saying, because
+            "remove the group" reads like it might take them with it. */}
+        {group.deviceCount > 0 ? (
+          <p className="rounded-md border border-border bg-subtle px-3 py-2 text-xs text-muted-foreground">
+            The devices are not deleted. They keep running and can be put in another group
+            afterward; until then they have none, and fall back to the fleet-wide settings.
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </form>
   );
 }

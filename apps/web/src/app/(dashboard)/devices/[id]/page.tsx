@@ -6,7 +6,6 @@ import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { OnlineDot } from "@/components/status";
 import { DeviceControls } from "@/components/device-controls";
 import {
@@ -16,7 +15,9 @@ import {
 } from "@/components/device-history";
 import { DevicePackages, type DevicePackageRow } from "@/components/device-packages";
 import { DeviceLastSeen } from "@/components/device-last-seen";
-import { formatBytes, formatDuration, formatRelative } from "@/lib/format";
+import { DeviceLoadCard } from "@/components/device-load-card";
+import { loadRecentTrend } from "@/lib/metrics";
+import { formatDuration, formatRelative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
   const user = await requireUser();
   const { id } = await params;
 
-  const [device, groups, targets] = await Promise.all([
+  const [device, groups, targets, trend] = await Promise.all([
     prisma.device.findUnique({
       where: { id },
       include: {
@@ -41,30 +42,38 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           // The table pages client-side, so this is a cap on how far back the
           // history goes rather than on what fits on screen.
           take: 200,
-          include: { rollout: { select: { id: true, appVersion: { select: { version: true } } } } },
+          include: {
+            rollout: {
+              select: {
+                id: true,
+                appVersion: {
+                  select: {
+                    version: true,
+                    appTarget: { select: { displayName: true, packageName: true } },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     }),
     prisma.deviceGroup.findMany({ orderBy: { name: "asc" } }),
     // Which of the installed packages Magnemite can actually update.
     prisma.appTarget.findMany({ where: { enabled: true }, select: { packageName: true } }),
+    // The last hour behind each meter on the Load card.
+    loadRecentTrend(id),
   ]);
 
   if (!device) notFound();
 
   const online = device.status === "ONLINE";
 
-  const memTotal = device.memTotalBytes === null ? null : Number(device.memTotalBytes);
-  const memAvailable = device.memAvailableBytes === null ? null : Number(device.memAvailableBytes);
-  const memUsed = memTotal === null || memAvailable === null ? null : memTotal - memAvailable;
-
-  const diskTotal = device.totalBytes === null ? null : Number(device.totalBytes);
-  const diskFree = device.freeBytes === null ? null : Number(device.freeBytes);
-  const diskUsed = diskTotal === null || diskFree === null ? null : diskTotal - diskFree;
-
   const jobRows: DeviceJobRow[] = device.jobs.map((job) => ({
     id: job.id,
     rolloutId: job.rolloutId,
+    targetName: job.rollout.appVersion.appTarget.displayName,
+    targetPackage: job.rollout.appVersion.appTarget.packageName,
     state: job.state,
     fromVersion: job.fromVersion,
     toVersion: job.toVersion,
@@ -172,60 +181,21 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Load</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3 text-sm">
-            <Meter
-              label="CPU"
-              // Load average against core count is the honest reading a box
-              // can give for free: 1.0 per core means "fully busy", above that
-              // means work is queueing.
-              detail={
-                device.loadAvg1 === null
-                  ? "not reported"
-                  : `${device.loadAvg1.toFixed(2)}${
-                      device.cpuCount ? ` of ${device.cpuCount} cores` : ""
-                    }`
-              }
-              percent={
-                device.loadAvg1 === null || !device.cpuCount
-                  ? null
-                  : (device.loadAvg1 / device.cpuCount) * 100
-              }
-            />
-            <Meter
-              label="Memory"
-              detail={
-                memUsed === null || memTotal === null
-                  ? "not reported"
-                  : `${formatBytes(memUsed)} of ${formatBytes(memTotal)}`
-              }
-              percent={memUsed === null || !memTotal ? null : (memUsed / memTotal) * 100}
-            />
-            <Meter
-              label="Storage"
-              detail={
-                diskUsed === null || diskTotal === null
-                  ? formatBytes(device.freeBytes === null ? null : Number(device.freeBytes))
-                  : `${formatBytes(diskUsed)} of ${formatBytes(diskTotal)}`
-              }
-              percent={diskUsed === null || !diskTotal ? null : (diskUsed / diskTotal) * 100}
-            />
-            {device.loadAvg5 !== null || device.loadAvg15 !== null ? (
-              // The raw 5/15-minute load averages mean nothing to most people
-              // ("15 min 1.64" — of what?). Against the core count they turn
-              // into the same percentage the CPU bar above already shows, which
-              // is what makes "busy right now" versus "busy all afternoon"
-              // readable at a glance.
-              <p className="text-xs text-muted-foreground">
-                CPU averaged {loadText(device.loadAvg5, device.cpuCount)} over the last 5m and{" "}
-                {loadText(device.loadAvg15, device.cpuCount)} over 15m
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
+        <DeviceLoadCard
+          load={{
+            deviceId: device.id,
+            loadAvg1: device.loadAvg1,
+            loadAvg5: device.loadAvg5,
+            loadAvg15: device.loadAvg15,
+            cpuCount: device.cpuCount,
+            memTotalBytes: device.memTotalBytes === null ? null : Number(device.memTotalBytes),
+            memAvailableBytes:
+              device.memAvailableBytes === null ? null : Number(device.memAvailableBytes),
+            freeBytes: device.freeBytes === null ? null : Number(device.freeBytes),
+            totalBytes: device.totalBytes === null ? null : Number(device.totalBytes),
+          }}
+          trend={trend}
+        />
 
         <Card>
           <CardHeader>
@@ -271,48 +241,6 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
           <DeviceHistory jobs={jobRows} agentUpdates={agentUpdateRows} />
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-/** A load average as a share of the box's cores, which is how the bars read. */
-function loadText(load: number | null, cores: number | null): string {
-  if (load === null) return "—";
-  if (!cores) return load.toFixed(2);
-  return `${Math.round((load / cores) * 100)}%`;
-}
-
-/**
- * A labelled bar. `percent` is null when the box has not reported the reading —
- * an agent old enough to predate these metrics — and that reads as "not
- * reported" rather than as a bar sitting at zero.
- */
-function Meter({
-  label,
-  detail,
-  percent,
-}: {
-  label: string;
-  detail: string;
-  percent: number | null;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="text-right text-xs">
-          {detail}
-          {percent === null ? "" : ` (${Math.round(percent)}%)`}
-        </span>
-      </div>
-      {percent === null ? (
-        <Progress value={0} tone="muted" />
-      ) : (
-        <Progress
-          value={percent}
-          tone={percent >= 90 ? "danger" : percent >= 70 ? "primary" : "success"}
-        />
-      )}
     </div>
   );
 }

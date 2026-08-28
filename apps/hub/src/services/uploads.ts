@@ -140,7 +140,9 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
   }
   if (!version) {
     await fs.rm(incoming, { force: true });
-    throw new Error("could not read a version out of this file — type a label in");
+    throw new Error(
+      "could not read a version out of this file — its manifest declares neither a versionName nor a versionCode",
+    );
   }
 
   // --- shape it like every other artifact ---------------------------------

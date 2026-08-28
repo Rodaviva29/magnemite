@@ -17,13 +17,17 @@ import {
 } from "@/components/ui/table";
 import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { AgentUpdateStateBadge, JobStateBadge } from "@/components/status";
-import { formatDuration, formatRelative } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
+import { RelativeTime } from "@/components/relative-time";
 import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
 
 export type DeviceJobRow = {
   id: string;
   rolloutId: string;
+  /** Which app was installed. The fleet tracks several. */
+  targetName: string;
+  targetPackage: string;
   state: JobState;
   fromVersion: string | null;
   toVersion: string;
@@ -54,6 +58,9 @@ export type DeviceAgentUpdateRow = {
 type HistoryRow = {
   id: string;
   kind: "app" | "agent";
+  /** Null for an agent self-update, which belongs to no app target. */
+  targetName: string | null;
+  targetPackage: string | null;
   fromVersion: string | null;
   toVersion: string;
   /** Sorted and filtered as text, so both kinds of state share one column. */
@@ -72,6 +79,8 @@ function toHistoryRows(jobs: DeviceJobRow[], agentUpdates: DeviceAgentUpdateRow[
   const fromJobs: HistoryRow[] = jobs.map((job) => ({
     id: `job:${job.id}`,
     kind: "app",
+    targetName: job.targetName,
+    targetPackage: job.targetPackage,
     fromVersion: job.fromVersion,
     toVersion: job.toVersion,
     stateKey: job.state,
@@ -88,6 +97,9 @@ function toHistoryRows(jobs: DeviceJobRow[], agentUpdates: DeviceAgentUpdateRow[
   const fromAgent: HistoryRow[] = agentUpdates.map((update) => ({
     id: `agent:${update.id}`,
     kind: "agent",
+    // The agent updates itself; there is no app target behind it.
+    targetName: null,
+    targetPackage: null,
     fromVersion: update.fromVersion,
     toVersion: update.toVersion,
     stateKey: update.state,
@@ -106,7 +118,7 @@ function toHistoryRows(jobs: DeviceJobRow[], agentUpdates: DeviceAgentUpdateRow[
   return [...fromJobs, ...fromAgent];
 }
 
-type SortKey = "version" | "state" | "mode" | "when" | "duration";
+type SortKey = "version" | "target" | "state" | "mode" | "when" | "duration";
 
 /**
  * Every update this box has been given, sorted and paged like the fleet and
@@ -128,6 +140,9 @@ export function DeviceHistory({
   const { headProps, sort, sortRows } = useTableSort<SortKey, HistoryRow>(
     {
       version: (r) => r.toVersion,
+      // Self-updates sort together under one label rather than scattering
+      // through the apps on an empty key.
+      target: (r) => r.targetName ?? "agent",
       state: (r) => r.stateKey,
       mode: (r) => r.mode,
       when: (r) => r.when,
@@ -145,6 +160,8 @@ export function DeviceHistory({
       return (
         row.toVersion.toLowerCase().includes(q) ||
         (row.fromVersion?.toLowerCase().includes(q) ?? false) ||
+        (row.targetName?.toLowerCase().includes(q) ?? false) ||
+        (row.targetPackage?.toLowerCase().includes(q) ?? false) ||
         row.stateKey.toLowerCase().includes(q) ||
         (row.kind === "agent" && "agent self-update".includes(q))
       );
@@ -169,7 +186,7 @@ export function DeviceHistory({
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="Search version, state…"
+          placeholder="Search app, version, state…"
           className="max-w-xs"
         />
         <Select
@@ -193,6 +210,7 @@ export function DeviceHistory({
           <TableHeader>
             <TableRow>
               <TableSortHead {...headProps("version")}>Version</TableSortHead>
+              <TableSortHead {...headProps("target")}>Target</TableSortHead>
               <TableSortHead {...headProps("state")}>State</TableSortHead>
               <TableSortHead {...headProps("mode")}>Mode</TableSortHead>
               <TableSortHead {...headProps("when")}>When</TableSortHead>
@@ -203,7 +221,7 @@ export function DeviceHistory({
           <TableBody>
             {pagination.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                   No update matches this filter.
                 </TableCell>
               </TableRow>
@@ -225,6 +243,21 @@ export function DeviceHistory({
                     </div>
                   ) : null}
                 </TableCell>
+                <TableCell className="min-w-32 text-sm">
+                  {row.targetName ? (
+                    <>
+                      <div className="truncate font-medium">{row.targetName}</div>
+                      <div className="truncate font-mono text-xs text-muted-foreground">
+                        {row.targetPackage}
+                      </div>
+                    </>
+                  ) : (
+                    // A self-update replaces the agent binary, so naming an app
+                    // here would be wrong rather than merely missing.
+                    <span className="text-xs text-muted-foreground">Magnemite agent</span>
+                  )}
+                </TableCell>
+
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
                     {row.job ? <JobStateBadge state={row.job.state} /> : null}
@@ -235,7 +268,7 @@ export function DeviceHistory({
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{row.mode ?? "—"}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  {formatRelative(row.when)}
+                  <RelativeTime value={row.when} />
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {formatDuration(

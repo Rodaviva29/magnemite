@@ -27,6 +27,27 @@ async function main() {
   await syncAdminFromEnv();
   console.log(`admin user: ${process.env.ADMIN_EMAIL ?? "admin@example.com"}`);
 
+  // Where builds are discovered. Every source publishes the same index shape;
+  // more can be added from Settings, and the lowest priority decides whose URL
+  // is downloaded when two of them list the same build.
+  //
+  // Created before the target, because the target has to be paired with them:
+  // a target polls only the feeds it is given, so one seeded without any would
+  // never discover a thing.
+  const feeds = KNOWN_FEEDS;
+
+  const feedRows = [];
+  for (const feed of feeds) {
+    feedRows.push(
+      await prisma.sourceFeed.upsert({
+        where: { name: feed.name },
+        update: {},
+        create: feed,
+      }),
+    );
+  }
+  console.log(`source feeds: ${feeds.map((f) => f.name).join(", ")}`);
+
   const appTarget = await prisma.appTarget.upsert({
     where: { packageName: "com.nianticlabs.pokemongo" },
     update: {},
@@ -41,21 +62,15 @@ async function main() {
       maxAttempts: 3,
     },
   });
-  console.log(`app target: ${appTarget.packageName}`);
 
-  // Where builds are discovered. Every source publishes the same index shape;
-  // more can be added from Settings, and the lowest priority decides whose URL
-  // is downloaded when two of them list the same build.
-  const feeds = KNOWN_FEEDS;
-
-  for (const feed of feeds) {
-    await prisma.sourceFeed.upsert({
-      where: { name: feed.name },
-      update: {},
-      create: feed,
-    });
-  }
-  console.log(`source feeds: ${feeds.map((f) => f.name).join(", ")}`);
+  // Both feeds, which is what a single-app fleet wants. Re-running the seed
+  // must not unpair anything an operator has since unticked, so this only ever
+  // adds.
+  await prisma.appTargetSource.createMany({
+    data: feedRows.map((feed) => ({ appTargetId: appTarget.id, feedId: feed.id })),
+    skipDuplicates: true,
+  });
+  console.log(`app target: ${appTarget.packageName} (${feedRows.length} sources)`);
 
   const group = await prisma.deviceGroup.upsert({
     where: { name: "default" },

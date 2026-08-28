@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SearchInput } from "@/components/ui/search-input";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
-import { formatRelative } from "@/lib/format";
+
+import { RelativeTime } from "@/components/relative-time";
 
 export type DevicePackageRow = {
   id: string;
@@ -62,7 +63,12 @@ export function DevicePackages({
           <span className="text-xs text-muted-foreground">
             {visible.length} of {packages.length}
             {gone > 0 ? ` · ${gone} no longer installed` : ""}
-            {syncedAt ? ` · inventory ${formatRelative(syncedAt)}` : ""}
+            {syncedAt ? (
+              <>
+                {" · inventory "}
+                <RelativeTime value={syncedAt} />
+              </>
+            ) : null}
           </span>
         </CardHeader>
 

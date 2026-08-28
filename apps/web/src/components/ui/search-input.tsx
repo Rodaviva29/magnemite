@@ -1,5 +1,6 @@
 "use client";
 
+import type { Ref } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -9,18 +10,22 @@ export function SearchInput({
   onChange,
   placeholder = "Search…",
   className,
+  inputRef,
   "aria-label": ariaLabel = "Search",
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  /** For callers that focus the field from a keyboard shortcut. */
+  inputRef?: Ref<HTMLInputElement>;
   "aria-label"?: string;
 }) {
   return (
     <div className={cn("relative min-w-56 flex-1", className)}>
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={inputRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
