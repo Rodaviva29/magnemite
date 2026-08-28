@@ -42,12 +42,13 @@ export async function updateHubSettings(
   const jobStallTimeoutSeconds = int("jobStallTimeoutSeconds", 1);
   const sourcePollMinutes = int("sourcePollMinutes", 1);
   const updateCooldownMinutes = int("updateCooldownMinutes", 0);
-  // Floored at the 20-second heartbeat: a shorter interval cannot produce more
-  // points, it just stores every beat.
-  const metricsSampleSeconds = int("metricsSampleSeconds", 20);
+  // Floored against the heartbeat below, since that is now configurable: a
+  // shorter interval cannot produce more points, it just stores every beat.
+  const metricsSampleSeconds = int("metricsSampleSeconds", 1);
   // 0 is meaningful here — it turns health recording off and drops what is
   // already stored on the next prune.
   const metricsRetentionDays = int("metricsRetentionDays", 0);
+  const heartbeatSeconds = int("heartbeatSeconds", 5);
   const agentUpdateConcurrency = int("agentUpdateConcurrency", 1);
   // Three missed 20-second heartbeats is the floor that stops a box flapping
   // offline on one dropped beat.
@@ -61,11 +62,27 @@ export async function updateHubSettings(
     metricsSampleSeconds === null ||
     metricsRetentionDays === null ||
     agentUpdateConcurrency === null ||
-    deviceOfflineTimeoutSeconds === null
+    deviceOfflineTimeoutSeconds === null ||
+    heartbeatSeconds === null
   ) {
     return {
       error:
-        "Every field needs a whole number — 1 or more, except the cooldown and the history retention. The sample interval starts at 20 and the offline timeout at 30.",
+        "Every field needs a whole number — 1 or more, except the cooldown and the history retention. The heartbeat starts at 5 and the offline timeout at 30.",
+    };
+  }
+
+  // Two of these are really measured in heartbeats, and the numbers only mean
+  // anything against it. Letting them through unchecked is how a fleet ends up
+  // flapping between online and offline on one missed beat, which looks like a
+  // network fault and is really a form that allowed nonsense.
+  if (deviceOfflineTimeoutSeconds < heartbeatSeconds * 3) {
+    return {
+      error: `The offline timeout has to allow at least three missed heartbeats — ${heartbeatSeconds * 3}s or more at a ${heartbeatSeconds}s heartbeat. Otherwise one dropped beat marks a box offline.`,
+    };
+  }
+  if (metricsSampleSeconds < heartbeatSeconds) {
+    return {
+      error: `The health sample interval cannot be shorter than the ${heartbeatSeconds}s heartbeat — there is no extra data to store between beats.`,
     };
   }
 
@@ -76,6 +93,7 @@ export async function updateHubSettings(
     updateCooldownMinutes,
     metricsSampleSeconds,
     metricsRetentionDays,
+    heartbeatSeconds,
     agentUpdateConcurrency,
     deviceOfflineTimeoutSeconds,
   };
@@ -106,7 +124,7 @@ export async function updateHubSettings(
     ok: true,
     message: told
       ? "Saved."
-      : "Saved, but the hub could not be told — it is still running on the old values. Restart it, or save again once it is back.",
+      : "Saved, but the hub could not be told, it is still running on the old values. Restart it, or save again once it is back.",
   };
 }
 

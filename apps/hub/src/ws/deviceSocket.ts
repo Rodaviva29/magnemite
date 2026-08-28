@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { agentMessageSchema, type ServerMessage } from "@magnemite/protocol";
 import { hashToken, prisma } from "@magnemite/db";
+import { getHubSettings } from "../services/hubSettings.js";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
 import { getConnection, register, unregister } from "../registry.js";
@@ -147,7 +148,10 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
     deviceId,
     name: device.name,
     approved: device.approved,
-    heartbeatSeconds: 20,
+    // Set from Settings → Hub. A box adopts it here, on connect, so a change
+    // reaches the fleet as boxes reconnect rather than in seconds like the
+    // settings that never leave the server.
+    heartbeatSeconds: (await getHubSettings()).heartbeatSeconds,
     trackedPackages: await trackedPackages(),
   });
 

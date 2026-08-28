@@ -134,6 +134,16 @@ export type HubSettingsValues = {
    */
   metricsRetentionDays: number;
   /**
+   * Seconds between heartbeats, which the hub tells every box in its welcome.
+   *
+   * The one setting here that lives on the far side: a box only learns it on
+   * its next connection, and an agent too old to read it keeps beating at 20.
+   * Two other values are measured in beats, so raising this without raising
+   * them is how a fleet starts flapping between online and offline — the
+   * dashboard rejects that combination rather than letting it through.
+   */
+  heartbeatSeconds: number;
+  /**
    * How many boxes may be swapping their agent binary at once. The sibling of
    * `maxConcurrentJobs`, for the other thing the whole fleet does at the same
    * time: reconnecting after a hub deploy.
@@ -154,6 +164,7 @@ const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
   updateCooldownMinutes: 0,
   metricsSampleSeconds: 60,
   metricsRetentionDays: 7,
+  heartbeatSeconds: 20,
   agentUpdateConcurrency: 5,
   deviceOfflineTimeoutSeconds: 70,
 };
@@ -161,30 +172,20 @@ const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
 const HUB_SETTINGS_KEYS = Object.keys(HUB_SETTINGS_DEFAULTS) as (keyof HubSettingsValues)[];
 
 /**
- * Held until something says it is stale, rather than re-read on a timer.
+ * Always a read. The caller caches if it has reason to.
  *
- * The scheduler reads these on every tick *and* on every nudge — a job
- * finishing, a box reconnecting — so during a rollout this is the hottest read
- * in the system, for a handful of numbers that change about never. A timer
- * here is pure waste: it was set to five seconds, the same as the scheduler's
- * tick, so nearly every read missed and went to the database anyway.
+ * This used to hold a copy, which was wrong in a way that took a while to
+ * show: the dashboard and the hub are separate processes, and inside Next the
+ * page and the server action do not reliably share module state either. So a
+ * save wrote the new value, cleared the copy it could reach, and the page went
+ * on rendering the copy it could not — the setting looked like it reverted to
+ * the default while the database held the new number.
  *
- * Two things clear it instead, which between them cover everything that can
- * actually change the values:
- *
- *   the dashboard   writes them, then tells the hub through /internal/settings
- *   a restart       starts with nothing cached and reads on first use
- *
- * What that leaves is a value changed straight in the database by hand, with
- * no restart after. That one needs a restart, or one Save from the dashboard
- * to ring the bell — a manual change with a manual fix, which is not worth a
- * query every few seconds forever.
+ * The hub is the only process with a reason to cache: its scheduler reads
+ * these on every tick. It does that in `services/hubSettings.ts`, where it can
+ * also be told to drop the copy, which is the piece that makes caching safe.
  */
-let hubSettingsCache: HubSettingsValues | null = null;
-
 export async function getHubSettings(): Promise<HubSettingsValues> {
-  if (hubSettingsCache) return { ...hubSettingsCache };
-
   const rows = await prisma.setting.findMany({ where: { key: { in: HUB_SETTINGS_KEYS } } });
   const values = { ...HUB_SETTINGS_DEFAULTS };
   for (const row of rows) {
@@ -192,19 +193,7 @@ export async function getHubSettings(): Promise<HubSettingsValues> {
       values[row.key as keyof HubSettingsValues] = row.value;
     }
   }
-
-  hubSettingsCache = values;
-  return { ...values };
-}
-
-/**
- * Drop this process's copy, so the next read goes to the database.
- *
- * Called on the hub when the dashboard says it has written new values. The
- * dashboard's own copy is dropped by `updateHubSettings` itself.
- */
-export function invalidateHubSettingsCache(): void {
-  hubSettingsCache = null;
+  return values;
 }
 
 export async function updateHubSettings(patch: Partial<HubSettingsValues>): Promise<void> {
@@ -218,9 +207,6 @@ export async function updateHubSettings(patch: Partial<HubSettingsValues>): Prom
       }),
     ),
   );
-  // So the process that just wrote them re-renders with the new values rather
-  // than its own stale copy.
-  hubSettingsCache = null;
 }
 
 /**
@@ -239,7 +225,6 @@ export async function seedMissingHubSettings(patch: Partial<HubSettingsValues>):
     data: entries.map(([key, value]) => ({ key, value })),
     skipDuplicates: true,
   });
-  if (count > 0) hubSettingsCache = null;
   return count;
 }
 

@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SourceFeed } from "@magnemite/db";
-import { getHubSettings, Prisma, prisma } from "@magnemite/db";
+import { Prisma, prisma } from "@magnemite/db";
+import { getHubSettings } from "./hubSettings.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount } from "../registry.js";

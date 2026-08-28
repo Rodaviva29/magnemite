@@ -1,6 +1,7 @@
 import type { deviceMetricsSchema } from "@magnemite/protocol";
 import type { z } from "zod";
-import { getHubSettings, prisma } from "@magnemite/db";
+import { prisma } from "@magnemite/db";
+import { getHubSettings } from "./hubSettings.js";
 import { log } from "../log.js";
 
 type DeviceMetrics = z.infer<typeof deviceMetricsSchema>;

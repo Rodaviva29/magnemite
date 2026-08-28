@@ -2,7 +2,8 @@ import { createReadStream } from "node:fs";
 import fsp from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { getHubSettings, invalidateHubSettingsCache, prisma, serialize } from "@magnemite/db";
+import { prisma, serialize } from "@magnemite/db";
+import { getHubSettings, invalidateHubSettingsCache } from "../services/hubSettings.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
@@ -123,7 +124,6 @@ export async function internalRoutes(app: FastifyInstance) {
    */
   app.post("/internal/settings", async () => {
     invalidateHubSettingsCache();
-    log.info("hub settings changed — cache dropped");
     return { ok: true };
   });
 

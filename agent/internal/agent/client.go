@@ -29,6 +29,12 @@ const (
 	minBackoff       = 2 * time.Second
 	maxBackoff       = 60 * time.Second
 	defaultHeartbeat = 20 * time.Second
+	// Bounds on what the hub may ask for. Anything outside is treated as a
+	// mistake and ignored: the fleet keeps beating at whatever it was on,
+	// which is always safe, rather than adopting a value that would either
+	// flood the hub or look offline.
+	minHeartbeat = 5 * time.Second
+	maxHeartbeat = 10 * time.Minute
 	// One full package inventory every 15 heartbeats — five minutes at the
 	// default rate.
 	inventoryEveryBeats = 15
@@ -44,6 +50,14 @@ type Agent struct {
 	mu      sync.Mutex
 	conn    *websocket.Conn
 	tracked []string
+	// How often to beat. The hub sets it in every welcome, so it survives a
+	// reconnect without the loop having to wait for one.
+	heartbeat time.Duration
+	// Wakes the heartbeat loop when the hub changes the interval mid-session.
+	// Buffered and written to without blocking: a change that arrives while no
+	// loop is running is picked up when the next one starts and reads
+	// a.heartbeat anyway.
+	rebeat chan time.Duration
 
 	jobMu   sync.Mutex
 	jobID   string
@@ -62,6 +76,8 @@ func New(cfg *config.Config, system sys.System, version, configPath string) *Age
 		Version:    version,
 		ConfigPath: configPath,
 		tracked:    []string{"com.nianticlabs.pokemongo"},
+		heartbeat:  defaultHeartbeat,
+		rebeat:     make(chan time.Duration, 1),
 	}
 }
 
@@ -220,8 +236,44 @@ func (a *Agent) sendHello() error {
 	})
 }
 
+// setHeartbeat adopts an interval the hub asked for in its welcome.
+//
+// Out of range is ignored rather than clamped: a nonsense interval is far more
+// likely a bug at the other end than an intention, and carrying on at the
+// current rate is always the safe reading of it.
+func (a *Agent) setHeartbeat(seconds int) {
+	d := time.Duration(seconds) * time.Second
+	if d < minHeartbeat || d > maxHeartbeat {
+		if seconds != 0 {
+			log.Printf("ignoring heartbeat interval of %ds from the hub", seconds)
+		}
+		return
+	}
+
+	a.mu.Lock()
+	changed := a.heartbeat != d
+	a.heartbeat = d
+	a.mu.Unlock()
+	if !changed {
+		return
+	}
+
+	log.Printf("heartbeat interval is now %s", d)
+	select {
+	case a.rebeat <- d:
+	default:
+	}
+}
+
 func (a *Agent) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(defaultHeartbeat)
+	a.mu.Lock()
+	interval := a.heartbeat
+	a.mu.Unlock()
+	if interval <= 0 {
+		interval = defaultHeartbeat
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	beats := 0
@@ -230,6 +282,10 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case d := <-a.rebeat:
+			// Reset rather than a fresh ticker, so the beat count — and with
+			// it the inventory cadence — carries across the change.
+			ticker.Reset(d)
 		case <-ticker.C:
 			beats++
 			// Apps are installed and removed by hand on these boxes, so the
@@ -283,6 +339,7 @@ func (a *Agent) handle(ctx context.Context, data []byte) {
 			a.Cfg.DeviceID = msg.DeviceID
 			_ = a.Cfg.Save(a.ConfigPath)
 		}
+		a.setHeartbeat(msg.HeartbeatSeconds)
 		log.Printf("registered as %q (approved=%v)", msg.Name, msg.Approved)
 		if !msg.Approved {
 			log.Printf("waiting for an operator to approve this device in the dashboard")

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
-import { getHubSettings, prisma, seedMissingHubSettings, syncAdminFromEnv } from "@magnemite/db";
+import { prisma, seedMissingHubSettings, syncAdminFromEnv } from "@magnemite/db";
+import { getHubSettings } from "./services/hubSettings.js";
 import { env } from "./env.js";
 import { log } from "./log.js";
 import { authzRoutes } from "./routes/authz.js";

@@ -16,6 +16,7 @@ export type HubSettingsRow = {
   updateCooldownMinutes: number;
   metricsSampleSeconds: number;
   metricsRetentionDays: number;
+  heartbeatSeconds: number;
   agentUpdateConcurrency: number;
   deviceOfflineTimeoutSeconds: number;
 };
@@ -111,13 +112,32 @@ export function HubSettingsForm({
                 id="metricsSampleSeconds"
                 name="metricsSampleSeconds"
                 type="number"
-                min={20}
+                min={5}
                 defaultValue={settings.metricsSampleSeconds}
                 disabled={disabled}
               />
               <p className="text-xs text-muted-foreground">
                 How often a box's CPU, memory, storage, temperature and per-app usage are kept for
-                the history charts. Boxes beat every 20s; anything shorter just stores every beat.
+                the history charts. Cannot be shorter than the heartbeat — there is nothing extra to
+                store between beats.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="heartbeatSeconds">Heartbeat interval (seconds)</Label>
+              <Input
+                id="heartbeatSeconds"
+                name="heartbeatSeconds"
+                type="number"
+                min={5}
+                defaultValue={settings.heartbeatSeconds}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                How often each box reports in. Unlike everything else here it lives on the boxes: a
+                box adopts it on its next connection, not straight away, and an agent too old to
+                read it keeps beating at 20s. The offline timeout and the sample interval are
+                measured against it.
               </p>
             </div>
 
@@ -172,6 +192,12 @@ export function HubSettingsForm({
           </div>
 
           {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+          {/* The button reports a plain save on its own. This is for the one
+              outcome it cannot show: saved, but the hub was not reachable to
+              be told, so it is still running on the old numbers. */}
+          {state.ok && state.message && state.message !== "Saved." ? (
+            <p className="text-sm text-warning">{state.message}</p>
+          ) : null}
 
           {!disabled ? (
             <div className="flex justify-end">

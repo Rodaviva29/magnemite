@@ -1,4 +1,5 @@
-import { getHubSettings, prisma } from "@magnemite/db";
+import { prisma } from "@magnemite/db";
+import { getHubSettings } from "../hubSettings.js";
 import { bus } from "../../bus.js";
 import { log } from "../../log.js";
 import { runAutoUpdate } from "../autoUpdate.js";
