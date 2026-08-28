@@ -52,7 +52,6 @@ CREATE TABLE "Device" (
     "rotomConnected" BOOLEAN NOT NULL DEFAULT false,
     "rotomWorkerCount" INTEGER,
     "rotomLastSeenAt" TIMESTAMP(3),
-    "rotomDisabledBy" TEXT,
     "notes" TEXT,
     "groupId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

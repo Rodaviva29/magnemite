@@ -1,18 +1,43 @@
 services:
+  # The stack brings its own database. Prisma reaches MariaDB through the
+  # "mysql" connector -- there is no separate mariadb provider -- so
+  # DB_PROVIDER is a fixed `mysql` on the app services below.
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_USER: ${SERVICE_USER_MARIADB:-magnemite}
+      MARIADB_PASSWORD: ${SERVICE_PASSWORD_MARIADB}
+      MARIADB_DATABASE: ${DB_NAME:-magnemite}
+      # Nothing here ever connects as root; a random one it is.
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - mariadbdata:/var/lib/mysql
+    healthcheck:
+      # Ships with the image, and --innodb_initialized is the part that makes
+      # `service_healthy` mean "ready for a migration", not just "port open".
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   hub:
     build:
       context: ..
       dockerfile: apps/hub/Dockerfile
+      # The Prisma Client baked into the image at build time has to match the
+      # DATABASE_URL below, so the provider is a build arg, not just a runtime
+      # one. It also picks the migration history the entrypoint applies.
       args:
-        DB_PROVIDER: ${DB_PROVIDER:-mysql}
+        DB_PROVIDER: mysql
     restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
     environment:
       NODE_ENV: production
-      DB_PROVIDER: ${DB_PROVIDER:-mysql}
-      # The external database, set in the Environment tab. It has to be
-      # reachable from this container, so a Coolify database resource means
-      # its internal hostname, not any public one it also publishes.
-      DATABASE_URL: ${DATABASE_URL}
+      DB_PROVIDER: mysql
+      DATABASE_URL: mysql://${SERVICE_USER_MARIADB:-magnemite}:${SERVICE_PASSWORD_MARIADB}@mariadb:3306/${DB_NAME:-magnemite}
       HUB_PORT: 3001
       HUB_INTERNAL_SECRET: ${SERVICE_PASSWORD_HUBSECRET}
       # Artifact URLs handed to the boxes are built from this, so it has to be
@@ -69,16 +94,20 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      # Same as the hub: the Prisma Client is generated at image build time,
+      # so the provider has to be set there too.
       args:
-        DB_PROVIDER: ${DB_PROVIDER:-mysql}
+        DB_PROVIDER: mysql
     restart: unless-stopped
     depends_on:
+      mariadb:
+        condition: service_healthy
       hub:
         condition: service_started
     environment:
       NODE_ENV: production
-      DB_PROVIDER: ${DB_PROVIDER:-mysql}
-      DATABASE_URL: ${DATABASE_URL}
+      DB_PROVIDER: mysql
+      DATABASE_URL: mysql://${SERVICE_USER_MARIADB:-magnemite}:${SERVICE_PASSWORD_MARIADB}@mariadb:3306/${DB_NAME:-magnemite}
       AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
       MAGNEMITE_PUBLIC_URL: ${MAGNEMITE_PUBLIC_URL}
       MAGNEMITE_DASHBOARD_URL: ${MAGNEMITE_DASHBOARD_URL}
@@ -109,6 +138,7 @@ services:
       start_period: 40s
 
 volumes:
+  mariadbdata:
   artifacts:
   caddy_data:
   caddy_config:

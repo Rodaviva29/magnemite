@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { prisma, seedMissingHubSettings, syncAdminFromEnv } from "@magnemite/db";
+import { prisma, syncAdminFromEnv } from "@magnemite/db";
 import { getHubSettings } from "./services/hubSettings.js";
 import { env } from "./env.js";
 import { log } from "./log.js";
@@ -18,56 +18,19 @@ import {
 import { ensureArtifactDir } from "./services/artifacts.js";
 import { sweepOffline } from "./services/devices.js";
 import { markMonitorStart, seedDefaultMonitorRules } from "./services/monitor.js";
-import { releaseInstallHolds, rotomEnabled, syncDevices } from "./services/rotom.js";
+import { rotomEnabled, syncDevices } from "./services/rotom.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { startPolling, stopPolling } from "./services/sources/poller.js";
 import { attachDeviceSocket } from "./ws/deviceSocket.js";
 
 const OFFLINE_SWEEP_MS = 30_000;
 
-/**
- * Two settings used to be environment variables.
- *
- * A hub that still has one set adopts its value once, so upgrading does not
- * quietly reset a tuned fleet to the defaults. Only when there is no row yet:
- * after that the dashboard owns the value and the variable is ignored, which
- * is worth knowing before wondering why editing it changes nothing.
- */
-async function adoptLegacyEnvSettings() {
-  const legacy: Record<string, string | undefined> = {
-    agentUpdateConcurrency: process.env.AGENT_UPDATE_CONCURRENCY,
-    deviceOfflineTimeoutSeconds: process.env.DEVICE_OFFLINE_TIMEOUT,
-  };
-
-  const patch: Record<string, number> = {};
-  for (const [key, raw] of Object.entries(legacy)) {
-    const parsed = Number(raw);
-    if (raw !== undefined && Number.isInteger(parsed) && parsed > 0) patch[key] = parsed;
-  }
-  if (Object.keys(patch).length === 0) return;
-
-  const adopted = await seedMissingHubSettings(patch);
-  if (adopted > 0) {
-    log.warn(
-      { adopted: Object.keys(patch) },
-      "adopted settings from environment variables that no longer apply — they are editable in Settings → Hub now, and the variables can be removed",
-    );
-  }
-}
-
 async function main() {
   // Keeps the admin login in sync with ADMIN_EMAIL/ADMIN_PASSWORD on every
   // boot — restarting the hub is the whole story for changing it or
   // recovering a lost password, no seed step required.
   await syncAdminFromEnv();
-  await adoptLegacyEnvSettings();
   await ensureArtifactDir();
-  // Rotom is no longer part of an install, so anything the old lifecycle had
-  // parked out of the scanning pool has nothing left to re-enable it. Once,
-  // on boot, and a no-op on every fleet that never ran that version.
-  await releaseInstallHolds().catch((err) =>
-    log.error({ err }, "could not release boxes disabled by the old install lifecycle"),
-  );
   // Writes the default monitor rules on a fleet that has none, all disabled —
   // upgrading into a running watchdog would start rebooting boxes before
   // anyone had read the settings.

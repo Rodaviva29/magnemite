@@ -34,8 +34,8 @@ Rotom is the only thing that does.
   It used to be: the box was disabled before a rollout, re-enabled afterwards, and "did the update
   work" was answered by it reappearing with live workers. That is gone. It made every rollout depend
   on a second service being reachable and agreeing with us, and it left boxes parked out of the
-  scanning pool when a hub restarted mid-install. Installs verify themselves; Rotom watches. A hub
-  upgrading past that version re-enables anything the old code had disabled, once, on boot.
+  scanning pool when a hub restarted mid-install. Installs verify themselves; Rotom watches. The
+  only thing that disables a box in Rotom now is a person.
 </Callout>
 
 ## Matching devices
@@ -51,7 +51,7 @@ its API implies — `enabled && is_connected && can_be_used` — plus how long a
 it last saw the box, against **Rotom stale after** in
 [Settings → Monitoring](/docs/fleet/monitoring).
 
-One state is deliberately *not* a fault: a box somebody **disabled in Rotom on
+One state is deliberately _not_ a fault: a box somebody **disabled in Rotom on
 purpose**. Alerting on that would mean alerting on a decision that was already
 made. It is also now the only way a box ends up disabled, since Magnemite no
 longer does it around installs.

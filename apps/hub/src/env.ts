@@ -33,9 +33,7 @@ const schema = z.object({
   /** Where those binaries live, next to the VERSION they were built from. */
   AGENT_BIN_DIR: z.string().default("/app/agent-bin"),
   // How many boxes may swap their binary at once, and how long a box may go
-  // quiet before it counts as offline, both live in Settings → Hub now. A hub
-  // still carrying AGENT_UPDATE_CONCURRENCY or DEVICE_OFFLINE_TIMEOUT adopts
-  // the value once on first boot and then ignores the variable.
+  // quiet before it counts as offline, both live in Settings → Hub, not here.
 
   ROTOM_ENABLED: z
     .string()

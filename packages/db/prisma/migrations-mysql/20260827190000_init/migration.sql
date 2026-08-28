@@ -30,7 +30,6 @@ CREATE TABLE `Device` (
     `rotomConnected` BOOLEAN NOT NULL DEFAULT false,
     `rotomWorkerCount` INTEGER NULL,
     `rotomLastSeenAt` DATETIME(3) NULL,
-    `rotomDisabledBy` VARCHAR(191) NULL,
     `notes` VARCHAR(191) NULL,
     `groupId` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

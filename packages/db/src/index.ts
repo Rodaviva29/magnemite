@@ -249,25 +249,6 @@ export async function updateHubSettings(patch: Partial<HubSettingsValues>): Prom
   await writeGroup(patch, "");
 }
 
-/**
- * Write settings that have no row yet, leaving any that do alone.
- *
- * For values that used to be environment variables: a hub that still has one
- * set adopts it once, so upgrading does not quietly reset a tuned fleet to the
- * defaults. Once the row exists the dashboard owns it and the variable is
- * ignored, which is why this never overwrites.
- */
-export async function seedMissingHubSettings(patch: Partial<HubSettingsValues>): Promise<number> {
-  const entries = Object.entries(patch) as [keyof HubSettingsValues, number][];
-  if (entries.length === 0) return 0;
-
-  const { count } = await prisma.setting.createMany({
-    data: entries.map(([key, value]) => ({ key, value })),
-    skipDuplicates: true,
-  });
-  return count;
-}
-
 // ---------------------------------------------------------------------------
 // Monitoring settings
 // ---------------------------------------------------------------------------

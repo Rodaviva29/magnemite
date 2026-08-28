@@ -144,12 +144,6 @@ model Device {
   rotomConnected   Boolean   @default(false)
   rotomWorkerCount Int?
   rotomLastSeenAt  DateTime?
-  /// Legacy, and never written any more. Magnemite used to disable a box in
-  /// Rotom for the duration of an install and record which job held it; that
-  /// coupling is gone and Rotom is a monitoring signal only. The column
-  /// survives one release so the hub can re-enable, once on boot, anything the
-  /// old lifecycle had parked — after which it can be dropped.
-  rotomDisabledBy  String?
   /// Whether Rotom itself has the box enabled. A box someone disabled there on
   /// purpose is not a box Rotom lost, and monitoring must not confuse the two.
   rotomEnabled     Boolean   @default(true)

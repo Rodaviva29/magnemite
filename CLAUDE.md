@@ -89,10 +89,10 @@ Two homes, and the split matters:
 - **Settings → Hub** — what is tuned while running: concurrency, intervals,
   retention, heartbeat. Same everywhere, wants changing without a deploy.
 
-Several values moved from the first to the second and the old variables are now
-**ignored in silence**, which is the trap of that migration. The hub adopts a
-leftover `AGENT_UPDATE_CONCURRENCY` or `DEVICE_OFFLINE_TIMEOUT` once at boot and
-then ignores it.
+Several values moved from the first to the second, and the old variables are
+now **ignored in silence** — a leftover `AGENT_UPDATE_CONCURRENCY` or
+`DEVICE_OFFLINE_TIMEOUT` in `.env` does nothing at all. That is the trap of
+that migration.
 
 The hub caches these in `apps/hub/src/services/hubSettings.ts` and is told to
 drop the copy by `POST /internal/settings` when the dashboard saves. Nothing
