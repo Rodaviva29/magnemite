@@ -50,7 +50,7 @@ agent-test: ## Vet and test the agent
 .PHONY: module
 module: agent ## Package the Magisk module zip into dist/
 	@rm -rf dist/module && mkdir -p dist/module/bin
-	@cp magisk-module/* dist/module/
+	@cp agent/magisk/* dist/module/
 	@cp agent/bin/magnemite-agent-linux-arm64 dist/module/bin/
 	@cp agent/bin/magnemite-agent-linux-arm dist/module/bin/
 	@sed -i.bak -e 's/^version=.*/version=v$(VERSION)/' -e 's/^versionCode=.*/versionCode=$(VERSIONCODE)/' dist/module/module.prop && rm -f dist/module/module.prop.bak
@@ -65,9 +65,18 @@ module: agent ## Package the Magisk module zip into dist/
 	@rm -rf dist/module
 	@echo "Module: dist/magnemite-agent-$(VERSION).zip"
 
+# Narrow every compose target to one service: `make build up SERVICE=web`
+# rebuilds and restarts the dashboard alone, leaving the hub -- and the device
+# sockets it holds -- untouched.
+SERVICE ?=
+
+.PHONY: build
+build: ## Rebuild the images, or one service with SERVICE=web
+	$(COMPOSE) build $(SERVICE)
+
 .PHONY: up
-up: ## Start the whole stack
-	$(COMPOSE) up -d --build
+up: ## Start the stack, or one service with SERVICE=web. Builds only what is missing
+	$(COMPOSE) up -d $(SERVICE)
 
 .PHONY: down
 down: ## Stop the stack

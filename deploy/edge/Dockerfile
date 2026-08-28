@@ -16,7 +16,7 @@ FROM caddy:2-alpine
 ARG CADDYFILE=Caddyfile
 COPY ${CADDYFILE} /etc/caddy/Caddyfile
 
-# Metadata only: both Caddyfiles hardcode :8080, and Caddy reads neither of
+# Metadata only: both Caddyfiles hardcode :8090, and Caddy reads neither of
 # these. They are here for whoever inspects the image -- Coolify among them,
 # which guesses a service's port off exactly this when it generates a domain.
 #
@@ -27,9 +27,9 @@ COPY ${CADDYFILE} /etc/caddy/Caddyfile
 # PORT is deliberately not wired into the Caddyfile. Hanging the listener off
 # an environment variable means anything that sets PORT in this container --
 # Coolify does, for some resource types -- moves Caddy while the healthcheck
-# and the proxy still say 8080, which is a 502 for the whole fleet.
-ENV PORT=8080
-EXPOSE 8080
+# and the proxy still say 8090, which is a 502 for the whole fleet.
+ENV PORT=8090
+EXPOSE 8090
 
 # Fail the build rather than the deploy: a Caddyfile that does not parse should
 # never reach a running container.

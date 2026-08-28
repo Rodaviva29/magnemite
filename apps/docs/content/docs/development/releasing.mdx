@@ -50,7 +50,7 @@ purpose.
 | `agent/`                           | **`agent=`**    | Redeploy `hub`; the fleet updates itself                            |
 | `packages/protocol`                | **`agent=`**    | Both sides implement it — redeploy `hub` **and** bump the agent     |
 | `packages/db/prisma/schema.prisma` | `hub=`          | Commit the migration; `hub` applies it on start                     |
-| `magisk-module/`                   | **`agent=`**    | `make module` and reflash — this part is not delivered over the air |
+| `agent/magisk/`                    | **`agent=`**    | `make module` and reflash — this part is not delivered over the air |
 | `apps/docs`                        | `docs=`         | Redeploy `docs`                                                     |
 
 Adding a **version source** is not a release at all: it is a URL in Settings.

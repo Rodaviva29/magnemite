@@ -60,7 +60,7 @@ const flow = [
 
 const paths = [
   {
-    href: "/docs/quick-start",
+    href: "/docs/deployment/docker-compose",
     step: "01",
     label: "Get it running",
     body: "Clean VPS to a logged-in dashboard.",
@@ -116,10 +116,10 @@ export default function HomePage() {
                 Read the docs <ArrowRight className="size-4" />
               </Link>
               <Link
-                href="/docs/quick-start"
+                href="/docs/deployment/docker-compose"
                 className="inline-flex items-center gap-2 rounded-lg border border-fd-border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent"
               >
-                Quick start
+                Get it running
               </Link>
             </div>
           </div>

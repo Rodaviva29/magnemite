@@ -2,7 +2,7 @@
 #
 # Coolify's proxy (Traefik) terminates TLS and forwards plain HTTP here, so
 # auto-HTTPS is off and the site address carries no domain: this listens on
-# :8080 and serves whatever Coolify routes to it.
+# :8090 and serves whatever Coolify routes to it.
 #
 # It exists for one reason. Traefik is a reverse proxy, not a file server, and
 # it cannot mount our artifacts volume — so without this the ~170 MB bundles
@@ -17,7 +17,7 @@
 	admin off
 }
 
-:8080 {
+:8090 {
 	log {
 		output stdout
 		format console

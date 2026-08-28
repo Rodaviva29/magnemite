@@ -1,0 +1,6 @@
+id=magnemite-agent
+name=Magnemite Agent
+version=v1.0.0
+versionCode=10000
+author=magnemite
+description=Keeps a socket open to the Magnemite Hub.

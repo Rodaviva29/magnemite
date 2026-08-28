@@ -1,12 +1,14 @@
 ---
 title: Docker, behind a proxy
-description: One virtual host, TLS from your own reverse proxy, three containers and a database you already run.
+description: One virtual host, TLS from your own reverse proxy, three containers and a db you already run.
 icon: Container
 ---
 
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
 `deploy/docker-compose.yml` is the self-hosted deployment: our own Caddy
 publishes one plain-HTTP port, serves the dashboard and the artifacts, and
-proxies what belongs to the hub. Nothing binds 80 or 443 — the reverse proxy
+proxies what belongs to the hub. Nothing binds 80 or 443, the reverse proxy
 already fronting your server terminates TLS and forwards to `EDGE_PORT`.
 
 ## What runs
@@ -15,24 +17,23 @@ already fronting your server terminates TLS and forwards to `EDGE_PORT`.
 | ------- | --------------------- | ------------------------------- |
 | `hub`   | `apps/hub/Dockerfile` | 3001, internal                  |
 | `web`   | `apps/web/Dockerfile` | 3000, internal                  |
-| `caddy` | `deploy/edge`         | `EDGE_PORT` (8080) → 8080, HTTP |
+| `caddy` | `deploy/edge`         | `EDGE_PORT` (8090) → 8090, HTTP |
 
 No database service: it connects to one you already run, MariaDB/MySQL or
 Postgres, over `DATABASE_URL`.
 
 ## Configuration
 
-Everything comes from `.env` at the repo root — copy `.env.example`:
+Everything comes from `.env` at the repo root. Copy `.env.example`:
 
 ```sh title=".env"
-EDGE_PORT=8080
+EDGE_PORT=8090
 MAGNEMITE_PUBLIC_URL=https://magnemite.example.com
 DB_PROVIDER=mysql
-DATABASE_URL=mysql://magnemite:…@db.example.com:3306/magnemite
+DATABASE_URL=mysql://<user>:<password>@<host>:3306/<database>
 ```
 
-Both audiences share one virtual host here, so compose derives
-`MAGNEMITE_DASHBOARD_URL` from `MAGNEMITE_PUBLIC_URL`. Full list:
+Full list:
 [environment reference](/docs/deployment/environment).
 
 ```sh
@@ -40,23 +41,20 @@ openssl rand -base64 32   # AUTH_SECRET
 openssl rand -base64 32   # HUB_INTERNAL_SECRET
 ```
 
-<Callout type="warn">
-  `DATABASE_URL` is resolved inside the container, so a host-published port like `127.0.0.1:5433` is
-  the one address it cannot use. And `DB_PROVIDER` has to match the URL: changing it is a
-  **rebuild**, because the Prisma Client is generated into the images.
-</Callout>
-
 ## Running it
 
-| Target         | Runs                                                  |
-| -------------- | ----------------------------------------------------- |
-| `make up`      | `up -d --build` — admin login works immediately       |
-| `make down`    | `down`                                                |
-| `make logs`    | `logs -f hub web`                                     |
-| `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub` |
-| `make seed`    | optional starter data and a first enrollment token    |
+| Target         | Runs                                                          |
+| -------------- | ------------------------------------------------------------- |
+| `make up`      | `up -d` (builds only images that do not exist yet)            |
+| `make build`   | `build` (rebuild after a `git pull` or a `Dockerfile` change) |
+| `make down`    | `down` (stops and removes containers)                         |
+| `make logs`    | `logs -f hub web`                                             |
+| `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub`         |
+| `make seed`    | optional starter data and a first enrollment token            |
 
-Without `make`, both flags are required — the compose file lives under
+`SERVICE=web` narrows `build` and `up` to one service.
+
+Without `make`, both flags are required, the compose file lives under
 `deploy/`, `.env` at the repo root, and Compose would otherwise start with
 every variable blank:
 
@@ -64,35 +62,143 @@ every variable blank:
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
-## What your proxy must do
+## What your proxy must do?
 
-Point one virtual host at `http://127.0.0.1:8080` and terminate TLS. It has to
-forward WebSocket upgrades on `/ws/device`, and must not buffer `/api/events`
-(SSE, an idle stream that must never time out) or `/files/*` (~170 MB
-responses agents resume with `Range`).
+One virtual host, four requirements.
 
-Caddy serves `/files/*` off the artifacts volume behind `forward_auth`, proxies
-`/ws/device`, `/api/enroll`, `/api/logs/*` and `/healthz` to the hub, and sends
-everything else to the dashboard. `/internal/*` is deliberately absent: the
-dashboard reaches it over the compose network, nothing outside can.
+<Steps>
+
+<Step>
+
+### Point a virtual host at the edge
+
+`http://127.0.0.1:8090`, TLS terminated by you. Caddy fans the requests out by
+path: `/files/*` off the artifacts volume behind `forward_auth`, `/ws/device`,
+`/api/enroll`, `/api/logs/*` and `/healthz` to the hub, everything else to the
+dashboard.
+
+</Step>
+
+<Step>
+
+### Forward WebSocket upgrades on `/ws/device`
+
+The `Upgrade` and `Connection` headers have to survive. Without them the
+handshake is rejected and every box retries forever with backoff, so the fleet
+shows as offline with nothing in the hub's log to explain it.
+
+</Step>
+
+<Step>
+
+### Never buffer `/api/events`
+
+Server-sent events, and an idle stream that must never time out. A buffering
+proxy holds the messages until it has enough of them, which reads as a
+dashboard that no longer updates by itself.
+
+</Step>
+
+<Step>
+
+### Let `/files/*` and `/api/logs/*` through whole
+
+Downloads are ~170 MB and boxes resume them with `Range`.
+
+A log bundle a box uploads goes the other way on the same host. Buffering to disk, a body-size
+cap, or a short read timeout each turn into failed installs.
+
+</Step>
+
+</Steps>
+
+### nginx
+
+```nginx
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+server {
+  listen 443 ssl;
+  server_name magnemite.example.com;
+
+  location / {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+
+    proxy_buffering off;          # SSE, and 170 MB bodies
+    proxy_request_buffering off;  # log bundles the boxes upload
+    client_max_body_size 0;
+    proxy_read_timeout 3600s;     # idle SSE and slow downloads
+  }
+}
+```
+
+### Caddy
+
+```
+magnemite.example.com {
+  reverse_proxy 127.0.0.1:8090 {
+    flush_interval -1
+  }
+}
+```
+
+Caddy upgrades WebSockets and passes `Range` through on its own; `flush_interval -1`
+is what stops it buffering the SSE stream.
+
+## Sign in
+
+Open your domain and log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The admin
+account is created when the hub boots. Optionally, run `make seed` to create a
+starter app target, two version sources, a group and
+a first **enrollment token**, printed once. Skip it and create the same things
+from **Settings**.
+
+## Build the Magisk module
+
+`SERVER` is the **hub** URL, the same value as `MAGNEMITE_PUBLIC_URL`:
+
+```sh
+make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
+# → dist/magnemite-agent-1.0.0.zip
+```
+
+Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`.
+
+## Flash a box
+
+```sh
+adb push dist/magnemite-agent-1.0.0.zip /data/local/tmp/
+adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-1.0.0.zip'"
+adb reboot
+```
+
+In bulk over the LAN: `./scripts/enroll.sh dist/magnemite-agent-1.0.0.zip -f hosts.txt`.
+
+The box enrolls itself on first boot and appears in the fleet table. That is the
+only time it needs hands-on work, yes! Every later update, the agent's own included,
+rides the socket it opened. Details in [the agent on a
+box](/docs/fleet/agent).
 
 ## Upgrading
 
 ```sh
 git pull
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+make build
+make up
 make migrate
 ```
 
 Rebuilding `hub` drops every device socket; agents reconnect with backoff and
-queued jobs resume. To leave them alone, name the service:
-`… up -d --build web`.
+queued jobs resume. To leave them alone, rebuild the dashboard by itself:
 
-## Postgres or MariaDB
-
-Prisma has no `mariadb` provider — MariaDB speaks MySQL's protocol, so
-`DB_PROVIDER=mysql` covers both; `postgresql` serves a Postgres.
-
-The two engines keep separate migration histories (`prisma/migrations` and
-`prisma/migrations-mysql`), and nothing copies data between them. Decide the
-engine once, before the first seed.
+```sh
+make build up SERVICE=web
+```

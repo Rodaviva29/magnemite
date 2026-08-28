@@ -44,7 +44,7 @@ packages/
   db/             Prisma schema + client, shared by hub and web
   protocol/       Shared types/contracts between hub and devices
 agent/            Go agent that runs on each box, talks to the hub over WebSocket
-magisk-module/    Magisk module that installs and launches the agent on the box
+  magisk/         Magisk module that installs and launches the agent on the box
 scripts/          Build, enrollment and local fleet-simulation scripts
 data/             Local runtime data (cached APK artifacts, etc.)
 deploy/           Docker Compose stacks, Caddy edge config

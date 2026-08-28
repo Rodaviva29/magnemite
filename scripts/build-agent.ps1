@@ -74,7 +74,7 @@ $staging = Join-Path $root "dist/module"
 if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Force -Path "$staging/bin" | Out-Null
 
-Copy-Item "$root/magisk-module/*" $staging -Recurse
+Copy-Item "$root/agent/magisk/*" $staging -Recurse
 Copy-Item "$root/agent/bin/magnemite-agent-linux-arm64" "$staging/bin/"
 Copy-Item "$root/agent/bin/magnemite-agent-linux-arm" "$staging/bin/"
 

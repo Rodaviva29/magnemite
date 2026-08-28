@@ -11,12 +11,14 @@ apps/docs         This documentation site (Fumadocs)
 packages/db       Prisma schema + client
 packages/protocol Wire protocol shared by hub and dashboard (mirrored in Go)
 agent             The Go agent
-magisk-module     Module that starts the agent as root at boot
+agent/magisk      The Magisk module's own files: module.prop and the three hooks
+deploy            Compose stacks and the Caddy edge
 scripts           Bulk provisioning, fake fleet, builds
-docs              Diagrams
 ```
 
-A pnpm workspace (`apps/*`, `packages/*`) on Node 22.
+A pnpm workspace (`apps/*`, `packages/*`) on Node 22. `make module` packs
+`agent/magisk` plus the two ARM binaries into `dist/`, stamping the version
+from `VERSION` — nothing in `agent/magisk` is edited per release.
 
 ## Inside the hub
 
@@ -31,6 +33,7 @@ apps/hub/src
 │   ├── authz.ts          GET  /internal/authz   (Caddy forward_auth)
 │   ├── files.ts          GET  /files/*          (only when SERVE_ARTIFACTS)
 │   ├── events.ts         GET  /internal/events  (SSE to the dashboard)
+│   ├── logs.ts           POST /api/logs/*       (log bundles a box uploads)
 │   └── internal.ts       Everything the dashboard commands
 ├── services/
 │   ├── scheduler.ts      Dispatch, concurrency caps, stall detection
@@ -41,6 +44,8 @@ apps/hub/src
 │   ├── monitor.ts        Rules, escalation, circuit breakers
 │   ├── notify.ts         Discord alerts
 │   ├── rotom.ts          Scanning state, matching, restart
-│   └── sources/          github.ts, mirror.ts, poller.ts
+│   ├── hubSettings.ts    The cached copy of Settings → Tuning
+│   ├── uploads.ts        Manual installs: an APK in, an AppVersion out
+│   └── sources/          feed.ts, poller.ts, types.ts
 └── ws/deviceSocket.ts    The protocol, server side
 ```

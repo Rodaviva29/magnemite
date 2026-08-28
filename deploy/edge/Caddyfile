@@ -2,7 +2,7 @@
 #
 # TLS is not ours to terminate: whatever reverse proxy already fronts your
 # server does that and forwards plain HTTP here, so auto-HTTPS is off and the
-# site address carries no domain — this listens on :8080 and serves whatever
+# site address carries no domain — this listens on :8090 and serves whatever
 # is routed to it. Point your proxy's virtual host at the published EDGE_PORT.
 #
 # It exists because a reverse proxy is not a file server and cannot mount our
@@ -14,7 +14,7 @@
 	admin off
 }
 
-:8080 {
+:8090 {
 	log {
 		output stdout
 		format console

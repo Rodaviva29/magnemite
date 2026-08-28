@@ -1,13 +1,5 @@
 {
   "title": "Magnemite",
   "root": true,
-  "pages": [
-    "index",
-    "architecture",
-    "quick-start",
-    "deployment",
-    "fleet",
-    "operations",
-    "development"
-  ]
+  "pages": ["index", "architecture", "deployment", "fleet", "operations", "development"]
 }

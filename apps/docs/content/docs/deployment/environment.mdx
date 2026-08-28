@@ -17,7 +17,7 @@ resource's **Environment** tab.
 
 | Variable                  | Default                   | What it is                                                                                                                                                                                                          |
 | ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, plain HTTP. Your proxy terminates TLS and forwards here. Compose only.                                                                                                                |
+| `EDGE_PORT`               | `8090`                    | Host port the edge publishes, plain HTTP. Your proxy terminates TLS and forwards here. Compose only.                                                                                                                |
 | `MAGNEMITE_PUBLIC_URL`    | —                         | Base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can reach. On Coolify it defaults to the edge's generated domain (`SERVICE_URL_EDGE`); set it to override a stale one. |
 | `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin — auth callbacks and alert links. On Coolify it defaults to the web service's generated domain (`SERVICE_URL_WEB`), which is a different host from the agents' one.                      |
 | `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Only when neither of the above is the right origin for auth callbacks. A bare host with no scheme is accepted.                                                                                                      |
@@ -63,9 +63,9 @@ Optional; see [Rotom](/docs/fleet/rotom).
 | Variable                                        | What it is                                                                        |
 | ----------------------------------------------- | --------------------------------------------------------------------------------- |
 | `ROTOM_ENABLED`                                 | `false` by default.                                                               |
-| `ROTOM_URL`                                     | RotomNG's HTTP listener, usually `:7072`. `/api` is appended, either form works.  |
+| `ROTOM_URL`                                     | RotomNG's HTTP listener, usually `:7072`. `/api` is appended.  |
 | `ROTOM_SECRET`                                  | Matches `secret` under `http_listener` in the Rotom config.                       |
-| `ROTOM_BASIC_USERNAME` · `ROTOM_BASIC_PASSWORD` | BasicAuth for a proxy in front of Rotom. A second credential, not an alternative. |
+| `ROTOM_BASIC_USERNAME` · `ROTOM_BASIC_PASSWORD` | BasicAuth for a proxy in front of Rotom.  |
 
 ## The agent's own configuration
 

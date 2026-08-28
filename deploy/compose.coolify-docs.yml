@@ -73,18 +73,18 @@ services:
         condition: service_started
     environment:
       # Declared with no value on purpose: Coolify fills it from the Domains
-      # tab. Writing `${SERVICE_URL_EDGE_8080}` here would interpolate a
+      # tab. Writing `${SERVICE_URL_EDGE_8090}` here would interpolate a
       # variable that does not exist yet and blank it out. Map form, not a
-      # list item -- Coolify's compose preview turns `- SERVICE_URL_EDGE_8080`
+      # list item -- Coolify's compose preview turns `- SERVICE_URL_EDGE_8090`
       # into a numeric key and the deploy fails with "non-string key in
       # services.edge.environment: 0".
       #
-      # The port goes in the *name*: `_8080` is what tells the proxy which
-      # container port the domain routes to, so no `:8080` is typed into the
+      # The port goes in the *name*: `_8090` is what tells the proxy which
+      # container port the domain routes to, so no `:8090` is typed into the
       # Domains tab. One declaration yields four variables -- the two carrying
       # the port, for routing, and the generic SERVICE_URL_EDGE /
       # SERVICE_FQDN_EDGE, which is what the apps below read.
-      SERVICE_URL_EDGE_8080:
+      SERVICE_URL_EDGE_8090:
       HUB_PORT: 3001
     volumes:
       # Read-only: Caddy streams the cached .apkm files straight off here, so
@@ -93,7 +93,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8090/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
