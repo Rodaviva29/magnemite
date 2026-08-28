@@ -1,103 +1,76 @@
 ---
 title: Environment reference
-description: Every variable the hub, the dashboard and the agent read, and which deployment sets it.
+description: Every variable the hub, the dashboard and the agent read.
 icon: Settings2
 ---
 
-With the docker compose deployment these come from `.env` at the repo root (copy
-`.env.example`). On Coolify, the `SERVICE_*` ones are generated and shown in the
-resource's **Environment** tab; the rest have defaults.
+`.env` is what the stack needs to **boot and connect**. What is tuned while it
+runs — concurrency, intervals, retention, heartbeat, the monitoring ceilings —
+lives in **Settings → Tuning** and is not an env var. Values that moved there
+are ignored in silence if left behind in `.env`.
+
+With docker compose these come from `.env` at the repo root (copy
+`.env.example`). On Coolify the `SERVICE_*` ones are generated and shown in the
+resource's **Environment** tab.
 
 ## URLs
 
-| Variable                  | Default                   | What it is                                                                                                                                                                                                                                                                                                   |
-| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, in plain HTTP. Your own reverse proxy terminates TLS and forwards here. Compose deployment only.                                                                                                                                                                               |
-| `MAGNEMITE_PUBLIC_URL`    | —                         | The base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can actually reach. On Coolify this is the _edge_ domain.                                                                                                                                                   |
-| `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin, checked by Better Auth and used by the hub for the links in [Discord alerts](/docs/fleet/monitoring). Only needs setting when the two audiences are on separate domains — **required on Coolify**, which splits them, where an alert link built on the agents' domain would 404. |
-| `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Base URL for auth callbacks. Falls back to Coolify's `SERVICE_FQDN_WEB` / `SERVICE_URL_WEB` if either is in the environment; a bare host with no scheme is accepted.                                                                                                                                         |
-| `HUB_URL`                 | `http://hub:3001`         | Where the dashboard reaches the hub's internal API, over the compose network.                                                                                                                                                                                                                                |
+| Variable                  | Default                   | What it is                                                                                                                           |
+| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `EDGE_PORT`               | `8080`                    | Host port the edge publishes, plain HTTP. Your proxy terminates TLS and forwards here. Compose only.                                 |
+| `MAGNEMITE_PUBLIC_URL`    | —                         | Base URL handed to agents. **Artifact URLs are built from it**, so it must be what the boxes can reach. On Coolify, the edge domain. |
+| `MAGNEMITE_DASHBOARD_URL` | `MAGNEMITE_PUBLIC_URL`    | The dashboard's own origin — auth callbacks and alert links. **Required on Coolify**, which splits the two domains.                  |
+| `BETTER_AUTH_URL`         | `MAGNEMITE_DASHBOARD_URL` | Only when neither of the above is the right origin for auth callbacks. A bare host with no scheme is accepted.                       |
+| `HUB_URL`                 | `http://hub:3001`         | Where the dashboard reaches the hub's internal API, over the compose network.                                                        |
 
 ## Database
 
-| Variable       | Default      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| -------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PROVIDER`  | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside `compose.yml` and `compose.mariadb.yml`. On Coolify it defaults to `mysql` and has to match the external `DATABASE_URL`; changing it needs a rebuild, because the Prisma Client is generated into the images. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
-| `DB_USER`      | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                                                                                                                                                          |
-| `DB_PASSWORD`  | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                                                                                                                                                        |
-| `DB_NAME`      | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                                                                                                                                                            |
-| `DATABASE_URL` | —            | Only used when running Prisma or the apps **outside** Docker. `deploy/compose.yml` and `deploy/compose.mariadb.yml` build it from the `DB_*` values and point at their own database service; the Coolify files **require** it, because they run no database of their own.                                                                                                                                                               |
+| Variable                              | Default      | What it is                                                                                                                      |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PROVIDER`                         | `postgresql` | `postgresql` or `mysql` (which also covers MariaDB). Must match `DATABASE_URL`; changing it needs a **rebuild**, not a restart. |
+| `DB_USER` · `DB_PASSWORD` · `DB_NAME` | `magnemite`  | Used by the compose files that run their own Postgres.                                                                          |
+| `DATABASE_URL`                        | —            | Required by the Coolify files and `compose.mariadb.yml`, which run no database. `compose.yml` builds it from the `DB_*` values. |
 
 ## Auth and the first admin
 
-| Variable         | Default                                                         | What it is                                                                                                                                |
-| ---------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`    | —                                                               | Signs Better Auth cookies. `openssl rand -base64 32`. Coolify generates `SERVICE_BASE64_64_AUTHSECRET`.                                   |
-| `ADMIN_EMAIL`    | `admin@example.com` (compose) / `admin@magnemite.com` (Coolify) | Login identifier for the admin account. Nothing is ever sent to it, but it must be a well-formed address — `admin@localhost` is rejected. |
-| `ADMIN_PASSWORD` | —                                                               | Admin password. Coolify generates `SERVICE_PASSWORD_ADMIN`.                                                                               |
+| Variable         | Default             | What it is                                                                                           |
+| ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`    | —                   | Signs Better Auth cookies. `openssl rand -base64 32`. Coolify: `SERVICE_BASE64_64_AUTHSECRET`.       |
+| `ADMIN_EMAIL`    | `admin@example.com` | Login identifier. Nothing is sent to it, but it must be well-formed — `admin@localhost` is rejected. |
+| `ADMIN_PASSWORD` | —                   | Admin password. Coolify: `SERVICE_PASSWORD_ADMIN`.                                                   |
 
 <Callout type="info">
-  `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set on the **hub** service, because the hub syncs the admin
-  account to them on every boot — restart the hub after changing either, and there is no `.env` file
-  inside the container for it to read otherwise. That restart is also the way back in if you lose
-  the login.
+  Both live on the **hub** service: the hub syncs the admin account to them on every boot, and there
+  is no `.env` inside the container. Changing `ADMIN_PASSWORD` and restarting the hub is the way
+  back in if the login is lost. Changing `ADMIN_EMAIL` later creates a *second* admin.
 </Callout>
 
 ## Hub
 
-| Variable              | Default                      | What it is                                                                                                                                |
-| --------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `HUB_PORT`            | `3001`                       |                                                                                                                                           |
-| `HUB_INTERNAL_SECRET` | —                            | Shared secret for web → hub internal calls (SSE, dispatch nudges, rollout control). Coolify generates `SERVICE_PASSWORD_HUBSECRET`.       |
-| `ARTIFACT_DIR`        | `/data/artifacts` in compose | Where cached `.apkm` bundles live. Must match the volume mounted into Caddy as `/srv/artifacts`.                                          |
-| `SERVE_ARTIFACTS`     | `false`                      | Serve `/files/*` from Node. Leave `false` in both deployments; `true` only for local development without Caddy.                           |
-| `AGENT_AUTO_UPDATE`   | `true`                       | Tell boxes on an older build to update themselves to the binary this hub image ships. See [updating the agent](/docs/fleet/agent-update). |
-| `AGENT_BIN_DIR`       | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
-
-<Callout type="info">
-  Max concurrent jobs, job stall timeout, the health sample interval and retention, concurrent agent
-  updates and the device offline timeout are not env vars — they live in **Settings → Tuning**,
-  editable at runtime with no restart. How often a source is read lives on the source, the
-  auto-update cooldown on the app, and the Rotom sync interval in **Settings → Tuning**. See
-  [rollouts](/docs/fleet/rollouts), [auto-update](/docs/fleet/auto-update) and [health
-  history](/docs/fleet/health).
-</Callout>
-
-## Version sources
-
-Sources themselves are rows in the database, managed entirely in **Settings
-→ Version sources** — see [APKs sources](/docs/operations/sources). The
-optional `pnpm db:seed` adds two starter sources with no env var involved.
+| Variable                | Default            | What it is                                                                                       |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------ |
+| `HUB_PORT` · `HUB_HOST` | `3001` · `0.0.0.0` | Where the hub listens.                                                                           |
+| `HUB_INTERNAL_SECRET`   | —                  | Shared secret for web → hub internal calls. Coolify: `SERVICE_PASSWORD_HUBSECRET`.               |
+| `ARTIFACT_DIR`          | `/data/artifacts`  | Where cached bundles live. Must match the volume Caddy mounts as `/srv/artifacts`.               |
+| `SERVE_ARTIFACTS`       | `false`            | Serve `/files/*` from Node. `true` only for local development without Caddy.                     |
+| `AGENT_AUTO_UPDATE`     | `true`             | Tell boxes on an older build to [update themselves](/docs/fleet/agent#the-agent-updates-itself). |
+| `AGENT_BIN_DIR`         | `/app/agent-bin`   | Where the hub image keeps those binaries.                                                        |
+| `LOG_LEVEL`             | `info` in prod     | pino level: `trace` … `fatal`. `PRISMA_LOG=1` logs every query — development only.               |
 
 ## Rotom
 
-| Variable               | Default | What it is                                                                          |
-| ---------------------- | ------- | ----------------------------------------------------------------------------------- |
-| `ROTOM_ENABLED`        | `false` | See [Rotom](/docs/fleet/rotom).                                                     |
-| `ROTOM_URL`            | —       | RotomNG's HTTP listener, usually `:7072`. `/api` is appended, so either form works. |
-| `ROTOM_SECRET`         | —       | Matches `secret` under `http_listener` in the Rotom config.                         |
-| `ROTOM_BASIC_USERNAME` | —       | BasicAuth username, if a reverse proxy in front of Rotom asks for one.              |
-| `ROTOM_BASIC_PASSWORD` | —       | BasicAuth password for it. Independent of `ROTOM_SECRET`; both may be set.          |
+Optional; see [Rotom](/docs/fleet/rotom).
 
-## Coolify-generated names
-
-Coolify generates the secrets below on first deploy and shows them in the
-Environment tab.
-
-The domains and the database are **not** generated: the domains are typed into
-the Domains tab, and `MAGNEMITE_PUBLIC_URL`, `MAGNEMITE_DASHBOARD_URL` and
-`DATABASE_URL` are set by hand alongside them — see [adding the
-domains](/docs/deployment/coolify#add-the-domains).
-
-| Placeholder                    | Becomes                    |
-| ------------------------------ | -------------------------- |
-| `SERVICE_PASSWORD_HUBSECRET`   | `HUB_INTERNAL_SECRET`      |
-| `SERVICE_BASE64_64_AUTHSECRET` | `AUTH_SECRET`              |
-| `SERVICE_PASSWORD_ADMIN`       | the first admin's password |
+| Variable                                        | What it is                                                                        |
+| ----------------------------------------------- | --------------------------------------------------------------------------------- |
+| `ROTOM_ENABLED`                                 | `false` by default.                                                               |
+| `ROTOM_URL`                                     | RotomNG's HTTP listener, usually `:7072`. `/api` is appended, either form works.  |
+| `ROTOM_SECRET`                                  | Matches `secret` under `http_listener` in the Rotom config.                       |
+| `ROTOM_BASIC_USERNAME` · `ROTOM_BASIC_PASSWORD` | BasicAuth for a proxy in front of Rotom. A second credential, not an alternative. |
 
 ## The agent's own configuration
 
-Per-box, in `/data/adb/magnemite/config.json`, or as flags:
+Per-box, in `/data/adb/magnemite/config.json` or as flags:
 
 | Flag            | Config key        | What it is                                                                             |
 | --------------- | ----------------- | -------------------------------------------------------------------------------------- |
@@ -106,6 +79,15 @@ Per-box, in `/data/adb/magnemite/config.json`, or as flags:
 | `-name`         | `name`            | Friendly name for the box.                                                             |
 | `-config`       | —                 | Path to `config.json`.                                                                 |
 | `-work-dir`     | —                 | Scratch directory for downloads and extraction.                                        |
-| `-fake-root`    | —                 | Simulate an Android box. See [Testing without hardware](/docs/development/fake-fleet). |
+| `-fake-root`    | —                 | Simulate an Android box. See [testing without hardware](/docs/development/fake-fleet). |
 | `-fake-serial`  | —                 | Serial to report in `-fake-root` mode.                                                 |
 | `-version`      | —                 | Print the agent version and exit.                                                      |
+
+## Not env vars
+
+Version sources are rows in the database (**Settings → Version sources**).
+Automatic rollouts, canary, soak, attempts, backoff, cooldown and the rollout
+window are per app target (**Settings → Apps**). Everything fleet-wide and
+numeric — concurrency, stall timeout, heartbeat, offline timeout, sample
+interval, retention, monitoring graces and ceilings, the Discord webhook — is
+in **Settings → Tuning**.

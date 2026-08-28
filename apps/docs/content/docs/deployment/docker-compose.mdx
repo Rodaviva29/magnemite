@@ -6,12 +6,8 @@ icon: Container
 
 `deploy/compose.yml` is the self-contained deployment: our own Caddy publishes
 one plain-HTTP port, serves the dashboard and the artifacts, and proxies what
-belongs to the hub. TLS is not ours, nothing here binds 80 or 443, and
-whatever reverse proxy already fronts the server terminates it and forwards to
-`EDGE_PORT`.
-
-Use it when you have a VPS, a domain, and a proxy of your own (nginx, Caddy,
-Traefik, a tunnel) to put in front.
+belongs to the hub. Nothing binds 80 or 443 — the reverse proxy already
+fronting your server terminates TLS and forwards to `EDGE_PORT`.
 
 ## What runs
 
@@ -22,28 +18,24 @@ Traefik, a tunnel) to put in front.
 | `web`      | `apps/web/Dockerfile` | 3000, internal                     |
 | `caddy`    | `caddy:2-alpine`      | `EDGE_PORT` (8080) → 8080, HTTP    |
 
-Postgres is published on `127.0.0.1:5433` on purpose: it is enough for Prisma
-Studio or `psql` from the host, and reachable from nowhere else.
-`deploy/compose.mariadb.yml` runs the other three services against a database
-you host yourself — see [Postgres or MariaDB](#postgres-or-mariadb) below.
+Postgres is published on `127.0.0.1:5433` on purpose: enough for Prisma Studio
+or `psql` from the host, reachable from nowhere else.
 
 ## Configuration
 
-Everything comes from `.env` at the repo root — copy `.env.example` and fill it
-in. The two that matter most:
+Everything comes from `.env` at the repo root — copy `.env.example`. Two
+matter most:
 
 ```sh title=".env"
-# Host port the edge publishes, in plain HTTP. Your proxy forwards to it.
 EDGE_PORT=8080
-# The base URL handed to agents. Artifact URLs are built from it.
 MAGNEMITE_PUBLIC_URL=https://magnemite.example.com
 ```
 
-Both audiences share one virtual host, so compose sets
-`MAGNEMITE_DASHBOARD_URL` and `BETTER_AUTH_URL` from `MAGNEMITE_PUBLIC_URL` for
-you. The full list is in the [environment reference](/docs/deployment/environment).
+Both audiences share one virtual host here, so compose derives
+`MAGNEMITE_DASHBOARD_URL` and `BETTER_AUTH_URL` from `MAGNEMITE_PUBLIC_URL`.
+Full list: [environment reference](/docs/deployment/environment).
 
-Generate the secrets rather than inventing them:
+Generate the secrets, don't invent them:
 
 ```sh
 openssl rand -base64 32   # AUTH_SECRET
@@ -51,58 +43,39 @@ openssl rand -base64 32   # HUB_INTERNAL_SECRET
 openssl rand -base64 24   # DB_PASSWORD
 ```
 
-## Bringing it up
-
-```sh
-make up      # build and start everything — admin login works immediately
-make seed    # optional: starter app target, sources, group, first token
-```
+## Running it
 
 | Target         | Runs                                                  |
 | -------------- | ----------------------------------------------------- |
-| `make up`      | `up -d --build`                                       |
+| `make up`      | `up -d --build` — admin login works immediately       |
 | `make down`    | `down`                                                |
 | `make logs`    | `logs -f hub web`                                     |
 | `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub` |
-| `make seed`    | the optional seed inside `hub`                        |
+| `make seed`    | optional starter data and a first enrollment token    |
 
-Compose directly, if you would rather not use `make`:
+Without `make`, both flags are required — the compose files live under
+`deploy/`, `.env` lives at the repo root, and Compose would otherwise start
+with every variable blank:
 
 ```sh
 docker compose --env-file .env -f deploy/compose.yml up -d --build
 ```
 
-Both flags are needed: the compose files live under `deploy/`, and `.env` lives
-at the repo root where everything else reads it from — Compose would otherwise
-look for it next to the compose file and quietly start with every variable
-blank.
+## What your proxy must do
 
-## What your proxy needs to do
+Point one virtual host at `http://127.0.0.1:8080` and terminate TLS. It has to
+forward WebSocket upgrades on `/ws/device`, and must not buffer `/api/events`
+(SSE, an idle stream that must never time out) or `/files/*` (~170 MB
+responses agents resume with `Range`).
 
-Point one virtual host at `http://127.0.0.1:8080` and terminate TLS there. It
-has to forward WebSocket upgrades on `/ws/device`, and must not buffer
-`/api/events` (SSE, an idle stream that must never time out) or `/files/*`
-(~170 MB responses that agents resume with `Range`).
-
-## What the edge routes
-
-```
-:8080 {
-  /files/*      → file_server off the artifacts volume, behind forward_auth
-  /ws/device    → hub
-  /api/enroll   → hub
-  /healthz      → hub
-  everything else → web
-}
-```
-
-`/internal/*` is deliberately absent: the dashboard reaches it over the compose
-network, and nothing outside can.
+The edge routes `/files/*` to a `file_server` behind `forward_auth`,
+`/ws/device`, `/api/enroll`, `/api/logs/*` and `/healthz` to the hub, and
+everything else to the dashboard. `/internal/*` is deliberately absent: the
+dashboard reaches it over the compose network, nothing outside can.
 
 <Callout type="warn">
-  Leave `SERVE_ARTIFACTS=false`. Caddy streams the cached `.apkm` files straight off the shared
-  volume with native `Range` support; flipping this to `true` puts ~35 GB of a fleet-wide rollout
-  through Node for no benefit.
+  Leave `SERVE_ARTIFACTS=false`. Caddy streams cached `.apkm` files off the shared volume with
+  native `Range`; `true` puts ~35 GB of a fleet-wide rollout through Node for no benefit.
 </Callout>
 
 ## Upgrading
@@ -113,50 +86,29 @@ docker compose --env-file .env -f deploy/compose.yml up -d --build
 make migrate
 ```
 
-Rebuilding restarts `hub`, which drops every device socket. The agents
-reconnect on their own with backoff, and queued jobs resume — but on a large
-fleet, do it in a window where a few minutes of reconnects are acceptable. If
-you want dashboard deploys that leave the sockets alone, that property comes
-free here (`docker compose --env-file .env -f deploy/compose.yml up -d --build web` touches only the dashboard) and
-takes one setting on [Coolify](/docs/deployment/zero-downtime).
+Rebuilding `hub` drops every device socket; agents reconnect with backoff and
+queued jobs resume. To leave them alone, name the service:
+`… up -d --build web`.
 
 ## Postgres or MariaDB
 
-`deploy/compose.yml` brings its own Postgres and needs nothing else.
-`deploy/compose.mariadb.yml` is the same stack with **no database service at
-all**: it connects to one you already run, over `DATABASE_URL`.
+`deploy/compose.mariadb.yml` is the same stack with **no database service**: it
+connects to one you already run, over `DATABASE_URL`.
 
 ```sh
-docker compose --env-file .env -f deploy/compose.mariadb.yml up -d --build
-# or with make:
 make up COMPOSE_FILE=deploy/compose.mariadb.yml
 ```
 
-Prisma has no separate "mariadb" provider — MariaDB speaks the same wire
-protocol as MySQL, so it uses the `mysql` connector, which is what
-`DB_PROVIDER` defaults to in that file. Set it to `postgresql` and the same
-file serves an external Postgres just as well.
+Prisma has no `mariadb` provider — MariaDB speaks MySQL's protocol, so
+`DB_PROVIDER` is `mysql` there. Set it to `postgresql` and the same file serves
+an external Postgres.
 
-<Callout type="warn" title="DATABASE_URL is resolved inside the container">
-  The `DATABASE_URL` in `.env.example` points at the host-published port, for Prisma Studio and
-  clients on your machine. That is the one address a container cannot use. Give this file the
-  database's own address instead.
+<Callout type="warn" title="Two things bite here">
+  The `DATABASE_URL` in `.env.example` points at the host-published port, which is the one address a
+  container cannot use — give this file the database's own address. And changing `DB_PROVIDER` is a
+  **rebuild**, not a restart: the Prisma Client is generated into the images.
 </Callout>
 
-Changing `DB_PROVIDER` is a **rebuild**, not a restart: the Prisma Client is
-generated into the hub and web images at build time, so it has to match the URL
-those images will be handed. The Coolify files work the same way — see [the
-database is not in the
-stack](/docs/deployment/coolify#the-database-is-not-in-the-stack).
-
-The two engines keep separate migration histories —
-`packages/db/prisma/migrations` for Postgres, `migrations-mysql` for MariaDB —
-because the DDL Prisma generates differs enough between them (types, enum
-handling, quoting) that one history can't serve both. `make migrate` and
-`make seed` work the same either way; `prisma.config.ts` picks the right
-history from `DB_PROVIDER`.
-
-<Callout type="warn">
-  Switching an existing deployment from one engine to the other is not a supported migration path —
-  there is no data copy between them. Decide once, before the first `make seed`.
-</Callout>
+The two engines keep separate migration histories (`prisma/migrations` and
+`prisma/migrations-mysql`), and nothing copies data between them. Decide the
+engine once, before the first seed.

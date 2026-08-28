@@ -1,18 +1,15 @@
 {
-  "title": "Features help",
+  "title": "Features",
   "icon": "Smartphone",
   "pages": [
-    "enrollment",
     "agent",
-    "agent-update",
-    "update",
+    "enrollment",
     "rollouts",
-    "auto-update",
-    "columns",
+    "update",
+    "manual",
     "health",
     "monitoring",
     "logs",
-    "execute",
     "rotom"
   ]
 }

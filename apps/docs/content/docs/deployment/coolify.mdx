@@ -1,24 +1,15 @@
 ---
 title: On a Coolify setup
-description: Two domains, generated secrets, and a Caddy that stays in front of the hub.
+description: Two domains, generated secrets, an external database, and deploys that leave the fleet connected.
 icon: Cloud
 ---
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
 `deploy/compose.coolify.yml` lets Coolify's proxy terminate TLS and keeps a
-small Caddy of our own (`edge`) in front of the hub. It uses **two domains**
-rather than path routing, because the agents and the dashboard are separate
-audiences.
-
-| Service | Domain for                                                           | Container port |
-| ------- | -------------------------------------------------------------------- | -------------- |
-| `web`   | the dashboard you log into                                           | `3000`         |
-| `edge`  | what the boxes talk to — use a subdomain like `agents.<your-domain>` | `8080`         |
-
-Neither is declared in the compose file. You add them in the Domains tab — see
-[adding the domains](#add-the-domains) and [why they are not in the
-file](#why-the-domains-are-not-in-the-file).
+small Caddy of our own (`edge`) in front of the hub. It uses **two domains**,
+because the dashboard and the boxes are separate audiences, and **no database**
+— you point it at one you deploy separately.
 
 ## Deploying
 
@@ -28,23 +19,17 @@ file](#why-the-domains-are-not-in-the-file).
 
 ### Create the resource
 
-**New Resource → Docker Compose**, pointed at this repository. The compose file
-is resolved from two fields in **Build configuration**, and it is the pair that
-matters, not either one alone:
+**New Resource → Docker Compose**, pointed at this repository, with two fields
+under **Build configuration**:
 
 | Field          | Value                  |
 | -------------- | ---------------------- |
 | Base directory | `/deploy`              |
 | Compose file   | `/compose.coolify.yml` |
 
-Coolify echoes the result underneath as **Resolved file:
-`/deploy/compose.coolify.yml`** — check that line before continuing.
-
-Both fields are joined, so a full path in one and `/` in the other resolves to
-the same file — but the base directory is also the working directory of the
-**Custom Build/Start Commands**, so keep it on `/deploy` and the commands stay
-the short ones used [to narrow a
-deploy](/docs/deployment/zero-downtime).
+Coolify echoes **Resolved file: `/deploy/compose.coolify.yml`** underneath —
+check that line. The base directory is also the working directory of the custom
+build/start commands, so keep it at `/deploy`.
 
 </Step>
 
@@ -52,12 +37,8 @@ deploy](/docs/deployment/zero-downtime).
 
 ### Add the domains
 
-Two things have to line up here, and they are in different tabs. The **Domains**
-tab tells Coolify's proxy where to route; the **Environment** tab tells the apps
-what to call themselves.
-
-In the **Domains** tab, one domain per service, each with the container port as
-a `:suffix` — that suffix is the routing hint, not part of the public address:
+In the **Domains** tab, one per service, each with the container port as a
+`:suffix` — that suffix is a routing hint, not part of the public address:
 
 | Service | Domain                                      |
 | ------- | ------------------------------------------- |
@@ -65,29 +46,44 @@ a `:suffix` — that suffix is the routing hint, not part of the public address:
 | `edge`  | `https://agents.magnemite.example.com:8080` |
 | `docs`  | `https://docs.magnemite.example.com:3002`   |
 
-<Callout type="error" title="The edge port is the one that breaks quietly">
-  Miss `:8080` and Traefik routes the boxes' domain to a port Caddy never opened — the dashboard
+<Callout type="error" title="The edge port breaks quietly">
+  Miss `:8080` and Traefik routes the boxes' domain to a port Caddy never opened. The dashboard
   keeps working, so nothing looks wrong, while every box gets a 502 on `/ws/device` and on every
   download. `docs` only exists if you deployed `compose.coolify-docs.yml`.
 </Callout>
 
-Then, in the **Environment** tab, the two domains again **without** the port —
-these are what the boxes and the browser are handed, not routing hints — plus
-the database this stack does not run itself:
+</Step>
+
+<Step>
+
+### Set the environment
+
+In the **Environment** tab, the same two domains **without** the port, plus the
+database this stack does not run:
 
 ```sh
 MAGNEMITE_PUBLIC_URL=https://agents.magnemite.example.com
 MAGNEMITE_DASHBOARD_URL=https://magnemite.example.com
-DATABASE_URL=mysql://magnemite:<password>@<db-host>:3306/magnemite
+DATABASE_URL=mysql://<user>:<password>@<host>:3306/<database>
 ```
 
-`DATABASE_URL` points at a database you deploy separately — see [the database is
-not in the stack](#the-database-is-not-in-the-stack). Add `DB_PROVIDER` too if
-it is not MariaDB or MySQL.
+`MAGNEMITE_PUBLIC_URL` is the one to get right: every artifact URL a box is
+told to download from is built on it, so the dashboard's domain here enrolls a
+fleet that can never fetch anything. `MAGNEMITE_DASHBOARD_URL` is **required**
+here — Better Auth has nothing else to build callbacks from, and alert links
+would otherwise point at the agents' domain.
 
-`MAGNEMITE_PUBLIC_URL` is the one to get right: every artifact URL a box is told
-to download from is built on it, so pointing it at the dashboard's domain
-enrolls a fleet that can never fetch anything.
+The four parts of `DATABASE_URL` are the database's own user, that user's
+password, the hostname **this stack** can reach it on, and the database name.
+Nothing there is a service name from this compose file:
+
+```sh
+DATABASE_URL=mysql://magnemite:s3cret@magnemite-db-abc123:3306/magnemite
+```
+
+The user and the database are both commonly called `magnemite`, which is what
+makes the shape confusing to read: two different things that share a name. Add
+`DB_PROVIDER` if the database is not MariaDB or MySQL.
 
 </Step>
 
@@ -95,13 +91,9 @@ enrolls a fleet that can never fetch anything.
 
 ### Deploy
 
-Nothing to run by hand afterwards. The database migrates itself on boot and the
-admin account is created the moment the hub starts.
-
-The first deploy has to be the full-stack one, with the **Custom Build/Start
-Command** fields empty — narrowing them comes later, once there are sockets
-worth protecting. See [deploying without dropping the
-fleet](/docs/deployment/zero-downtime).
+Nothing to run by hand: the database migrates itself on boot and the admin
+account is created when the hub starts. The **first** deploy must be the
+full-stack one, with the custom build/start command fields empty.
 
 </Step>
 
@@ -109,155 +101,83 @@ fleet](/docs/deployment/zero-downtime).
 
 ### Read the generated admin password
 
-Coolify generates the database password, the internal secret, `AUTH_SECRET` and
-the **admin password** itself, and shows them in the **Environment** tab. Read
-`SERVICE_PASSWORD_ADMIN` from there to sign in the first time; change it from
-**Settings → Accounts** afterwards if you prefer one you can remember.
+Coolify generates the internal secret, `AUTH_SECRET` and the admin password,
+and shows them in the **Environment** tab — `SERVICE_PASSWORD_ADMIN` is the
+first login. To change it, change `ADMIN_PASSWORD` and restart the hub; that is
+also the [way back in](/docs/operations/accounts) if it is lost.
 
 </Step>
 
 </Steps>
 
-## What you set up from the dashboard
+The stack boots empty apart from the admin: set up an app target and its
+[version sources](/docs/operations/sources), a group, and an [enrollment
+token](/docs/fleet/enrollment) from **Settings**.
 
-The stack boots empty apart from the admin account: no app target, no version
-sources, no groups. That is the first session in the dashboard, not a script —
-an app target and its [version sources](/docs/operations/sources) first, then a
-group and an [enrollment token](/docs/fleet/enrollment) for the boxes, all under
-**Settings**.
+## Deploying without dropping the fleet
+
+Coolify rebuilds every service with a `build:` under a tag carrying the current
+commit, so a plain deploy recreates the lot — fine for `web`, fatal for `hub`,
+which takes a couple of hundred device sockets with it.
+
+Narrow it with the resource's **Custom Build Command** and **Custom Start
+Command** (General tab). Coolify injects `-f` and `--env-file` itself.
+
+| Changed               | Build command                   | Start command                             |
+| --------------------- | ------------------------------- | ----------------------------------------- |
+| Dashboard only        | `docker compose build web`      | `docker compose up -d --no-deps web`      |
+| Hub, or the Caddyfile | `docker compose build hub edge` | `docker compose up -d --no-deps hub edge` |
+
+Clearing both fields restores the full-stack deploy.
+
+<Callout type="error" title="--no-deps is not optional">
+  Without it, Compose starts what `web` declares in `depends_on` — `hub` — and recreates it, because
+  its image tag moved with the commit. That is the exact restart this avoids. Never add
+  `--remove-orphans` or `--force-recreate` either: both reach past the service you named.
+</Callout>
+
+The Caddyfile is **baked into the image** (`deploy/edge/Dockerfile` runs
+`caddy validate` on it, so a config that does not parse fails the build), which
+is why a routing change means building `edge`. It is not a bind mount because
+Coolify turns a file bind mount into one it manages itself: the container then
+gets the copy stored on the server, not the one in the repository.
+
+## The external database
+
+This file ships no database service and no data volume. `DB_PROVIDER` has to
+agree with `DATABASE_URL` — **`mysql`** for MariaDB or MySQL, `postgresql` for
+Postgres — and it is used twice per app service: as a **build arg**, because
+the Prisma Client is generated into the images, and as a **runtime env**,
+because it selects which migration history `prisma migrate deploy` applies.
+Changing it is a rebuild, not a restart.
 
 <Callout type="warn">
-  The UnownHash mirror needs its base URL set to `https://mirror.unownhash.com/apks/`, with the
-  trailing path. Without it the index still parses and every download 404s.
+  The URL is resolved inside the container, so it needs the database's **internal** hostname on a
+  shared network — a public one works until Coolify's firewall or a restart moves it. And the two
+  migration histories do not convert into each other: pointing this stack at a database of the other
+  kind starts an empty schema rather than migrating anything.
 </Callout>
 
-## The admin login
+## Why the domains are typed by hand
 
-The login defaults to `admin@magnemite.com`. Nothing is ever sent to it — the
-address is an identifier, not a mailbox — so it only needs changing if you want
-your own.
+Coolify can generate a domain from a `SERVICE_URL_*` placeholder, and this file
+used to. It went wrong twice over: `edge` came out with no port at all, and the
+generated values are [not always
+updated](https://github.com/coollabsio/coolify/issues/8912) after a domain is
+edited in the UI — stale in the one variable every box downloads from. Nothing
+interpolates `SERVICE_URL_*` or `SERVICE_FQDN_*` any more; `SERVICE_PASSWORD_*`
+and `SERVICE_BASE64_*` still do, because generating secrets has nothing to get
+wrong.
 
-<Callout type="warn">
-  Set `ADMIN_EMAIL` **before the first boot** if you want a different one. Changing it later creates
-  a *second* admin rather than renaming the first, because the sync upserts on the address.
-</Callout>
+Upgrading from a version that used them: keep the domain, make sure it carries
+`:8080`, and add `MAGNEMITE_PUBLIC_URL` and `MAGNEMITE_DASHBOARD_URL` to the
+Environment tab. No box needs re-flashing — a box only ever knows the URL.
 
-<Callout type="info">
-  There is no `.env` file inside the container, so the hub reads `ADMIN_EMAIL` and `ADMIN_PASSWORD`
-  from the **hub** service's environment, on every boot. That is why they are set on `hub` and not
-  only on `web`.
-</Callout>
+## Why there is still a Caddy
 
-## Things this file does differently
-
-### The database is not in the stack
-
-Unlike `deploy/compose.yml`, which runs its own Postgres, this file ships no
-database service and no data volume. It connects to one you deploy separately —
-its own Coolify resource, or anything else the containers can reach — over a
-single `DATABASE_URL`.
-
-`DB_PROVIDER` has to agree with that URL: **`mysql`** for MariaDB or MySQL
-(Prisma has no separate `mariadb` connector), `postgresql` for Postgres. It is
-interpolated in two places per app service, and both are load-bearing:
-
-- as a **build arg**, because the Prisma Client is generated into the hub and
-  web images at build time and has to match the URL it will be given;
-- as a **runtime env**, because the hub's entrypoint runs `prisma migrate
-deploy`, and the provider is what selects `prisma/migrations-mysql` over
-  `prisma/migrations`.
-
-Both read the same `${DB_PROVIDER:-mysql}`, so setting the variable once moves
-both and they cannot drift apart. Changing it means a **rebuild**, not just a
-restart — the client is inside the image.
-
-<Callout type="warn" title="The URL is resolved inside the container">
-  A Coolify database resource publishes an internal hostname on its own network and, optionally, a
-  public one. `DATABASE_URL` needs the internal one, and the database has to share a network with
-  this stack — a public URL works until Coolify's firewall or a restart moves it.
-</Callout>
-
-<Callout type="error" title="Providers do not migrate into each other">
-  The two migration histories are separate and nothing copies data between them. Pointing this stack
-  at a database of the other kind starts an empty schema, it does not convert anything. Dump and
-  restore by hand if you have a fleet already enrolled.
-</Callout>
-
-### Why the domains are not in the file
-
-Coolify can generate a domain for a service from a `SERVICE_URL_<name>_<port>`
-placeholder, and this file used to do that. It went wrong asymmetrically: `web`
-and `docs` came out as `…:3000` and `…:3002`, and `edge` came out as a bare
-`http://edge-….sslip.io` with no port at all — pointing the boxes at a port
-Caddy does not listen on.
-
-The other half of the problem is that the generated values are not stable.
-Coolify keeps a port-carrying variable and a generic one for each service, and
-after a domain is edited in the UI the generic pair [is not always
-updated](https://github.com/coollabsio/coolify/issues/8912) — it keeps the
-autogenerated wildcard domain. `MAGNEMITE_PUBLIC_URL` was read from that generic
-variable, which is the worst possible thing to have go quietly stale: it is the
-host every box downloads from.
-
-Setting the two domains by hand costs one extra field each and removes both
-failure modes. Nothing in the compose file interpolates a `SERVICE_URL_*` or
-`SERVICE_FQDN_*` any more; `SERVICE_PASSWORD_*`, `SERVICE_USER_*` and
-`SERVICE_BASE64_*` still work as before, because generating secrets is the part
-of that mechanism with nothing to get wrong.
-
-### The auth URL fallback
-
-Better Auth without a base URL derives the origin from the incoming `Host`
-header, which breaks callbacks behind a proxy. The app resolves one from
-`BETTER_AUTH_URL`, then `MAGNEMITE_DASHBOARD_URL`, then Coolify's own
-`SERVICE_FQDN_WEB` / `SERVICE_URL_WEB` if they happen to be in the environment.
-
-With the domains set by hand, the last two are not there — which makes
-**`MAGNEMITE_DASHBOARD_URL` required on this deployment**, not optional. Leave it
-out and logging in fails in ways that look like a cookie problem. A bare host
-with no `https://` is accepted.
-
-### Why there is still a Caddy
-
-Coolify's proxy (Traefik) routes; it does not serve files. It has no
-`file_server` equivalent, and the `artifacts` volume belongs to this stack, not
-to the Coolify-managed proxy container — so pointing the boxes' domain straight
-at the hub means every one of those ~170 MB bundles is read and pushed by Node.
-
-The `edge` service closes that gap. It mounts `artifacts` read-only, answers
-`/files/*` with `file_server` (native `Range`, so an interrupted download
-resumes) behind a `forward_auth` call to the hub's `/internal/authz`, and
-proxies only `/ws/device`, `/api/enroll` and `/healthz` through. Everything else
-on that domain is a 404, which keeps the hub's `/internal/*` API unreachable
-from outside — the same guarantee the Caddy setup gives.
-
-The Caddyfile is **baked into the image**, not bind-mounted, because Coolify
-turns a file bind mount into one it manages itself — see [when the Caddyfile
-changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
-
-## Upgrading from an earlier version of this file
-
-The boxes' domain has been generated three different ways, and none of the moves
-needs re-flashing — a box only ever knows the URL, so keeping the same domain
-value is enough:
-
-- `SERVICE_FQDN_HUB_3001` → `SERVICE_FQDN_EDGE`, when the edge gained its own
-  service.
-- `SERVICE_FQDN_EDGE` → `SERVICE_URL_EDGE_8080`, briefly moving the port into
-  the variable name.
-- No placeholder at all, which is where it is now.
-
-Coming from either of the placeholder shapes: keep the domain, make sure it
-carries `:8080`, and **add `MAGNEMITE_PUBLIC_URL` and `MAGNEMITE_DASHBOARD_URL`
-to the Environment tab** — they used to come from the generated variables, and
-without them the hub boots with an empty public URL.
-
-## Next
-
-<Cards>
-  <Card
-    title="Deploying without dropping the fleet"
-    href="/docs/deployment/zero-downtime"
-    description="Narrow the deploy so a dashboard change leaves 200 sockets alone."
-  />
-</Cards>
+Traefik routes; it does not serve files, and the `artifacts` volume belongs to
+this stack. Without `edge`, every ~170 MB bundle would be read and pushed by
+Node. It mounts the volume read-only, answers `/files/*` with native `Range`
+behind a `forward_auth` call to the hub's `/internal/authz`, proxies
+`/ws/device`, `/api/enroll`, `/api/logs/*` and `/healthz`, and 404s everything
+else — which is what keeps `/internal/*` unreachable from outside.

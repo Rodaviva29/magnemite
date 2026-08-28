@@ -1,67 +1,63 @@
 ---
-title: Rollouts explained
-description: Canary, soak, concurrency caps, retries, and what happens to a box that is unplugged mid-install.
+title: Rollouts
+description: Canary, soak, concurrency, retries — started by hand or by the hub itself.
 icon: Rocket
 ---
 
-A rollout is a version, a target set, and a policy. The hub turns it into one
-job per device and dispatches them dinamically as capacity allows. The dashboard shows the overall progress, and each box reports back.
+A rollout is a version, a target set and a policy. The hub turns it into one
+job per device and dispatches them as capacity allows.
 
-## Targeting
+Start one from the fleet table — select boxes, or **Update all** — or let the
+hub start it for you (see [automatic rollouts](#automatic-rollouts)).
 
-One box, a selection, a device group, or the whole fleet. Groups are the useful
-unit once you have more than one site: they carry their own pre/post-install
-hooks and can cap concurrency below the fleet-wide limit.
+## The policy
 
-## Retry backoff
+| Field                   | What it does                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| **Canary devices**      | The first N update alone; the rest wait for them to succeed.                    |
+| **Soak (min)**          | Extra wait after the canary succeeds, before the rest go.                       |
+| **Retry backoff (s)**   | Hold before the next attempt — 60 by default, doubling, capped at 30 minutes.   |
+| **Attempts per device** | How many tries before a job is left failed.                                     |
+| **Clean install**       | Uninstall first instead of upgrading in place. **Wipes app data on every box.** |
+| **Skip up-to-date**     | Leave boxes already on the version alone.                                       |
 
-A failed attempt is held before the next one — **60 seconds by default**, doubling each attempt and
-capped at 30 minutes. Set it per rollout on the fleet page, or per app target for automatic ones.
-
-Zero restores the old behaviour of retrying on the very next scheduler tick, which is wrong for the
-failure that motivated the setting: a box that has just restarted its `system_server` needs the
-best part of a minute, and a retry arriving inside that window fails instantly on a box that is
-about to be fine. Two of three attempts can go that way, leaving the rollout to give up on hardware
-that was never broken.
-
-The `Retry` button ignores the hold. An operator pressing it is making a fresh decision, not
-waiting out a backoff they did not set.
-
-## Canary and soak
-
-The first **N** devices update alone. The rest are held until those succeed,
-plus a soak period you choose.
-
-A failed canary parks the rollout at `PAUSED` instead of pushing a bad build to
-the fleet. Resuming is deliberate: look at the failed job's log, decide, then
-press resume.
+Targeting is one box, a selection, a device group, or the fleet. Groups are the
+useful unit past one site: they carry their own pre/post-install hooks and can
+cap concurrency below the fleet-wide limit.
 
 <Callout type="info">
-  Canary is worth setting even at three devices. Most bad builds fail the same way on every box, and
-  the first three tell you as much as the first fifty.
+  Canary is worth setting even at three devices — most bad builds fail the same way on every box,
+  and the first three tell you as much as the first fifty. A failed canary parks the rollout at
+  `PAUSED` rather than pushing a bad build to the fleet; resuming is deliberate.
 </Callout>
+
+The backoff exists for one failure in particular: a box that has just restarted
+its `system_server` needs the best part of a minute, and a retry inside that
+window fails instantly on hardware that is about to be fine. Zero retries on
+the next scheduler tick. The **Retry** button ignores the hold — an operator
+pressing it is making a fresh decision.
 
 ## Concurrency
 
-| Setting                                           | Scope                               |
-| ------------------------------------------------- | ----------------------------------- |
-| **Settings → Tuning → Max concurrent jobs** | The whole fleet. Default 10.        |
-| A group's own cap                                 | Lower, for a site on a thin uplink. |
+**Settings → Tuning → Max concurrent jobs** (10) caps the whole fleet; a group
+can cap lower for a site on a thin uplink. The cap counts boxes
+downloading or installing, which is what consumes your egress and their
+`/data`.
 
-The cap counts devices downloading/installing, which is what actually
-consumes your egress and their `/data`.
+<Callout type="warn">
+  A fleet-wide rollout to 200 boxes is roughly **35 GB** off your server. Concurrency paces it; it
+  does not reduce it. Check your traffic allowance before the first one.
+</Callout>
 
-## Failure handling
+## When things fail
 
-| Situation              | What happens                                                                                                                                             |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Device offline**     | The job stays queued and dispatches the moment the agent reconnects. Nothing to retry by hand.                                                           |
-| **Job failed**         | Re-queued automatically up to the rollout's attempt limit, held for the retry backoff first. The bytes already on disk make the retry cheap.             |
-| **Attempts exhausted** | `Retry` and `Retry all failed` are in the UI.                                                                                                            |
-| **Job stalled**        | A box unplugged mid-install stops sending progress; after the job stall timeout (**Settings → Tuning**, default 900 seconds) the hub re-queues it. |
-| **Hub restarted**      | Jobs survive in Postgres; the scheduler picks them up on the next tick.                                                                                  |
-
-## Rollout states
+| Situation              | What happens                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| **Device offline**     | The job stays queued and dispatches when the agent reconnects.                                    |
+| **Job failed**         | Re-queued up to the attempt limit, after the backoff. Bytes already on disk make the retry cheap. |
+| **Attempts exhausted** | `Retry` and `Retry all failed` in the UI.                                                         |
+| **Job stalled**        | No progress for the stall timeout (**Settings → Tuning**, 900 s) and the hub re-queues it.        |
+| **Hub restarted**      | Jobs survive in the database; the scheduler picks them up on the next tick.                       |
 
 ```
 QUEUED ──► RUNNING ──┬─► COMPLETED
@@ -69,14 +65,31 @@ QUEUED ──► RUNNING ──┬─► COMPLETED
                      └─► CANCELLED  (you stopped it)
 ```
 
-## Reading a job
+Each job carries the box's own log lines alongside its phase and percentage, so
+a failure is diagnosable from the dashboard without adb: the `pm` output, a
+sha256 mismatch, the free-space refusal.
 
-Each job carries the device's own log lines alongside the phase and percentage,
-so a failure is diagnosable from the dashboard without adb: the `pm` output,
-the sha256 mismatch, or the free-space refusal.
+## Automatic rollouts
 
-## Egress
+Per app, on **Settings → Apps**. With it on, the hub polls each source on its
+own interval, caches the newest **approved** version, and creates a rollout
+with that app's canary and soak — inside the time window, if one is set.
 
-A full rollout to 200 boxes is roughly **35 GB** off your server. Max
-concurrent jobs paces it, but it does not reduce it, check your traffic
-allowance before the first fleet-wide update.
+It **never** downgrades, never runs two rollouts for one app at once, does
+nothing when every box is already current, and waits out the cooldown.
+
+| Field                                  | What it does                                                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Approve new versions automatically** | Off, a human ticks _approve_ on the Versions page first. A reasonable default while learning to trust it. |
+| **Window start / end**                 | Jobs created outside it stay queued. The difference between 35 GB at 04:00 and 35 GB at peak.             |
+| **Cooldown (min)**                     | How long after the last automatic rollout finished before another may start. 0 ships immediately.         |
+
+Polling interval is per source (**Settings → Version sources → Check every**,
+15 minutes by default), because an index is somebody else's server. A changed
+interval takes effect within seconds.
+
+<Callout type="warn">
+  Auto-approve plus no canary means an upstream mistake reaches 200 boxes unattended. Keep a canary
+  of a few devices and a soak long enough that a dead scanner would show up — in
+  [Rotom](/docs/fleet/rotom), or as a [monitoring](/docs/fleet/monitoring) alert.
+</Callout>

@@ -1,12 +1,14 @@
 ---
-title: Agent on all boxes
-description: Build the Magisk module with the hub URL baked in, flash it once, and never touch the box again.
+title: The agent on a box
+description: Build the Magisk module with the hub URL baked in, flash it once, and let it update itself from then on.
 icon: Smartphone
 ---
 
-The agent is a ~6 MB static Go binary started as root at boot by a Magisk
-module. It dials **out** over WSS, so the boxes work behind any NAT, CGNAT or
-changing IP with no ports open and no VPN.
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+A ~6 MB static Go binary, started as root at boot by a Magisk module. It dials
+**out** over WSS, so boxes work behind any NAT or CGNAT with no open ports and
+no VPN.
 
 ## Build the module
 
@@ -15,54 +17,41 @@ per-box step:
 
 ```sh
 # SERVER is the hub URL — the same value as MAGNEMITE_PUBLIC_URL.
-# docker compose: https://magnemite.example.com
-# Coolify:        https://agents.magnemite.example.com
+# compose: https://magnemite.example.com
+# Coolify: https://agents.magnemite.example.com
 make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
-# → dist/magnemite-agent-0.1.2.zip
+# → dist/magnemite-agent-1.0.0.zip
 ```
 
-On Windows:
+Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`.
 
-```powershell
-./scripts/build-agent.ps1 -Server https://magnemite.example.com -Token <token>
-```
-
-Everything Go-related runs inside the `golang` image, so no toolchain is needed
-on the host. The version comes from the `agent=` line of the `VERSION` file at
-the repo root, and both build paths stamp it into `module.prop`. Magisk compares
-`versionCode`, which is derived so it always moves with the version (`0.1.5` →
-`105`).
+Everything Go-related runs inside the `golang` image, so the host needs no
+toolchain. The version comes from the `agent=` line of `VERSION` at the repo
+root; both build paths stamp it into `module.prop`, and the `versionCode`
+Magisk compares is derived from it (`1.0.0` → `10000`).
 
 <Callout type="warn">
   `SERVER` is the **hub** URL, never the dashboard's. A box pointed at the dashboard's domain fails
-  the handshake.
+  the handshake on `/ws/device`.
 </Callout>
 
-## Install it now!
-
-Through the Magisk app, or over adb:
+## Flash it
 
 ```sh
-adb push dist/magnemite-agent-0.1.2.zip /data/local/tmp/
-adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-0.1.2.zip'"
+adb push dist/magnemite-agent-1.0.0.zip /data/local/tmp/
+adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-1.0.0.zip'"
 adb reboot
 ```
 
 In bulk over the LAN:
 
 ```sh
-./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip 192.168.1.10 192.168.1.11
-./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f hosts.txt
+./scripts/enroll.sh dist/magnemite-agent-1.0.0.zip 192.168.1.10 192.168.1.11
+./scripts/enroll.sh dist/magnemite-agent-1.0.0.zip -f hosts.txt
 ```
 
-That is the only time a box needs hands-on work. After it reboots, every later
-update rides the socket it opened itself: no adb, no LAN access. That includes
-the agent itself — see [updating the agent](/docs/fleet/agent-update), which the
-hub drives on its own and which never needs the module reflashing.
-
-## Without a baked-in config
-
-Write `/data/adb/magnemite/config.json` on the box before rebooting:
+Without a baked-in config, write `/data/adb/magnemite/config.json` before
+rebooting:
 
 ```json title="/data/adb/magnemite/config.json"
 {
@@ -71,30 +60,98 @@ Write `/data/adb/magnemite/config.json` on the box before rebooting:
 }
 ```
 
-The same values are available as flags: `-server`, `-enroll-token`, `-name`.
-
-- The full list is in the [environment reference](/docs/deployment/environment#the-agents-own-configuration).
+The same values exist as flags — full list in the [environment
+reference](/docs/deployment/environment#the-agents-own-configuration).
 
 ## What it does at boot
 
 1. Reads `config.json` (or its flags).
-2. Fixes DNS if `/etc/resolv.conf` is missing, see
-   [DNS on Android](/docs/operations/troubleshooting#dns-on-android).
-3. Enrolls if it has no device token yet, then rewrites the config without the
+2. Fixes DNS if `/etc/resolv.conf` is missing — see [DNS on
+   Android](/docs/operations/troubleshooting#dns-on-android).
+3. Enrolls if it has no device token, then rewrites the config without the
    enrollment token.
-4. Opens the WebSocket and sends `hello` with its serial, model, Android
-   version, current Pokémon GO version and other useful information.
-5. Heartbeats, and waits for an `install_job`.
+4. Opens the WebSocket and sends `hello`: serial, model, Android version, ABI,
+   installed versions of the tracked packages.
+5. Heartbeats every 20 seconds and waits for work.
 
-## Which build goes on which box
+`make agent` cross-compiles `linux/arm64`, `linux/arm` (GOARM=7),
+`linux/amd64` and `windows/amd64`. The module zip carries the two ARM builds
+and picks at install time; the other two are for a [fake
+fleet](/docs/development/fake-fleet).
 
-`make agent` cross-compiles four binaries:
+## The agent updates itself
 
-| Target                | Used for                     |
-| --------------------- | ---------------------------- |
-| `linux/arm64`         | the boxes                    |
-| `linux/arm` (GOARM=7) | older 32-bit boxes           |
-| `linux/amd64`         | a fake fleet on a Linux host |
-| `windows/amd64`       | a fake fleet on Windows      |
+Nothing is flashed again. The hub image cross-compiles the agent during its own
+build, so a running hub always carries the exact binary it wants the fleet on.
 
-The module zip carries the two Linux ARM builds and picks at install time.
+<Steps>
+
+<Step>
+
+### Releasing
+
+```sh
+sed -i 's/^agent=.*/agent=1.0.1/' VERSION
+git commit -am "agent 1.0.1" && git push
+docker compose --env-file .env -f deploy/compose.yml up -d --build hub
+```
+
+</Step>
+
+<Step>
+
+### On hub boot
+
+The binaries are copied into `ARTIFACT_DIR` under `agent/<version>/` — the
+volume the edge already serves `/files/*` from — hashed, and earlier versions
+removed.
+
+</Step>
+
+<Step>
+
+### On every hello
+
+A box reporting a different `agentVersion`, not running a job, is sent an
+`agent_update` with the URL, sha256 and version. Boxes on the target are left
+alone.
+
+</Step>
+
+<Step>
+
+### On the box
+
+It downloads with its own device token, verifies the sha256, keeps the old
+binary as `.old`, swaps the new one in with an atomic rename and re-execs. The
+fresh `hello` is what confirms the update.
+
+</Step>
+
+</Steps>
+
+Updates go out in batches, capped by **concurrent agent updates** in **Settings
+→ Tuning** (5). A box powered off for a month catches up when it dials in.
+`AGENT_AUTO_UPDATE=false` pins the fleet instead.
+
+Every attempt is a row in the device's **Update history**, tagged `agent`:
+`updating` until the box comes back on the new version, then `done`, or
+`failed` with the reason the agent reported. A row stuck on `updating` is a box
+that never returned — no power, or a binary that cannot reach the hub.
+
+<Callout type="info">
+  The swap is a rename on one filesystem, so a box that loses power mid-update comes back on either
+  the old binary or the new one, never half of one. If the new one cannot start, the module's
+  respawn loop puts `.old` back. `tail /data/adb/magnemite/agent.log` for `self-update:` lines; a
+  `checksum mismatch` means the box was served a different file than the hub published.
+</Callout>
+
+## When the module is needed again
+
+- A **brand-new box** — there is no agent to update.
+- A box that **never comes online** — it cannot be told anything.
+- `service.sh` or `customize.sh` **changed** — those live in the module, not in
+  the binary.
+
+Reinstalling an old zip over an updated box puts the old binary back, so keep a
+freshly built one for boxes enrolled later.

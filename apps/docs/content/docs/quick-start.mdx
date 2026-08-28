@@ -6,22 +6,9 @@ icon: Rocket
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Two supported ways to run the stack. Pick one:
-
-<Cards>
-  <Card
-    title="Docker, behind a proxy"
-    href="/docs/deployment/docker-compose"
-    description="One virtual host; your own reverse proxy handles TLS."
-  />
-  <Card
-    title="Coolify"
-    href="/docs/deployment/coolify"
-    description="Coolify's proxy terminates TLS; two domains."
-  />
-</Cards>
-
-What follows is the short version of the docker compose path, end to end.
+Two ways to run the stack: [docker compose behind your own
+proxy](/docs/deployment/docker-compose), or [Coolify](/docs/deployment/coolify).
+Below is the compose path end to end.
 
 <Steps>
 
@@ -32,34 +19,13 @@ What follows is the short version of the docker compose path, end to end.
 ```sh
 git clone https://github.com/Rodaviva29/magnemite.git && cd magnemite
 cp .env.example .env
-# Set MAGNEMITE_PUBLIC_URL (and EDGE_PORT if 8080 is taken), then generate the
-# secrets:
-#   openssl rand -base64 32
-$EDITOR .env
-
-make up   # docker compose --env-file .env -f deploy/compose.yml up -d --build
+$EDITOR .env      # MAGNEMITE_PUBLIC_URL, then three secrets: openssl rand -base64 32
+make up
 ```
 
-The stack publishes plain HTTP on `EDGE_PORT` (8080) and never binds 80 or 443:
-point a virtual host on your own reverse proxy at `http://127.0.0.1:8080` and
+The stack publishes plain HTTP on `EDGE_PORT` (8080) and never binds 80 or 443.
+Point a virtual host on your reverse proxy at `http://127.0.0.1:8080` and
 terminate TLS there.
-
-</Step>
-
-<Step>
-
-### Seed the database (optional)
-
-The admin account is created automatically from `ADMIN_EMAIL` /
-`ADMIN_PASSWORD` the moment the hub boots — nothing to run for that. This
-step is a shortcut for the rest: a starter app target, two version sources, a
-device group, and a first **enrollment token**, printed once so copy it now.
-Skip it and set all of that up by hand from Settings instead, if you'd rather
-start empty.
-
-```sh
-make seed
-```
 
 </Step>
 
@@ -67,8 +33,12 @@ make seed
 
 ### Sign in
 
-Open your domain and log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Sign-up is
-disabled by design.
+Open your domain, log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The admin
+account is created on hub boot; sign-up is disabled by design.
+
+`make seed` is optional and adds a starter app target, two version sources, a
+group and a first **enrollment token** — printed once. Skip it and set the same
+things up from **Settings**.
 
 </Step>
 
@@ -76,14 +46,15 @@ disabled by design.
 
 ### Build the Magisk module
 
-`SERVER` is the **hub** URL — the same value as `MAGNEMITE_PUBLIC_URL`.
+`SERVER` is the **hub** URL — the same value as `MAGNEMITE_PUBLIC_URL`, never
+the dashboard's.
 
 ```sh
 make module SERVER=https://magnemite.example.com TOKEN=<enrollment token>
-# → dist/magnemite-agent-0.1.2.zip
+# → dist/magnemite-agent-1.0.0.zip
 ```
 
-On Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`.
+Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`.
 
 </Step>
 
@@ -92,12 +63,12 @@ On Windows: `./scripts/build-agent.ps1 -Server https://… -Token <token>`.
 ### Flash a box
 
 ```sh
-adb push dist/magnemite-agent-0.1.2.zip /data/local/tmp/
-adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-0.1.2.zip'"
+adb push dist/magnemite-agent-1.0.0.zip /data/local/tmp/
+adb shell "su -c 'magisk --install-module /data/local/tmp/magnemite-agent-1.0.0.zip'"
 adb reboot
 ```
 
-Or in bulk over the LAN: `./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f hosts.txt`.
+In bulk over the LAN: `./scripts/enroll.sh dist/magnemite-agent-1.0.0.zip -f hosts.txt`.
 
 </Step>
 
@@ -106,9 +77,10 @@ Or in bulk over the LAN: `./scripts/enroll.sh dist/magnemite-agent-0.1.2.zip -f 
 ### Watch it appear
 
 The box enrolls itself on first boot and shows up in the fleet table with its
-serial, model, current Pokémon GO version and free space.
+serial, model, installed versions and free space.
 
-That is the only time it needs hands-on work. Every later update rides the socket it opened itself.
+That is the only hands-on step. Every later update — the agent's own included —
+rides the socket the box opened.
 
 </Step>
 
@@ -123,13 +95,13 @@ That is the only time it needs hands-on work. Every later update rides the socke
     description="Canary a build on three boxes before the other 197."
   />
   <Card
-    title="Turn on automatic updates"
-    href="/docs/fleet/auto-update"
-    description="New version, cached, rolled out inside a time window."
+    title="Install your own APK"
+    href="/docs/fleet/manual"
+    description="Upload a build and push it to the boxes you pick."
   />
   <Card
-    title="Wire up Rotom (optional)"
-    href="/docs/fleet/rotom"
-    description="Make the scanner coming back the success signal."
+    title="Watch for dead scanners"
+    href="/docs/fleet/monitoring"
+    description="Rules that restart or reboot a box that stopped working."
   />
 </Cards>

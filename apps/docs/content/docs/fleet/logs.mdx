@@ -1,10 +1,12 @@
 ---
-title: Reading a box's logs
-description: Download logcat as a zip, or watch it live, without going to the box.
+title: Logs and commands
+description: A box's logcat as a zip, live, or a root shell — from the device page.
 icon: ScrollText
 ---
 
-Both live in the device page's **⋯** menu, and both need the box online.
+Three items in a device page's **⋯** menu, all needing the box online:
+**Logcat (.zip)**, **Live logs** and **Execute**. Operators and admins only —
+following an arbitrary file and running a command both read as root.
 
 ## Logcat (.zip)
 
@@ -14,70 +16,67 @@ A snapshot, collected on demand and downloaded through the browser.
 | ------------- | ---------------------------------------------------------------------------------------- |
 | `logcat.txt`  | `logcat -d -v time`, last 50 000 lines                                                   |
 | `agent.log`   | The agent's own log, from `/data/adb/magnemite/`                                         |
-| `agent.log.1` | The rotated one, when the box has been running long enough                               |
+| `agent.log.1` | The rotated one, when the box has been up long enough                                    |
 | `device.txt`  | Serial, model, Android, ABI, LAN address, uptime, disk, memory, load, installed packages |
 
-`config.json` is deliberately **not** in there: it holds the device token.
+`config.json` is deliberately not in there: it holds the device token.
 
-Picking the item asks the box, waits while it zips and uploads, and then the
-download starts — usually a few seconds. If nothing arrives within two minutes
-it gives up and says so; the usual cause is an agent older than this feature,
-which does not know the message.
+The box zips and uploads it with its own device token — the same one it
+downloads bundles with — and the last 3 bundles per box are kept, nothing older
+than 7 days. Nothing arriving within two minutes usually means an agent older
+than the feature.
 
 <Callout type="warn" title="could not upload the bundle: HTTP 404">
   The box built the zip and had nowhere to put it: the edge is not routing `POST /api/logs/*` to the
-  hub, which means it is running an image built before that route existed. Rebuild it — see [when
-  the Caddyfile changed](/docs/deployment/zero-downtime#when-the-caddyfile-changed).
-</Callout>
-
-<Callout type="info">
-  The zip goes to the hub, not through the dashboard: the box uploads it with its own device token,
-  the same one it downloads `.apkm` bundles with. The last 3 bundles per box are kept, and nothing
-  older than 7 days.
+  hub, so it is running an image built before that route existed. Rebuild the edge — see [deploying
+  without dropping the fleet](/docs/deployment/coolify#deploying-without-dropping-the-fleet).
 </Callout>
 
 ## Live logs
 
-A log as it is being written, streamed to the panel while it is open.
+A log as it is written, streamed while the panel is open. The source picker
+offers `logcat`, the agent's log, the scanner's, plus whatever `.log` files the
+box turns out to have; **Another file…** takes any absolute path. Both start
+from the last 200 lines rather than replaying everything, and lines are
+coloured by level.
 
-### Which log
+Files are **not** followed with `tail -F`: that is toybox here, its follow
+support varies by ROM, and when it declines it still prints the tail first —
+which looks exactly like a working stream that then goes quiet. The agent polls
+instead, and picks the file up again when it is rotated or truncated.
 
-The source picker offers `logcat`, the agent's own log, the scanner's
-(`/data/local/tmp/aegis.log`), plus whatever `.log` files the box turns out to
-have — the panel asks it on open. **Another file…** takes any absolute path.
+What it costs:
 
-| Source   | Followed with                                   |
-| -------- | ----------------------------------------------- |
-| `logcat` | `logcat -v time -T 200`                         |
-| Any file | The agent's own follow, starting 200 lines back |
+- One follow per **source** on the box: everyone watching logcat shares one.
+- Closing the panel stops it, so does the box disconnecting, and so does a
+  five-minute deadline the agent renews while anyone is watching — a browser
+  that vanished cannot leave a follow running on someone's TV box.
+- The panel keeps 2000 lines and stores nothing. For something to keep, use the
+  zip.
+- Lines batch roughly once a second; a box logging faster than the socket
+  drains has lines dropped, and the panel says how many.
 
-Both start from the last 200 lines rather than replaying everything.
+## Execute
 
-Files are **not** followed with `tail -F`. That is toybox on these boxes, its
-follow support varies by ROM, and when it decides not to follow it still prints
-the tail first — which looks exactly like a working stream that then goes quiet.
-The agent does the polling itself instead, and picks the file up again when it
-is rotated, truncated or rewritten. A path it cannot open says so in the panel
-rather than sitting empty.
+A shell command run as root on that box — the same `sh -c` the install hooks
+use, invoked by hand. The dialog keeps the ones people were opening adb for:
 
-Lines are coloured by level: the logcat format is taken apart into timestamp,
-tag and message, and a log an app writes itself is coloured on whatever level
-word it used (`ERROR`, `WARN`, `FATAL`, and so on).
+```sh
+am force-stop com.nianticlabs.pokemongo
+am force-stop com.pokemod.aegis
+am startservice com.pokemod.aegis/com.pokemod.aegis.services.MappingService
+```
 
-### What it costs
+Anything else can be typed; `Ctrl`/`Cmd`+`Enter` runs it. Output is stdout and
+stderr together, capped at 64 KB with the **tail** kept, because the end is the
+part that says what happened. 60 seconds and the box gives up — a command that
+needs longer belongs in a script on the box. Nothing is stored; every run goes
+to the audit log with the command and who ran it.
 
-- One follow runs on the box per **source**: everyone watching logcat shares
-  one, and someone watching a file at the same time gets their own.
-- Closing the panel stops it. So does the box disconnecting, and so does a
-  five-minute deadline the agent enforces itself, renewed while anyone is
-  watching — a browser that vanished cannot leave a follow running on someone's
-  TV box.
-- The panel keeps the last 2000 lines and nothing is stored anywhere. For
-  something to keep, use the zip.
-- Lines are sent in batches, roughly once a second. A box logging faster than
-  the socket drains has lines dropped, and the panel says how many rather than
-  pretending it showed everything.
-- Operators and admins only — following an arbitrary file reads it as root.
+<Callout type="warn">
+  This is a root shell on hardware in someone's living room, and nothing validates the command
+  beyond its length. `rm -rf` does exactly what you would expect.
+</Callout>
 
 ## What to look for
 
@@ -85,11 +84,5 @@ word it used (`ERROR`, `WARN`, `FATAL`, and so on).
 | --------------------------------- | ------------------------------------------------------------------------------ |
 | An install that failed            | `agent.log` — the `pm install-create/write/commit` session and its exact error |
 | A self-update that did not happen | `agent.log`, lines starting `self-update:`                                     |
-| The scanner crashing              | `logcat.txt`, around the crash — `FATAL EXCEPTION` and the process name        |
+| The scanner crashing              | `logcat.txt` — `FATAL EXCEPTION` and the process name                          |
 | A box that will not connect       | `agent.log` — TLS and dial errors, plus the reconnect backoff                  |
-
-## Requirements
-
-The agent collects both, so a box needs an agent from **0.1.4** or later. Boxes
-update themselves — see [updating the agent](/docs/fleet/agent-update) — so this
-arrives on its own; a box that has been powered off catches up when it dials in.

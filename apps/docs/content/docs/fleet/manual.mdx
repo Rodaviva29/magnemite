@@ -1,0 +1,85 @@
+---
+title: Manual install
+description: Upload an APK yourself and push it to the boxes you pick.
+icon: Upload
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+**Deployment → Manual install** is for everything a watched source will never
+publish: the scanner, a launcher, a hotfix somebody handed you. You give it a
+file and a set of boxes.
+
+What comes out is an ordinary rollout — same jobs, same retries, same page to
+watch it on. Only the artifact's origin differs.
+
+## The four steps
+
+<Steps>
+
+<Step>
+
+### Which app
+
+The package the APK replaces — pick one the fleet already reports, or type a
+package name. Left empty, it is read from the file's own manifest.
+
+</Step>
+
+<Step>
+
+### The build
+
+A single `.apk`, or an `.apkm` / `.xapk` bundle of splits. A lone APK is
+wrapped into a one-entry bundle on the server, which is what the agent installs
+from; nothing to do on your side.
+
+The version label is whatever you type — `1.4.2`, but also
+`2026-08-26 hotfix`. Left empty, the manifest's `versionName` is used.
+Re-uploading under the same label **replaces** that artifact rather than
+failing, which is what fixing a bad build expects.
+
+</Step>
+
+<Step>
+
+### Which boxes
+
+Search, filter by group, or select the lot. Offline boxes can be picked: the
+job waits queued and dispatches the moment the agent reconnects.
+
+</Step>
+
+<Step>
+
+### Hooks and options
+
+Pre- and post-install hooks travel with **this rollout**. Left empty, each box
+falls back to its group's hooks — which stop and start the _watched_ app, not
+necessarily the one being installed. That matters when the upload is the
+scanner itself.
+
+`Clean install` uninstalls first and wipes app data on every box. `Skip boxes
+already on this label` is off here by default: a re-upload under the same label
+is usually a different build, and skipping would quietly do nothing.
+
+</Step>
+
+</Steps>
+
+## What it leaves behind
+
+An uploaded build becomes an `AppVersion` in `READY`, approved on arrival —
+a human just chose the file — under an app target flagged **manual**. Nothing
+polls a manual target and nothing auto-updates it.
+
+Deleting a build here stops it being offered; the artifact itself is reclaimed
+by **Free old bundles** on the Versions page.
+
+<Callout type="warn">
+  Installing over a different signing key cannot upgrade in place. The agent falls back to
+  uninstall-and-install, which wipes the app's data, and says so on the job.
+</Callout>
+
+Operators and admins only, and every manual rollout is written to the audit log
+with who started it.

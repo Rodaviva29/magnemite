@@ -33,7 +33,7 @@ agents' domain, anything that is not `/ws/device`, `/api/enroll`, `/files/*` or
 It runs as root but **changes no device settings of its own accord**. It
 installs, reads package versions and free space, collects logs when asked, and
 runs the shell you gave it: the pre/post-install hooks, and whatever an operator
-types into [Execute](/docs/fleet/execute).
+types into [Execute](/docs/fleet/logs#execute).
 
 That last pair is worth being clear about. An operator account can run arbitrary
 commands as root on every box in the fleet — that is what the hooks have always

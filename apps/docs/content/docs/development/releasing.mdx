@@ -21,15 +21,15 @@ believes the fleet is already where it should be — you deploy, nothing happens
 and nothing is wrong in the logs either.
 
 ```sh title="VERSION"
-agent=0.1.5   # bump this and the boxes update themselves
-hub=0.1.5     # a label: shown on the Status page
-web=0.1.5     # the same, for the dashboard
-docs=0.1.5    # the same, for the documentation site
+agent=1.0.0   # bump this and the boxes update themselves
+hub=1.0.0     # a label: shown on the Status page
+web=1.0.0     # the same, for the dashboard
+docs=1.0.0    # the same, for the documentation site
 ```
 
 One line per deployable, because they ship on different clocks. Only `agent=`
-changes what the fleet runs; the rest are how you tell, on **Settings →
-Health**, whether a deploy finished — a hub and a dashboard on different
+changes what the fleet runs; the rest are how you tell, on the **Status**
+page, whether a deploy finished — a hub and a dashboard on different
 numbers is a half-applied release.
 
 Same string, same fleet. It is not semver, so a _lower_ `agent=` is a downgrade
@@ -94,7 +94,7 @@ docker compose --env-file .env -f deploy/compose.yml up -d --build hub
 
 The hub's image cross-compiles the agent, publishes the binaries, and tells
 each box to update as it reconnects — full flow, settings and failure handling
-in [updating the agent](/docs/fleet/agent-update).
+in [updating the agent](/docs/fleet/agent#the-agent-updates-itself).
 
 Before shipping something that touches the agent's connection or install path,
 run it against a [fake fleet](/docs/development/fake-fleet): a binary that
@@ -108,7 +108,7 @@ Every device socket goes down with the hub process. The agents reconnect on
 their own with backoff and queued jobs resume, so it is a few minutes of noise
 rather than damage — but on a large fleet, pick your moment. Narrowing a deploy
 so only the dashboard restarts is one setting on
-[Coolify](/docs/deployment/zero-downtime), and free under plain compose
+[Coolify](/docs/deployment/coolify#deploying-without-dropping-the-fleet), and free under plain compose
 (`docker compose --env-file .env -f deploy/compose.yml up -d --build web`).
 
 ## Checklist
@@ -144,7 +144,7 @@ Hub first, then the dashboard. Migrations ride along with the hub.
 
 ### Watch it land
 
-**Settings → Health** shows the agent target version and how many boxes are
+The **Status** page shows the agent target version and how many boxes are
 updating. Each device page lists its own agent updates in the update history,
 including failures and why.
 

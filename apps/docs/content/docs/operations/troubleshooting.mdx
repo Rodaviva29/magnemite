@@ -59,7 +59,7 @@ weight — but so does the single-binary cross-compile.
 
 ## What version is actually running
 
-**Settings → Health** carries the version of every piece, which is the first
+The **Status** page carries the version of every piece, which is the first
 thing to check when something behaves like an older build:
 
 | Card        | Reports                                                          |
@@ -86,10 +86,10 @@ box. What each contains, and what to look for, is in
 
 The hub only sends `agent_update` to a box whose reported version differs from
 its target, that is not mid-job, and whose ABI it has a build for. Check
-**Settings → Health** for the target version and `AGENT_AUTO_UPDATE`, the
+the **Status** page for the target version and `AGENT_AUTO_UPDATE`, the
 device page for the version that box reports, and the box's own log for
 `self-update:` lines. Full flow in
-[updating the agent](/docs/fleet/agent-update).
+[updating the agent](/docs/fleet/agent#the-agent-updates-itself).
 
 ## Small `/data`
 
