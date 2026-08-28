@@ -105,6 +105,7 @@ export async function completeJob(jobId: string, outcome: JobOutcome) {
     publishJob(updated);
   } else {
     const canRetry = job.attempt < job.rollout.maxAttempts;
+    const retryAt = canRetry ? nextAttemptAt(job.rollout.retryBackoffSeconds, job.attempt) : null;
     const updated = await prisma.job.update({
       where: { id: jobId },
       data: {
@@ -113,6 +114,7 @@ export async function completeJob(jobId: string, outcome: JobOutcome) {
         lastError: outcome.error ?? "unknown error",
         dataWiped,
         installMode: outcome.installMode ?? job.installMode,
+        nextAttemptAt: retryAt,
         finishedAt: canRetry ? null : new Date(),
       },
     });
@@ -121,9 +123,10 @@ export async function completeJob(jobId: string, outcome: JobOutcome) {
       phase: canRetry ? "QUEUED" : "FAILED",
     });
     if (canRetry) {
+      const held = retryAt ? ` in ${Math.round((retryAt.getTime() - Date.now()) / 1000)}s` : "";
       await logJobEvent(
         jobId,
-        `re-queued for attempt ${job.attempt + 1}/${job.rollout.maxAttempts}`,
+        `re-queued for attempt ${job.attempt + 1}/${job.rollout.maxAttempts}${held}`,
         { phase: "QUEUED" },
       );
     }
@@ -147,6 +150,9 @@ export async function retryJob(jobId: string) {
       // Reset the counter: a manual retry is a fresh decision, not a
       // continuation of the automatic attempts that already gave up.
       attempt: 0,
+      // An operator pressing retry is not waiting out a backoff they did not
+      // set; the point of the button is that it goes now.
+      nextAttemptAt: null,
       lastError: null,
       queuedAt: new Date(),
       dispatchedAt: null,
@@ -185,6 +191,33 @@ export async function cancelJob(jobId: string) {
 }
 
 /**
+ * Ceiling on the doubling, so a rollout with a generous base and a high
+ * attempt count cannot park a job for the rest of the afternoon.
+ */
+const RETRY_BACKOFF_CEILING_SECONDS = 30 * 60;
+
+/**
+ * When a job that has just failed its Nth attempt may be dispatched again.
+ *
+ * Doubles per attempt from the rollout's base: the first retry is for the
+ * transient thing — a box mid-restart, an uplink that dropped — and gets the
+ * short wait, while a job still failing on its third attempt is telling us
+ * something slower is wrong and there is nothing to gain by asking again
+ * immediately.
+ *
+ * Null when the rollout sets no backoff, which keeps the old behaviour of
+ * retrying on the next tick.
+ */
+function nextAttemptAt(backoffSeconds: number, attempt: number): Date | null {
+  if (backoffSeconds <= 0) return null;
+  const seconds = Math.min(
+    backoffSeconds * 2 ** Math.max(0, attempt - 1),
+    RETRY_BACKOFF_CEILING_SECONDS,
+  );
+  return new Date(Date.now() + seconds * 1000);
+}
+
+/**
  * Re-queue jobs whose agent went quiet. Covers the box that was unplugged
  * mid-install and the socket that died without a close frame.
  */
@@ -206,6 +239,9 @@ export async function requeueStalled(stallTimeoutSeconds: number) {
         state: canRetry ? "QUEUED" : "FAILED",
         progress: 0,
         lastError: `agent went silent for over ${stallTimeoutSeconds}s in ${job.state}`,
+        nextAttemptAt: canRetry
+          ? nextAttemptAt(job.rollout.retryBackoffSeconds, job.attempt)
+          : null,
         finishedAt: canRetry ? null : new Date(),
       },
     });

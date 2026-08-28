@@ -55,9 +55,10 @@ resource's **Environment** tab; the rest have defaults.
 | `AGENT_BIN_DIR`       | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
 
 <Callout type="info">
-  Max concurrent jobs, job stall timeout, source poll interval, the auto-update cooldown, the health
-  sample interval and retention, concurrent agent updates and the device offline timeout are not env
-  vars — they live in **Settings → Hub**, editable at runtime with no restart. See
+  Max concurrent jobs, job stall timeout, the health sample interval and retention, concurrent agent
+  updates and the device offline timeout are not env vars — they live in **Settings → Hub**,
+  editable at runtime with no restart. How often a source is read lives on the source, the
+  auto-update cooldown on the app, and the Rotom sync interval in **Settings → Monitoring**. See
   [rollouts](/docs/fleet/rollouts), [auto-update](/docs/fleet/auto-update) and [health
   history](/docs/fleet/health).
 </Callout>
@@ -70,11 +71,13 @@ optional `pnpm db:seed` adds two starter sources with no env var involved.
 
 ## Rotom
 
-| Variable        | Default | What it is                                                                          |
-| --------------- | ------- | ----------------------------------------------------------------------------------- |
-| `ROTOM_ENABLED` | `false` | See [Rotom](/docs/fleet/rotom).                                                     |
-| `ROTOM_URL`     | —       | RotomNG's HTTP listener, usually `:7072`. `/api` is appended, so either form works. |
-| `ROTOM_SECRET`  | —       | Matches `secret` under `http_listener` in the Rotom config.                         |
+| Variable               | Default | What it is                                                                          |
+| ---------------------- | ------- | ----------------------------------------------------------------------------------- |
+| `ROTOM_ENABLED`        | `false` | See [Rotom](/docs/fleet/rotom).                                                     |
+| `ROTOM_URL`            | —       | RotomNG's HTTP listener, usually `:7072`. `/api` is appended, so either form works. |
+| `ROTOM_SECRET`         | —       | Matches `secret` under `http_listener` in the Rotom config.                         |
+| `ROTOM_BASIC_USERNAME` | —       | BasicAuth username, if a reverse proxy in front of Rotom asks for one.              |
+| `ROTOM_BASIC_PASSWORD` | —       | BasicAuth password for it. Independent of `ROTOM_SECRET`; both may be set.          |
 
 ## Coolify-generated names
 

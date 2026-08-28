@@ -354,7 +354,15 @@ async function reconcileJobs(
     // We think it is running, the agent has never heard of it (or moved on).
     await prisma.job.update({
       where: { id: job.id },
-      data: { state: "QUEUED", progress: 0, dispatchedAt: null, heartbeatAt: null },
+      // Not a failed attempt, so no backoff: the box is here and idle, and the
+      // job it should be running is the one we are putting back.
+      data: {
+        state: "QUEUED",
+        progress: 0,
+        nextAttemptAt: null,
+        dispatchedAt: null,
+        heartbeatAt: null,
+      },
     });
     await logJobEvent(job.id, "agent reconnected without this job, re-queued", { level: "WARN" });
     bus.publish({ kind: "job", jobId: job.id, rolloutId: job.rolloutId, deviceId });

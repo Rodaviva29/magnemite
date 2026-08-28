@@ -255,6 +255,13 @@ func (f *Fake) Disk(string) (uint64, uint64, error) {
 	return 6 * 1024 * 1024 * 1024, 8 * 1024 * 1024 * 1024, nil
 }
 
+// A fake box has no system_server to lose, so it is always ready — except
+// when a test says otherwise, which is how the wait itself gets exercised
+// without hardware.
+func (f *Fake) SystemServicesUp(context.Context) bool {
+	return os.Getenv("MAGNEMITE_FAKE_SYSTEM_DOWN") == ""
+}
+
 func (f *Fake) UptimeSeconds() int64 {
 	return int64(time.Since(f.started).Seconds())
 }

@@ -401,6 +401,14 @@ model AppTarget {
   soakMinutes       Int     @default(30)
   maxConcurrency    Int?
   maxAttempts       Int     @default(3)
+  /// Seconds to hold a failed job before its next attempt. Doubles per
+  /// attempt. Copied onto the rollouts this target creates.
+  retryBackoffSeconds Int   @default(60)
+  /// Minutes since this app's last automatic rollout finished before another
+  /// may start. 0 ships a new build as soon as it is discovered. Per target
+  /// rather than fleet-wide: a scanner people watch all day and a launcher
+  /// nobody notices do not want the same restraint.
+  updateCooldownMinutes Int @default(0)
   /// "HH:MM" local time. When both are set, auto rollouts only dispatch
   /// inside this window.
   windowStart       String?
@@ -435,6 +443,11 @@ model SourceFeed {
   /// Lowest wins when two feeds publish the same version of the same build.
   /// The version is stored once; this decides whose URL is downloaded.
   priority Int     @default(100)
+  /// Minutes between reads of this index. Per feed rather than fleet-wide,
+  /// because the feeds are somebody else's servers: a mirror that publishes
+  /// hourly and one that publishes on release do not want the same cadence,
+  /// and the polite interval is the feed's to decide, not the fleet's.
+  pollMinutes Int   @default(15)
 
   versions AppVersion[]
   targets  AppTargetSource[]
@@ -525,6 +538,15 @@ model Rollout {
   soakMinutes    Int     @default(0)
   maxConcurrency Int?
   maxAttempts    Int     @default(3)
+  /// Seconds to hold a failed job before it may be dispatched again, doubling
+  /// with each attempt and capped at retryBackoffCeilingSeconds.
+  ///
+  /// Zero restores the old behaviour of retrying on the very next scheduler
+  /// tick, which is wrong for the failure that motivated this: an install
+  /// heavy enough to take system_server down leaves the box rebuilding its
+  /// Android for the best part of a minute, and a retry that arrives inside
+  /// that window fails instantly on a box that is about to be fine.
+  retryBackoffSeconds Int @default(60)
 
   /// Hooks for this rollout only, overriding the ones on the device's group.
   /// A manual install of some other app needs to stop and start that app, not
@@ -570,6 +592,10 @@ model Job {
   toVersion   String
 
   queuedAt     DateTime  @default(now())
+  /// Set when a failed attempt is re-queued: the scheduler passes the job over
+  /// until this has gone by. Null means eligible now, which is every job that
+  /// has not failed yet.
+  nextAttemptAt DateTime?
   dispatchedAt DateTime?
   startedAt    DateTime?
   /// Last progress message from the agent, used to detect stalled jobs.
@@ -580,6 +606,7 @@ model Job {
 
   @@unique([rolloutId, deviceId])
   @@index([state])
+  @@index([state, nextAttemptAt])
   @@index([deviceId, state])
 }
 

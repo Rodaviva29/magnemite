@@ -70,9 +70,8 @@ where it already was.
 
 ## What the hub does with them
 
-1. Polls every enabled source every poll interval (**Settings → Hub
-   settings**, 15 minutes by default) and records what it finds as
-   **versions**.
+1. Polls each enabled source on its own **Check every** interval (15 minutes
+   by default, set on the source) and records what it finds as **versions**.
 2. Downloads a version **once**, when it is cached (either by you pressing
    _Cache_ or by auto-update).
 3. Computes a **sha256** while writing it to `ARTIFACT_DIR`.
@@ -96,9 +95,9 @@ database rows.
 
 Sources live in the database, not in `.env`, and are entirely managed from
 **Settings → Version sources** — add, edit, or remove as many as you like
-there, no env var involved. The poll interval itself is in **Settings → Hub
-settings**, alongside the other operational knobs — see [environment
-reference](/docs/deployment/environment).
+there, no env var involved. That includes how often each one is read: **Check
+every** sits on the source, next to its URL and priority, because the polite
+interval belongs to the feed rather than to the fleet.
 
 The optional `pnpm db:seed` / `make seed` adds two starter sources (the
 UnownHash mirror and Silva) on a fresh database, as a convenience — skip it

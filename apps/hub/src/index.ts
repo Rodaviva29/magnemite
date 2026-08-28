@@ -18,7 +18,7 @@ import {
 import { ensureArtifactDir } from "./services/artifacts.js";
 import { sweepOffline } from "./services/devices.js";
 import { markMonitorStart, seedDefaultMonitorRules } from "./services/monitor.js";
-import { rotomEnabled, syncDevices } from "./services/rotom.js";
+import { startRotomSync, stopRotomSync } from "./services/rotom.js";
 import { startScheduler, stopScheduler } from "./services/scheduler.js";
 import { startPolling, stopPolling } from "./services/sources/poller.js";
 import { attachDeviceSocket } from "./ws/deviceSocket.js";
@@ -95,19 +95,14 @@ async function main() {
   }, OFFLINE_SWEEP_MS);
 
   // Optional: keeps each device's Rotom identity and scanning state current,
-  // which is what makes "the scanner came back" a usable success signal.
-  const rotom = setInterval(() => {
-    void syncDevices().catch((err) => log.error({ err }, "rotom sync failed"));
-  }, 60_000);
-  if (rotomEnabled()) {
-    log.info({ url: env.ROTOM_URL }, "rotom integration enabled");
-    void syncDevices().catch(() => undefined);
-  }
+  // which is what makes "the scanner came back" a usable success signal. Its
+  // interval is a live setting, so the loop owns its own timing.
+  startRotomSync();
 
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
     clearInterval(sweeper);
-    clearInterval(rotom);
+    stopRotomSync();
     stopScheduler();
     stopPolling();
     stopAgentUpdateSweep();

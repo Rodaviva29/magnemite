@@ -20,6 +20,7 @@ export type SourceFeedRow = {
   baseUrl: string | null;
   enabled: boolean;
   priority: number;
+  pollMinutes: number;
   versionCount: number;
   /** App targets polled from this feed. */
   targetCount: number;
@@ -45,12 +46,12 @@ export function SourcesSection({ feeds, disabled }: { feeds: SourceFeedRow[]; di
         </CardTitle>
         <CardDescription>
           Any index in the shape <code className="font-mono text-xs">mirror.unownhash.com</code>{" "}
-          publishes works here — a flat JSON array of builds with{" "}
+          publishes works here, a flat JSON array of builds with{" "}
           <code className="font-mono text-xs">filename</code>,{" "}
           <code className="font-mono text-xs">version</code>,{" "}
           <code className="font-mono text-xs">arch</code> and{" "}
-          <code className="font-mono text-xs">size</code>. When two sources list the same build it
-          is stored once, and the lowest priority is the one downloaded.
+          <code className="font-mono text-xs">size</code>.<br></br>When two sources list the same
+          build it is stored once, and the lowest priority is the one downloaded.
         </CardDescription>
       </CardHeader>
 
@@ -140,6 +141,29 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
             defaultValue={feed.priority}
             disabled={disabled}
           />
+          <p className="text-xs text-muted-foreground">
+            Lowest wins when two sources list the same build.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`poll-${feed.id}`}>Check every</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id={`poll-${feed.id}`}
+              name="pollMinutes"
+              type="number"
+              min={1}
+              defaultValue={feed.pollMinutes}
+              disabled={disabled}
+              className="min-w-0 flex-1"
+            />
+            <span className="shrink-0 text-xs text-muted-foreground">minutes</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            This index is somebody else&rsquo;s server. A mirror that publishes hourly and one that
+            publishes on release do not want the same cadence.
+          </p>
         </div>
       </div>
 
@@ -227,16 +251,28 @@ function CreateSourceForm() {
           <Input
             id="new-source-base"
             name="baseUrl"
-            placeholder="https://example.com/apks/ — only if the index lists bare filenames"
+            placeholder="https://example.com/apks/ (only if the index lists bare filenames)"
             className="font-mono text-xs"
           />
         </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="new-source-poll">Check every</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="new-source-poll"
+              name="pollMinutes"
+              type="number"
+              min={1}
+              defaultValue={15}
+              className="min-w-0 flex-1"
+            />
+            <span className="shrink-0 text-xs text-muted-foreground">minutes</span>
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-xs text-muted-foreground">
-          Added last, so an existing build keeps being downloaded from where it already was.
-        </p>
+      <div className="flex justify-end">
         <Button type="submit" size="sm" variant="secondary">
           <Plus className="h-4 w-4" />
           Add source

@@ -108,18 +108,21 @@ export async function syncAdminFromEnv(): Promise<void> {
  * check, so a change here takes effect without restarting the hub.
  */
 export type HubSettingsValues = {
+  // Three knobs used to live here and no longer do: how often an index is read
+  // is a column on `SourceFeed`, and the wait between automatic rollouts is a
+  // column on `AppTarget`. Both were only ever fleet-wide because there was
+  // nowhere else to put them — a mirror that publishes hourly and one that
+  // publishes on release want different cadences, and so do a scanner people
+  // watch all day and a launcher nobody notices. The third, how often Rotom is
+  // asked about the fleet, went to the monitoring group — it is read by the
+  // monitor and its stale delay is measured against it, so the two belong in
+  // one form. Their old rows are inert: `readGroup` only reads the keys with
+  // defaults here.
+
   /** Fleet-wide cap on devices downloading/installing at the same time. */
   maxConcurrentJobs: number;
   /** Seconds without a job_progress message before a job is considered stalled. */
   jobStallTimeoutSeconds: number;
-  /** How often every enabled source is polled, in minutes. */
-  sourcePollMinutes: number;
-  /**
-   * Minutes since an app target's last AUTO rollout finished before another
-   * one is allowed to start. 0 means no cooldown — every discovered update
-   * ships as soon as it's found, the historical behavior.
-   */
-  updateCooldownMinutes: number;
   /**
    * Seconds between stored health samples. Boxes beat every 20 seconds and no
    * chart is read at that resolution, so the hub keeps one beat per interval
@@ -160,8 +163,6 @@ export type HubSettingsValues = {
 const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
   maxConcurrentJobs: 10,
   jobStallTimeoutSeconds: 900,
-  sourcePollMinutes: 15,
-  updateCooldownMinutes: 0,
   metricsSampleSeconds: 60,
   metricsRetentionDays: 7,
   heartbeatSeconds: 20,
@@ -272,7 +273,19 @@ export type MonitorSettingsValues = {
    * reboot without anyone needing to hear about it.
    */
   unreachableAlertSeconds: number;
-  /** Seconds since Rotom last saw a box before that counts as disconnected. */
+  /**
+   * Seconds between asking Rotom what it thinks of every box.
+   *
+   * Ignored entirely when the Rotom integration is off. When it is on, this is
+   * the resolution of everything Rotom-shaped: the Scanner column, and the
+   * `ROTOM_DISCONNECTED` signal below.
+   */
+  rotomSyncSeconds: number;
+  /**
+   * Seconds since Rotom last saw a box before that counts as disconnected.
+   * Measured against `rotomSyncSeconds` above, since a box cannot be known to
+   * be fresher than the last time anyone asked.
+   */
   rotomStaleSeconds: number;
   /**
    * No action on a box for this long after we rebooted it. Without this, a box
@@ -307,6 +320,7 @@ export type MonitorSettingsValues = {
 const MONITOR_SETTINGS_DEFAULTS: MonitorSettingsValues = {
   enabled: false,
   unreachableAlertSeconds: 300,
+  rotomSyncSeconds: 60,
   rotomStaleSeconds: 600,
   rebootGraceSeconds: 600,
   startupGraceSeconds: 180,

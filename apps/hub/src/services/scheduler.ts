@@ -105,6 +105,10 @@ async function dispatchQueued(maxConcurrentJobs: number) {
       state: "QUEUED",
       rollout: { status: { in: ["CANARY", "RUNNING"] } },
       device: { approved: true },
+      // A job that has just failed is held for its rollout's backoff. Filtered
+      // here rather than skipped in the loop below so a held job does not eat
+      // one of the 500 candidate slots on every tick.
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
     },
     include: {
       device: { include: { group: true } },

@@ -44,8 +44,8 @@ function toBigInt(value: number | null | undefined): bigint | null {
 }
 
 /**
- * Stores one point on a box's timeline, if enough time has passed since the
- * last one.
+ * Stores one point on a box's timeline, at most one per `metricsSampleSeconds`
+ * slot of the clock.
  *
  * Called on every heartbeat — every 20 seconds, per box — so the early return
  * is the common path and does no I/O beyond the cached settings read.
@@ -56,12 +56,34 @@ export async function recordSample(deviceId: string, metrics: DeviceMetrics): Pr
 
   const now = Date.now();
   const previous = lastSampleAt.get(deviceId);
-  // A floor of one heartbeat: asking for less than the beat interval cannot
-  // produce more points, it just stores every beat.
   const intervalMs = Math.max(settings.metricsSampleSeconds, 1) * 1000;
-  if (previous !== undefined && now - previous < intervalMs) return;
+
+  // A floor of one heartbeat: asking for less than the beat interval cannot
+  // produce more points, so the gate comes off entirely and every beat is
+  // stored. Keeping it on would cost samples rather than save them — see why
+  // below, and note that at this interval the two grids drift past each other
+  // by a few milliseconds a beat, which is enough to lose a slot outright.
+  if (settings.metricsSampleSeconds > settings.heartbeatSeconds) {
+    // Anchored to the clock, not to the previous sample. Measuring "has it
+    // been a minute since the last one I kept" sounds equivalent and is not:
+    // the reference is an *arrival* time, so the wait restarts from wherever
+    // the network happened to put it. Whenever the sample interval is a
+    // multiple of the beat — 60 and 20, the defaults — that puts the
+    // comparison exactly on the boundary, and the beat that should pass
+    // arrives a few milliseconds early about half the time. Each rejection
+    // pushes the sample a whole beat later and moves the reference with it, so
+    // the error never washes out: the fleet settles at one sample per 80s
+    // against a chart drawing 60s buckets, and the empty buckets read as
+    // outages. Against the clock there is nothing to accumulate.
+    if (
+      previous !== undefined &&
+      Math.floor(now / intervalMs) === Math.floor(previous / intervalMs)
+    )
+      return;
+  }
   // Claimed before the await, so two heartbeats arriving together cannot both
-  // decide they are the one to store.
+  // decide they are the one to store. A timestamp rather than the slot index,
+  // because the prune reads this map as "when was this box last seen".
   lastSampleAt.set(deviceId, now);
 
   const at = new Date(now);

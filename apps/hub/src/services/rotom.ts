@@ -2,6 +2,7 @@ import { prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
+import { getMonitorSettings } from "./hubSettings.js";
 
 /**
  * RotomNG integration.
@@ -17,7 +18,8 @@ import { log } from "../log.js";
  * agreeing, and the install pipeline has its own verification. What is left is
  * three things, all read-only or operator-driven:
  *
- *  - `syncDevices` keeps each box's scanning state current, every minute;
+ *  - `syncDevices` keeps each box's scanning state current, on the interval
+ *    set in Settings → Hub;
  *  - monitoring reads that state as the `ROTOM_DISCONNECTED` signal, and can
  *    `restart` a scanner as a remediation;
  *  - the device page offers the same actions by hand.
@@ -53,6 +55,25 @@ export function rotomEnabled(): boolean {
   return env.ROTOM_ENABLED && Boolean(env.ROTOM_URL);
 }
 
+/**
+ * BasicAuth for a reverse proxy sitting in front of Rotom, from
+ * `ROTOM_BASIC_USERNAME` / `ROTOM_BASIC_PASSWORD`.
+ *
+ * This is a separate axis from `ROTOM_SECRET`, not an alternative spelling of
+ * it: the proxy checks `Authorization`, Rotom checks `X-Rotom-Secret`, and a
+ * Rotom published behind a gated proxy checks both. Whatever is set gets sent,
+ * so all three shapes work without a mode flag to get wrong.
+ *
+ * A username with no password is a real configuration (BasicAuth allows an
+ * empty password), so only a missing username means "not configured".
+ */
+export function rotomBasicAuthHeader(): string | null {
+  const username = env.ROTOM_BASIC_USERNAME;
+  if (!username) return null;
+  const password = env.ROTOM_BASIC_PASSWORD ?? "";
+  return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
+}
+
 function apiUrl(path: string): string {
   const base = (env.ROTOM_URL ?? "").replace(/\/$/, "");
   // Tolerate ROTOM_URL being given with or without the /api suffix.
@@ -63,6 +84,8 @@ function apiUrl(path: string): string {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (env.ROTOM_SECRET) headers["X-Rotom-Secret"] = env.ROTOM_SECRET;
+  const basic = rotomBasicAuthHeader();
+  if (basic) headers["Authorization"] = basic;
   if (init?.body) headers["Content-Type"] = "application/json";
 
   const res = await fetch(apiUrl(path), {
@@ -185,4 +208,50 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
 
   log.debug({ seen: devices.length, matched: matchedIds.size }, "rotom sync");
   return { seen: devices.length, matched: matchedIds.size };
+}
+
+// ---------------------------------------------------------------------------
+// The sync loop
+// ---------------------------------------------------------------------------
+
+/**
+ * How often the interval itself is reconsidered. The same shape the source
+ * poller uses, and for the same reason: the period is a live setting, so a
+ * fixed `setInterval` set up at boot would keep the old one until a restart.
+ */
+const CHECK_INTERVAL_MS = 10_000;
+
+let timer: NodeJS.Timeout | null = null;
+let lastSyncedAt = 0;
+
+async function maybeSync() {
+  // Behind `void maybeSync()`, so anything that escapes here — reading the
+  // settings included — would be an unhandled rejection.
+  try {
+    const settings = await getMonitorSettings();
+    if (Date.now() - lastSyncedAt < settings.rotomSyncSeconds * 1000) return;
+    lastSyncedAt = Date.now();
+    await syncDevices();
+  } catch (err) {
+    log.error({ err }, "rotom sync failed");
+  }
+}
+
+export function startRotomSync(): void {
+  if (timer) return;
+  // The timer runs whether or not Rotom is configured: `syncDevices` returns
+  // immediately when it is not, and starting it unconditionally means turning
+  // the integration on is one restart rather than a special case here.
+  timer = setInterval(() => void maybeSync(), CHECK_INTERVAL_MS);
+  if (!rotomEnabled()) return;
+
+  log.info({ url: env.ROTOM_URL }, "rotom integration enabled");
+  // Once up front, so the Scanner column is populated on a fresh hub rather
+  // than after the first interval.
+  void maybeSync();
+}
+
+export function stopRotomSync(): void {
+  if (timer) clearInterval(timer);
+  timer = null;
 }

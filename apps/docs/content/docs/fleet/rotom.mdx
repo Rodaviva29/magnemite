@@ -5,8 +5,10 @@ icon: RadioTower
 ---
 
 Set `ROTOM_ENABLED=true`, `ROTOM_URL` (RotomNG's HTTP listener, usually
-`:7072`) and `ROTOM_SECRET`, and Magnemite starts asking Rotom what it thinks
-of each box once a minute.
+`:7072`) and `ROTOM_SECRET` — plus `ROTOM_BASIC_USERNAME` and
+`ROTOM_BASIC_PASSWORD` if a reverse proxy sits in front of it — and Magnemite
+starts asking Rotom what it thinks of each box — every 60 seconds by default,
+on **Settings → Monitoring → Ask Rotom every**.
 
 That matters because it is the one question Magnemite cannot answer for itself.
 A box can be online, heartbeating every twenty seconds, with the scanner
@@ -44,6 +46,18 @@ Devices are matched to Rotom by `origin`, falling back to the serial, and then
 to an unambiguous public IP. A box that never matches keeps working normally —
 it simply has no Scanner column and no Rotom-based rule.
 
+## How often it asks
+
+One request for the whole fleet, on **Settings → Monitoring → Ask Rotom
+every** — 60 seconds by default, and the resolution of everything Rotom-shaped:
+the Scanner column and the `ROTOM_DISCONNECTED` signal are both only ever as
+fresh as the last sync.
+
+It sits directly above **Rotom stale after**, which has to be at least two sync
+intervals — below that a rule alerts on the sync's own lag rather than on a box.
+Both are in the one form for exactly that reason, and it refuses the combination
+rather than letting a fleet discover it through the alerts.
+
 ## The health composite
 
 Rotom has no single "healthy" field, so the monitoring rule uses the composite
@@ -66,11 +80,33 @@ ROTOM_URL=http://rotom:7072
 ROTOM_SECRET=…
 ```
 
+### Behind a reverse proxy
+
+A Rotom published through a proxy is often gated by BasicAuth before Rotom
+itself sees the request. That is a **second** credential, not a different
+spelling of the first — the proxy checks `Authorization`, Rotom checks
+`X-Rotom-Secret`:
+
+```sh title=".env"
+ROTOM_BASIC_USERNAME=…
+ROTOM_BASIC_PASSWORD=…
+```
+
+Whatever is set is sent, so all three arrangements work with no mode to choose:
+the secret alone on an internal Rotom, BasicAuth alone in front of a Rotom with
+no secret configured, or both together. Only the username decides whether
+BasicAuth is used at all, so an empty password is a valid pairing.
+
+Getting this wrong shows up as **Enabled, but not answering** with an `HTTP
+401` on the health page — the proxy turning the request away and Rotom
+rejecting the secret look identical from here, so the Rotom card lists which
+credentials it is actually sending.
+
 Built against the
 [RotomNG API](https://github.com/UnownHash/RotomNG/blob/main/docs/RotomNG-API.md).
 
 - `GET /api/device`, `PUT /api/device/{id}/action/{action}`, authenticated with
-  `X-Rotom-Secret`.
+  `X-Rotom-Secret`, plus `Authorization: Basic …` when a proxy needs it.
 
 <Callout type="info">
   If Rotom runs in another compose project, the hub needs to reach it, either put both on a shared

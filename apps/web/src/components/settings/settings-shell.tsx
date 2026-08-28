@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   AppWindow,
   Boxes,
@@ -8,11 +8,10 @@ import {
   KeyRound,
   Rss,
   SearchX,
-  Siren,
+  Binoculars,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { cn } from "@/lib/utils";
@@ -50,8 +49,6 @@ const CATEGORIES: Category[] = [
     terms: [
       "max concurrent jobs",
       "job stall timeout",
-      "source poll interval",
-      "auto-update cooldown",
       "health sample interval",
       "history retention",
       "metrics",
@@ -60,7 +57,7 @@ const CATEGORIES: Category[] = [
   {
     id: "monitoring",
     label: "Monitoring",
-    icon: Siren,
+    icon: Binoculars,
     summary: "What counts as a box gone wrong, what to do about it, and who to tell.",
     terms: [
       "automations",
@@ -77,6 +74,7 @@ const CATEGORIES: Category[] = [
       "loop stalled",
       "unreachable",
       "rotom disconnected",
+      "rotom sync interval",
       "cooldown",
       "quiet hours",
       "actions per hour",
@@ -95,7 +93,9 @@ const CATEGORIES: Category[] = [
       "approve versions",
       "canary devices",
       "soak minutes",
+      "retry backoff",
       "attempts per device",
+      "auto-update cooldown",
       "rollout window",
       "package name",
     ],
@@ -105,7 +105,16 @@ const CATEGORIES: Category[] = [
     label: "Version sources",
     icon: Rss,
     summary: "The indexes new builds are discovered at, and which one wins a tie.",
-    terms: ["index url", "base url", "priority", "poll", "mirror", "feed", "discovery"],
+    terms: [
+      "index url",
+      "base url",
+      "priority",
+      "source poll interval",
+      "poll",
+      "mirror",
+      "feed",
+      "discovery",
+    ],
   },
   {
     id: "columns",
@@ -151,6 +160,35 @@ export function SettingsShell({ sections }: { sections: SettingsSection[] }) {
   const [active, setActive] = useState<SettingsSectionId>("hub");
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+
+  // The pinned header's own height, so the rail can stick *below* it rather
+  // than under it. Measured rather than guessed: the description wraps to a
+  // second line at some widths, and a hard-coded offset is wrong at exactly
+  // the sizes nobody tests.
+  const [headerHeight, setHeaderHeight] = useState(0);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    // `getBoundingClientRect`, not `offsetHeight`: the latter rounds to whole
+    // pixels, and a threshold rounded up past the rail's resting position is
+    // sticky pushing it *down* rather than holding it still.
+    const measure = () => setHeaderHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  // Only for the hairline under the header, which would otherwise be a rule
+  // drawn across the page for no reason while sitting at the top.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const byId = useMemo(() => new Map(sections.map((s) => [s.id, s])), [sections]);
 
@@ -195,7 +233,21 @@ export function SettingsShell({ sections }: { sections: SettingsSection[] }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
+      {/* Pinned on desktop for the same reason the rail is: Settings is a long
+          page, and scrolling into a category should not cost knowing which
+          page you are on. The negative margin swallows the layout's own top
+          padding so the background covers that strip once pinned, and the
+          padding puts the title back exactly where it was — no jump at the
+          moment it sticks. Phones keep it scrolling: a fixed bar already owns
+          the top there. */}
+      <header
+        ref={headerRef}
+        className={cn(
+          "lg:sticky lg:top-0 lg:z-20 lg:-mt-6 lg:bg-background lg:pb-4 lg:pt-6",
+          "lg:border-b lg:transition-colors",
+          scrolled ? "lg:border-border" : "lg:border-transparent",
+        )}
+      >
         <h1 className="font-display text-xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Auto-update policy, where versions are discovered, per-group install hooks, and the tokens
@@ -203,10 +255,18 @@ export function SettingsShell({ sections }: { sections: SettingsSection[] }) {
         </p>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
+      <div
+        className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start"
+        style={{ "--settings-header": `${headerHeight}px` } as CSSProperties}
+      >
         {/* Sticky on desktop so the rail stays reachable from the bottom of a
-            long category; on phones it collapses into a scrolling pill row. */}
-        <div className="flex flex-col gap-3 lg:sticky lg:top-6">
+            long category; on phones it collapses into a scrolling pill row.
+
+            The offset is the pinned header plus `gap-6` — the wrapper's own
+            gap, which is exactly where the rail already sits at rest. Anything
+            smaller and the rail drifts up for those few pixels before it
+            catches, which reads as the sidebar shifting on the first scroll. */}
+        <div className="flex flex-col gap-3 lg:sticky lg:top-[calc(var(--settings-header,0px)+1.5rem)]">
           <SearchInput
             value={query}
             onChange={setQuery}
@@ -258,10 +318,26 @@ export function SettingsShell({ sections }: { sections: SettingsSection[] }) {
                         </span>
                       ) : null}
                     </span>
-                    {count ? (
-                      <Badge variant="secondary" className="tabular-nums">
+                    {/* A plain number rather than a badge: seven filled pills
+                        down the rail read as seven notifications wanting
+                        something, when all they are is how many things each
+                        category holds. `!== undefined`, not truthiness, so a
+                        category that counts and has none of them still says
+                        so — hiding it at zero made "no rules are on" look
+                        identical to "this does not count anything". */}
+                    {count !== undefined ? (
+                      <span
+                        className={cn(
+                          "shrink-0 text-xs tabular-nums",
+                          count === 0
+                            ? "text-muted-foreground/50"
+                            : selected
+                              ? "text-foreground/70"
+                              : "text-muted-foreground",
+                        )}
+                      >
                         {count}
-                      </Badge>
+                      </span>
                     ) : null}
                   </button>
                 );

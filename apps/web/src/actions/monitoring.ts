@@ -85,7 +85,13 @@ export async function updateMonitorSettings(
   };
 
   const unreachableAlertSeconds = int("unreachableAlertSeconds", 30);
-  const rotomStaleSeconds = int("rotomStaleSeconds", 120);
+  // One HTTP request for the whole fleet at once, against somebody else's
+  // service. 10s is as tight as is polite.
+  const rotomSyncSeconds = int("rotomSyncSeconds", 10);
+  // Floored against the Rotom sync interval below, not by a constant: 120 was
+  // two of the 60s the sync used to be fixed at, and it stopped meaning that
+  // the moment the interval became a setting.
+  const rotomStaleSeconds = int("rotomStaleSeconds", 1);
   const rebootGraceSeconds = int("rebootGraceSeconds", 60);
   const startupGraceSeconds = int("startupGraceSeconds", 0);
   const maxActionsPerDeviceHour = int("maxActionsPerDeviceHour", 1);
@@ -95,6 +101,7 @@ export async function updateMonitorSettings(
 
   if (
     unreachableAlertSeconds === null ||
+    rotomSyncSeconds === null ||
     rotomStaleSeconds === null ||
     rebootGraceSeconds === null ||
     startupGraceSeconds === null ||
@@ -105,7 +112,7 @@ export async function updateMonitorSettings(
   ) {
     return {
       error:
-        "Every field needs a whole number. The Rotom delay starts at 120 seconds, the reboot grace at 60, and the two ceilings at 1.",
+        "Every field needs a whole number. The Rotom sync starts at 10 seconds, the reboot grace at 60, and the two ceilings at 1.",
     };
   }
 
@@ -130,10 +137,20 @@ export async function updateMonitorSettings(
       error: `The unreachable delay has to be at least the ${hubSettings.deviceOfflineTimeoutSeconds}s offline timeout — otherwise a box is alerted about before it is even marked offline.`,
     };
   }
+  // Two sync intervals, because a box can never be fresher than the last time
+  // anyone asked Rotom about it. Anything tighter alerts on the sync's own lag.
+  // Both numbers come out of this one form now, so the check is against what
+  // was just typed rather than against whatever is stored elsewhere.
+  if (rotomStaleSeconds < rotomSyncSeconds * 2) {
+    return {
+      error: `Asking Rotom every ${rotomSyncSeconds}s means the stale delay has to be at least ${rotomSyncSeconds * 2}s — anything tighter alerts on the sync's own lag rather than on a box.`,
+    };
+  }
 
   const patch: Partial<MonitorSettingsValues> = {
     enabled: formData.get("enabled") === "on",
     unreachableAlertSeconds,
+    rotomSyncSeconds,
     rotomStaleSeconds,
     rebootGraceSeconds,
     startupGraceSeconds,
@@ -156,6 +173,33 @@ export async function updateMonitorSettings(
       // The webhook is a credential — anyone who has it can post to the
       // channel — so the audit log records that it changed, not what to.
       meta: { ...patch, discordWebhookUrl: webhook ? "set" : "", hubNotified: told },
+    },
+  });
+
+  revalidatePath("/settings");
+  return { ok: true, message: savedMessage(told) };
+}
+
+/**
+ * The master switch, on its own.
+ *
+ * It sits above everything else on the tab and answers one question — is any
+ * of this running — so it saves on the flick rather than through the form that
+ * owns the numbers below it. Writing only `enabled` is what makes that safe:
+ * the patch is partial, so nothing else in the group is touched by a switch
+ * somebody flicked while a number below was half-edited.
+ */
+export async function setMonitorEnabled(enabled: boolean): Promise<ActionState> {
+  const user = await requireOperator();
+  await updateMonitorSettingsInDb({ enabled });
+
+  const told = await tellHub(false);
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "settings.monitoring",
+      meta: { enabled, hubNotified: told },
     },
   });
 
@@ -402,6 +446,43 @@ export async function updateMonitorRule(
       targetType: "MonitorRule",
       targetId: id,
       meta: { name: rule.name, signal: rule.signal, enabled: rule.enabled },
+    },
+  });
+
+  revalidatePath("/settings");
+  return { ok: true, message: savedMessage(told) };
+}
+
+/**
+ * The switch on a rule's row, without opening it.
+ *
+ * Turning a rule off is the thing people do most here — a rule that is firing
+ * on a fault somebody is already fixing, or one being tried out on a quiet
+ * fleet. Making that cost opening the editor and saving fourteen fields back
+ * is how a rule gets left running when it should not be.
+ */
+export async function setMonitorRuleEnabled(id: string, enabled: boolean): Promise<ActionState> {
+  const user = await requireOperator();
+  const rule = await prisma.monitorRule.findUnique({ where: { id }, select: { name: true } });
+  if (!rule) return { error: "That rule is already gone." };
+
+  await prisma.$transaction([
+    prisma.monitorRule.update({ where: { id }, data: { enabled } }),
+    // The counters are about the rule as it was running. A rule switched back
+    // on starts from nothing rather than acting on failures counted while
+    // nobody was watching it.
+    prisma.monitorState.deleteMany({ where: { ruleId: id } }),
+  ]);
+
+  const told = await tellHub(true);
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "monitorRule.update",
+      targetType: "MonitorRule",
+      targetId: id,
+      meta: { name: rule.name, enabled, hubNotified: told },
     },
   });
 

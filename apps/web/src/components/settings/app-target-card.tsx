@@ -23,6 +23,8 @@ export type AppTargetRow = {
   canaryCount: number;
   soakMinutes: number;
   maxAttempts: number;
+  retryBackoffSeconds: number;
+  updateCooldownMinutes: number;
   windowStart: string | null;
   windowEnd: string | null;
   /** Feeds this target is polled from. */
@@ -40,7 +42,9 @@ const PLACEHOLDER: AppTargetRow = {
   autoApprove: false,
   canaryCount: 1,
   soakMinutes: 30,
+  retryBackoffSeconds: 60,
   maxAttempts: 3,
+  updateCooldownMinutes: 0,
   windowStart: null,
   windowEnd: null,
   sourceIds: [],
@@ -143,13 +147,10 @@ export function AppTargetCard({
           </div>
 
           {/* --- where from ------------------------------------------------ */}
-          <Section
-            title="Version sources"
-            hint="Which indexes are polled for this package. A feed lists many apps, so two targets rarely want the same set — and one with nothing ticked is never polled."
-          >
+          <Section title="Version sources" hint="Which indexes are polled for this package.">
             {feeds.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No sources configured yet — add one under Version sources first.
+                No sources configured yet, add one under Version sources first.
               </p>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
@@ -261,6 +262,33 @@ export function AppTargetCard({
                     disabled={policyLocked}
                   />
                 </div>
+
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor={`backoff-${values.id}`}>Retry backoff (s)</Label>
+                  <Input
+                    id={`backoff-${values.id}`}
+                    name="retryBackoffSeconds"
+                    type="number"
+                    min={0}
+                    defaultValue={values.retryBackoffSeconds}
+                    disabled={policyLocked}
+                  />
+                </div>
+
+                {/* Per app, not per fleet: how soon this one may ship again is
+                    a property of the app. A scanner people watch all day and a
+                    launcher nobody notices do not want the same restraint. */}
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor={`cooldown-${values.id}`}>Cooldown (min)</Label>
+                  <Input
+                    id={`cooldown-${values.id}`}
+                    name="updateCooldownMinutes"
+                    type="number"
+                    min={0}
+                    defaultValue={values.updateCooldownMinutes}
+                    disabled={policyLocked}
+                  />
+                </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -292,7 +320,7 @@ export function AppTargetCard({
                   ? "No app target yet — nothing here can be set until one exists."
                   : !enabled
                     ? "Only automatic rollouts use these. Turn the switch above on to set them; a manual rollout takes its canary, soak and attempts from the fleet page instead."
-                    : "Leave both window fields blank to let automatic rollouts dispatch at any hour. The window only gates automatic rollouts; a manual one always starts immediately."}
+                    : "The cooldown is how long after one automatic rollout finishes before another may start — 0 ships a new build as soon as it is discovered. Leave both window fields blank to let automatic rollouts dispatch at any hour; the window only gates automatic ones, a manual rollout always starts immediately."}
               </p>
             </div>
           </Section>

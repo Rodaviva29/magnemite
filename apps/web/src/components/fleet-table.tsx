@@ -639,7 +639,7 @@ function RolloutDialog({
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="canaryCount">Canary devices</Label>
                 <Input id="canaryCount" name="canaryCount" type="number" min={0} defaultValue={1} />
@@ -658,9 +658,21 @@ function RolloutDialog({
                 <Label htmlFor="maxAttempts">Attempts</Label>
                 <Input id="maxAttempts" name="maxAttempts" type="number" min={1} defaultValue={3} />
               </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="retryBackoffSeconds">Retry backoff (s)</Label>
+                <Input
+                  id="retryBackoffSeconds"
+                  name="retryBackoffSeconds"
+                  type="number"
+                  min={0}
+                  defaultValue={60}
+                />
+              </div>
             </div>
             <p className="-mt-2 text-xs text-muted-foreground">
-              The canary devices update first. The rest wait for them to succeed, plus the soak.
+              The canary devices update first. The rest wait for them to succeed, plus the soak. A
+              failed attempt is held for the backoff before the next one, doubling each time — an
+              install heavy enough to restart the box needs that long before it can be retried.
             </p>
 
             <label className="flex items-start gap-2.5 text-sm">

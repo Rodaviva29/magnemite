@@ -2,13 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { SourceFeed } from "@magnemite/db";
 import { Prisma, prisma } from "@magnemite/db";
-import { getHubSettings } from "./hubSettings.js";
+import { getHubSettings, getMonitorSettings } from "./hubSettings.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount } from "../registry.js";
 import { HUB_VERSION } from "../version.js";
 import { agentTargetVersion, agentUpdatesInFlight } from "./agentRelease.js";
-import { listDevices, rotomEnabled } from "./rotom.js";
+import { listDevices, rotomBasicAuthHeader, rotomEnabled } from "./rotom.js";
 import { entriesForTarget, fetchFeedIndex } from "./sources/feed.js";
 import { getPollStat } from "./sources/poller.js";
 import { compareVersions } from "./sources/types.js";
@@ -82,6 +82,7 @@ async function checkHub(): Promise<IntegrationCheck> {
   const agentTarget = agentTargetVersion();
   const updating = agentUpdatesInFlight();
   const settings = await getHubSettings();
+  const monitor = await getMonitorSettings();
 
   return {
     key: "hub",
@@ -94,7 +95,11 @@ async function checkHub(): Promise<IntegrationCheck> {
       { label: "Node", value: process.version },
       { label: "Device sockets", value: String(connectionCount()) },
       { label: "Concurrent installs", value: String(settings.maxConcurrentJobs) },
-      { label: "Source poll", value: `every ${settings.sourcePollMinutes} min` },
+      // No fleet-wide poll interval any more: each feed keeps its own, and the
+      // Sources card below reports them next to what each one last found.
+      ...(rotomEnabled()
+        ? [{ label: "Rotom sync", value: `every ${monitor.rotomSyncSeconds}s` }]
+        : []),
       { label: "Artifacts served by", value: env.SERVE_ARTIFACTS ? "hub (Node)" : "edge (Caddy)" },
       {
         label: "Agent target",
@@ -371,7 +376,7 @@ async function checkRotom(): Promise<IntegrationCheck> {
     return {
       key: "rotom",
       label: "Rotom",
-      summary: "Offline, installs will not pause scanning",
+      summary: "Offline, integration disabled",
       state: "OFF",
       latencyMs: null,
       facts: [
@@ -400,6 +405,13 @@ async function checkRotom(): Promise<IntegrationCheck> {
       facts: [
         { label: "URL", value: env.ROTOM_URL ?? "—" },
         { label: "Secret", value: env.ROTOM_SECRET ? "set" : "none" },
+        // Which of the two credentials is in play, since a 401 looks the
+        // same either way: the proxy rejecting BasicAuth and Rotom
+        // rejecting the secret are both just HTTP 401 here.
+        {
+          label: "Basic auth",
+          value: rotomBasicAuthHeader() ? `as ${env.ROTOM_BASIC_USERNAME}` : "none",
+        },
         { label: "Devices listed", value: String(devices.length) },
         { label: "Matched to our fleet", value: String(matched) },
         // The scanner's own version, which Magnemite never installs and so

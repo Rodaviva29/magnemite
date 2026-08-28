@@ -51,6 +51,8 @@ services:
       ROTOM_ENABLED: ${ROTOM_ENABLED:-false}
       ROTOM_URL: ${ROTOM_URL:-}
       ROTOM_SECRET: ${ROTOM_SECRET:-}
+      ROTOM_BASIC_USERNAME: ${ROTOM_BASIC_USERNAME:-}
+      ROTOM_BASIC_PASSWORD: ${ROTOM_BASIC_PASSWORD:-}
     volumes:
       - artifacts:/data/artifacts
     expose:

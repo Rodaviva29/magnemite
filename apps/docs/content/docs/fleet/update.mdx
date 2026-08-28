@@ -1,6 +1,6 @@
 ---
 title: App update explained
-description: The eight steps between "install this version" and a verified package on the box.
+description: The nine steps between "install this version" and a verified package on the box.
 icon: PackageCheck
 ---
 
@@ -14,6 +14,32 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 
 This is important, it refuses to start unless `/data` has roughly **3× the bundle size** free. A
 172 MB `.apkm` unpacks to about 250 MB, and both sit on disk at once.
+
+</Step>
+
+<Step>
+
+### Wait for system_server
+
+`service check package` and `service check activity`, until both answer. Almost always instant.
+
+It matters on a retry: an install heavy enough to take system_server down leaves the box rebuilding
+its Android for the best part of a minute, with the kernel and the agent running straight through
+it. Without this wait, `am` reports `Can't find service: activity` and `pm install-create` reports
+`Can't find service: package` — a healthy box burning an attempt in under a second.
+
+</Step>
+
+<Step>
+
+### Run the pre-install hook
+
+Usually stopping the scanner/MITM. Configured per device group, or overridden per rollout.
+
+Before the download, not after it: the scanner is what saturates the uplink on these boxes, and a
+170 MB pull sharing it costs the scanner its Rotom socket. It reconnects with no backoff at all,
+and that storm is still going when the install asks system_server for the heaviest thing it ever
+does.
 
 </Step>
 
@@ -34,15 +60,6 @@ computed while caching.
 An `.apkm` is a zip holding `base.apk` plus `split_config.arm64_v8a.apk`. The
 agent selects base plus the matching ABI, and the nearest density and language
 splits if the bundle has them.
-
-</Step>
-
-<Step>
-
-### Run the pre-install hook
-
-Usually stopping the scanner/MITM. Configured per device group, or overridden
-per rollout.
 
 </Step>
 
@@ -84,6 +101,11 @@ is not taken as proof.
 ### Run the post-install hook
 
 Usually starting the scanner again or a personalized command.
+
+It runs on **every** way out, not only the successful one — a download that 404s, a commit that
+takes system_server with it, a job that hits its deadline. The pre-install hook stopped the box;
+something has to start it again, and the moments a box is most likely to be left stopped are the
+ones nobody is watching.
 
 </Step>
 

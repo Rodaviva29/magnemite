@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { CircleCheck, Play, Siren } from "lucide-react";
+import { Binoculars, CircleCheck, Play } from "lucide-react";
 import { runMonitorNow } from "@/actions/monitoring";
 import type { ActionState } from "@/actions/rollouts";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/table";
 import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { RelativeTime } from "@/components/relative-time";
+import { actionPastLabel, signalLabel } from "@/lib/monitor-vocabulary";
 import { useTablePagination } from "@/lib/table-pagination";
 
 export type MonitorActivityRow = {
@@ -36,28 +37,6 @@ export type MonitorActivityRow = {
   actionOk: boolean | null;
   detail: string | null;
   notified: boolean;
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  NOTIFY_ONLY: "Told you",
-  RESTART_APP: "Restarted the app",
-  KILL_APP: "Killed the app",
-  CLEAR_CACHE_RESTART: "Cleared the cache and restarted",
-  SEND_KEYEVENT: "Sent ENTER",
-  START_SERVICE: "Started the service",
-  SHELL: "Ran a command",
-  REBOOT: "Rebooted the box",
-  ROTOM_RESTART: "Restarted the scanner in Rotom",
-};
-
-const SIGNAL_LABELS: Record<string, string> = {
-  AGENT_OFFLINE: "Box is unreachable",
-  SERVICE_DOWN: "Service is down",
-  APP_NOT_FOREGROUND: "App is not in focus",
-  APP_ANR: "App is not responding",
-  HEALTH_CHECK_FAILED: "Health check is failing",
-  LOOP_STALLED: "Loop has stalled",
-  ROTOM_DISCONNECTED: "Rotom lost the box",
 };
 
 const LEVEL_FILTER = [
@@ -197,7 +176,7 @@ export function MonitorActivity({
                         <span>{event.message}</span>
                       </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {SIGNAL_LABELS[event.signal] ?? event.signal}
+                        {signalLabel(event.signal)}
                         {/* Whether it was announced, because a quiet Discord
                             with a busy feed is a question people ask. */}
                         {event.notified ? " · announced" : ""}
@@ -212,7 +191,7 @@ export function MonitorActivity({
                     <TableCell>
                       {event.action ? (
                         <Badge variant={event.actionOk === false ? "danger" : "secondary"}>
-                          {ACTION_LABELS[event.action] ?? event.action}
+                          {actionPastLabel(event.action)}
                           {event.actionOk === false ? " — failed" : ""}
                         </Badge>
                       ) : (
@@ -265,14 +244,14 @@ function StatusStrip({
         <span className="flex items-center gap-2">
           {enabled ? (
             <>
-              <Siren className="h-4 w-4 text-primary" />
+              <Binoculars className="h-4 w-4 text-primary" />
               <span>
                 Watching, {ruleCount} {ruleCount === 1 ? "rule" : "rules"} on
               </span>
             </>
           ) : (
             <>
-              <Siren className="h-4 w-4 text-muted-foreground" />
+              <Binoculars className="h-4 w-4 text-muted-foreground" />
               <span className="text-muted-foreground">Switched off</span>
             </>
           )}

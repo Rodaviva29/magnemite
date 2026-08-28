@@ -31,6 +31,7 @@ const createRolloutBody = z.object({
   soakMinutes: z.number().int().min(0).optional(),
   maxConcurrency: z.number().int().positive().nullable().optional(),
   maxAttempts: z.number().int().positive().optional(),
+  retryBackoffSeconds: z.number().int().min(0).optional(),
   skipUpToDate: z.boolean().optional(),
   createdById: z.string().nullable().optional(),
   note: z.string().nullable().optional(),

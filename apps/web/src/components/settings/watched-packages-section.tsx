@@ -45,9 +45,7 @@ export function WatchedPackagesSection({
           Fleet columns
         </CardTitle>
         <CardDescription>
-          Extra packages to show the installed version of, one column each. Nothing here is updated
-          by Magnemite — each box simply reports what it has on every heartbeat, and the column is
-          sortable and searchable like the rest.
+          Extra packages to show the installed version of, one column each.
         </CardDescription>
       </CardHeader>
 

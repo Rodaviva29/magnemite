@@ -11,12 +11,13 @@ import {
   PanelLeft,
   Rocket,
   Settings,
-  Siren,
+  Binoculars,
   Upload,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
@@ -39,7 +40,7 @@ const SECTIONS: { label?: string; links: NavLink[] }[] = [
   {
     label: "System",
     links: [
-      { href: "/monitoring", label: "Monitoring", icon: Siren },
+      { href: "/monitoring", label: "Monitoring", icon: Binoculars },
       { href: "/status", label: "Status", icon: Activity },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
@@ -58,6 +59,18 @@ export function Nav({
   activeRollouts: number;
 }) {
   const pathname = usePathname();
+
+  // A fleet with one box away is normal and must not sit there looking like an
+  // alarm; a fleet with none is the thing worth colouring. Everything between
+  // is just how many are up.
+  const tone =
+    total === 0 ? "muted" : online === total ? "success" : online === 0 ? "danger" : "primary";
+  const dotTone = {
+    muted: "bg-muted-foreground/40",
+    success: "bg-success",
+    danger: "bg-destructive",
+    primary: "bg-primary",
+  }[tone];
 
   // Collapsing is a desktop affordance; on phones the same sidebar slides in
   // over the page instead, so the two states are tracked separately.
@@ -251,19 +264,34 @@ export function Nav({
 
         <div className="flex flex-col gap-3 border-t border-border p-3">
           <Tooltip label={`${online} of ${total} devices online`} disabled={!collapsed}>
-            <div
-              className={cn(
-                "flex items-baseline justify-between px-1 text-xs",
-                collapsed && "lg:justify-center lg:px-0",
-              )}
-            >
-              <span className={cn("text-muted-foreground", collapsed && "lg:hidden")}>
-                Devices online
-              </span>
-              <span className="font-mono tabular-nums">
-                {online}
-                <span className="text-muted-foreground">/{total}</span>
-              </span>
+            {/* `12/40` in a monospace font was a fraction, and read like one —
+                a ratio to work out rather than a fleet to glance at. A dot for
+                the state, the two numbers in words, and a bar for the share
+                answers it without arithmetic, and the bar is the only part
+                that survives the rail collapsing. */}
+            <div className={cn("flex flex-col gap-2 px-1", collapsed && "lg:px-0")}>
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-2 text-xs",
+                  collapsed && "lg:justify-center",
+                )}
+              >
+                <span className={cn("text-muted-foreground", collapsed && "lg:hidden")}>
+                  Devices online
+                </span>
+                <span className="flex items-center gap-1.5 tabular-nums">
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotTone)} />
+                  <span className="font-medium">{online}</span>
+                  <span className={cn("text-muted-foreground", collapsed && "lg:hidden")}>
+                    of {total}
+                  </span>
+                </span>
+              </div>
+              <Progress
+                value={total > 0 ? (online / total) * 100 : 0}
+                tone={tone}
+                className="h-1"
+              />
             </div>
           </Tooltip>
 

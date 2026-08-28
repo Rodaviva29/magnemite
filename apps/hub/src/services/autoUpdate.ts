@@ -1,5 +1,4 @@
 import { prisma } from "@magnemite/db";
-import { getHubSettings } from "./hubSettings.js";
 import { log } from "../log.js";
 import { cacheVersion } from "./artifacts.js";
 import { createRollout } from "./rollouts.js";
@@ -28,14 +27,15 @@ export async function runAutoUpdate(appTargetId: string) {
   });
   if (active > 0) return null;
 
-  const settings = await getHubSettings();
-  if (settings.updateCooldownMinutes > 0) {
+  // The target's own cooldown, not the fleet's: how soon after one automatic
+  // rollout the next may start is a property of the app being shipped.
+  if (target.updateCooldownMinutes > 0) {
     const lastAuto = await prisma.rollout.findFirst({
       where: { mode: "AUTO", finishedAt: { not: null }, appVersion: { appTargetId } },
       orderBy: { finishedAt: "desc" },
     });
     if (lastAuto?.finishedAt) {
-      const readyAt = lastAuto.finishedAt.getTime() + settings.updateCooldownMinutes * 60_000;
+      const readyAt = lastAuto.finishedAt.getTime() + target.updateCooldownMinutes * 60_000;
       if (readyAt > Date.now()) return null;
     }
   }
@@ -75,6 +75,7 @@ export async function runAutoUpdate(appTargetId: string) {
     soakMinutes: target.soakMinutes,
     maxConcurrency: target.maxConcurrency,
     maxAttempts: target.maxAttempts,
+    retryBackoffSeconds: target.retryBackoffSeconds,
     skipUpToDate: true,
     note: `auto-update to ${latest.version} (${latest.source.toLowerCase()})`,
   });

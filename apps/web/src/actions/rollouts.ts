@@ -46,6 +46,7 @@ export async function startRollout(_prev: ActionState, formData: FormData): Prom
       canaryCount: number("canaryCount", 0),
       soakMinutes: number("soakMinutes", 0),
       maxAttempts: number("maxAttempts", 3),
+      retryBackoffSeconds: number("retryBackoffSeconds", 60),
       createdById: user.id,
       note: (formData.get("note") as string) || null,
     });

@@ -5,15 +5,12 @@ import { SlidersHorizontal } from "lucide-react";
 import { updateHubSettings } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { SaveButton } from "@/components/ui/save-button";
+import { NumberField, SettingGroup } from "@/components/settings/setting-fields";
 
 export type HubSettingsRow = {
   maxConcurrentJobs: number;
   jobStallTimeoutSeconds: number;
-  sourcePollMinutes: number;
-  updateCooldownMinutes: number;
   metricsSampleSeconds: number;
   metricsRetentionDays: number;
   heartbeatSeconds: number;
@@ -21,6 +18,15 @@ export type HubSettingsRow = {
   deviceOfflineTimeoutSeconds: number;
 };
 
+/**
+ * The fleet-wide knobs, in three groups.
+ *
+ * They used to be one grid ten fields long, in the order they happened to be
+ * added: the heartbeat sat between a sample interval and an agent concurrency,
+ * and the offline timeout — which is measured in heartbeats — was four rows
+ * away from it. Grouped, the couplings sit next to each other, which is the
+ * only way the numbers explain themselves.
+ */
 export function HubSettingsForm({
   settings,
   disabled,
@@ -38,158 +44,83 @@ export function HubSettingsForm({
           Hub settings
         </CardTitle>
         <CardDescription>
-          Fleet-wide operational knobs. Changes take effect within a few seconds, no restart needed.
+          Fleet-wide operational knobs. Changes take effect within a few seconds, no restart needed,
+          except the heartbeat, which each box adopts on its next connection.
         </CardDescription>
       </CardHeader>
 
       <CardContent>
-        <form action={formAction} className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="maxConcurrentJobs">Max concurrent jobs</Label>
-              <Input
-                id="maxConcurrentJobs"
-                name="maxConcurrentJobs"
-                type="number"
-                min={1}
-                defaultValue={settings.maxConcurrentJobs}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                Fleet-wide cap on devices downloading or installing at once.
-              </p>
-            </div>
+        <form action={formAction} className="flex flex-col gap-6">
+          <SettingGroup
+            title="The beat"
+            hint="Everything else timed in seconds is measured against the heartbeat, so it is set first. The form refuses a combination where one dropped beat marks a box offline."
+          >
+            <NumberField
+              name="heartbeatSeconds"
+              label="Heartbeat"
+              value={settings.heartbeatSeconds}
+              min={5}
+              disabled={disabled}
+              hint="How often each box reports in. Unlike everything else here it lives on the boxes: one adopts it on its next connection, and an agent too old to read it keeps beating at 20s."
+            />
+            <NumberField
+              name="deviceOfflineTimeoutSeconds"
+              label="Offline after"
+              value={settings.deviceOfflineTimeoutSeconds}
+              min={30}
+              disabled={disabled}
+              hint="Silence from a box before it is marked offline, really how many missed beats you will tolerate. Raise it for a site on a flaky uplink."
+            />
+          </SettingGroup>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="jobStallTimeoutSeconds">Job stall timeout (seconds)</Label>
-              <Input
-                id="jobStallTimeoutSeconds"
-                name="jobStallTimeoutSeconds"
-                type="number"
-                min={1}
-                defaultValue={settings.jobStallTimeoutSeconds}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                Silence from a box mid-job before it's re-queued.
-              </p>
-            </div>
+          <SettingGroup title="Installing">
+            <NumberField
+              name="maxConcurrentJobs"
+              label="Concurrent installs"
+              value={settings.maxConcurrentJobs}
+              min={1}
+              unit="boxes"
+              disabled={disabled}
+              hint="Fleet-wide cap on boxes downloading at once."
+            />
+            <NumberField
+              name="agentUpdateConcurrency"
+              label="Concurrent agent updates"
+              value={settings.agentUpdateConcurrency}
+              min={1}
+              unit="boxes"
+              disabled={disabled}
+              hint="How many boxes may swap their agent binary at once. The whole fleet reconnecting after a hub deploy is when this matters."
+            />
+            <NumberField
+              name="jobStallTimeoutSeconds"
+              label="Job stalls after"
+              value={settings.jobStallTimeoutSeconds}
+              min={1}
+              disabled={disabled}
+              hint="Silence from a box mid-job before that job is re-queued to it."
+            />
+          </SettingGroup>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="sourcePollMinutes">Source poll interval (minutes)</Label>
-              <Input
-                id="sourcePollMinutes"
-                name="sourcePollMinutes"
-                type="number"
-                min={1}
-                defaultValue={settings.sourcePollMinutes}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                How often every enabled version source is checked for new builds.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="updateCooldownMinutes">Auto-update cooldown (minutes)</Label>
-              <Input
-                id="updateCooldownMinutes"
-                name="updateCooldownMinutes"
-                type="number"
-                min={0}
-                defaultValue={settings.updateCooldownMinutes}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                Minimum time since an app's last auto-update rollout finished before another one is
-                allowed to start. 0 updates as soon as a new version is discovered.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="metricsSampleSeconds">Health sample interval (seconds)</Label>
-              <Input
-                id="metricsSampleSeconds"
-                name="metricsSampleSeconds"
-                type="number"
-                min={5}
-                defaultValue={settings.metricsSampleSeconds}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                How often a box's CPU, memory, storage, temperature and per-app usage are kept for
-                the history charts. Cannot be shorter than the heartbeat — there is nothing extra to
-                store between beats.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="heartbeatSeconds">Heartbeat interval (seconds)</Label>
-              <Input
-                id="heartbeatSeconds"
-                name="heartbeatSeconds"
-                type="number"
-                min={5}
-                defaultValue={settings.heartbeatSeconds}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                How often each box reports in. Unlike everything else here it lives on the boxes: a
-                box adopts it on its next connection, not straight away, and an agent too old to
-                read it keeps beating at 20s. The offline timeout and the sample interval are
-                measured against it.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="agentUpdateConcurrency">Concurrent agent updates</Label>
-              <Input
-                id="agentUpdateConcurrency"
-                name="agentUpdateConcurrency"
-                type="number"
-                min={1}
-                defaultValue={settings.agentUpdateConcurrency}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                How many boxes may swap their agent binary at once. The whole fleet reconnecting
-                after a hub deploy is when this matters.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="deviceOfflineTimeoutSeconds">Device offline timeout (seconds)</Label>
-              <Input
-                id="deviceOfflineTimeoutSeconds"
-                name="deviceOfflineTimeoutSeconds"
-                type="number"
-                min={30}
-                defaultValue={settings.deviceOfflineTimeoutSeconds}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                Silence from a box before it is marked offline. Boxes beat every 20 seconds, so this
-                is really how many missed beats you will tolerate — raise it for a site on a flaky
-                uplink.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="metricsRetentionDays">Health history retention (days)</Label>
-              <Input
-                id="metricsRetentionDays"
-                name="metricsRetentionDays"
-                type="number"
-                min={0}
-                defaultValue={settings.metricsRetentionDays}
-                disabled={disabled}
-              />
-              <p className="text-xs text-muted-foreground">
-                How long those samples are kept before the hub prunes them. 0 turns recording off
-                and drops what is already stored.
-              </p>
-            </div>
-          </div>
+          <SettingGroup title="Health history">
+            <NumberField
+              name="metricsSampleSeconds"
+              label="Sample every"
+              value={settings.metricsSampleSeconds}
+              min={5}
+              disabled={disabled}
+              hint="How often a box's CPU, memory, storage, temperature and per-app usage are kept for the charts. Never shorter than the heartbeat, there is nothing extra to store between beats."
+            />
+            <NumberField
+              name="metricsRetentionDays"
+              label="Keep for"
+              value={settings.metricsRetentionDays}
+              min={0}
+              unit="days"
+              disabled={disabled}
+              hint="How long those samples live before the hub prunes them. 0 turns recording off and drops what is already stored. What the monitoring rules write is kept separately, in Settings → Monitoring."
+            />
+          </SettingGroup>
 
           {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
           {/* The button reports a plain save on its own. This is for the one

@@ -41,6 +41,15 @@ const schema = z.object({
     .transform((v) => v === "true" || v === "1"),
   ROTOM_URL: z.string().optional(),
   ROTOM_SECRET: z.string().optional(),
+  /**
+   * BasicAuth for a reverse proxy in front of Rotom. Independent of
+   * `ROTOM_SECRET`: a proxy that gates the whole listener wants the
+   * `Authorization` header, Rotom itself wants `X-Rotom-Secret`, and a Rotom
+   * published behind such a proxy needs both at once. Set whichever the
+   * deployment actually has.
+   */
+  ROTOM_BASIC_USERNAME: z.string().optional(),
+  ROTOM_BASIC_PASSWORD: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

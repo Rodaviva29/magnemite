@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { KeyRound, Plus } from "lucide-react";
 import { createEnrollmentToken, revokeEnrollmentToken } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
@@ -45,6 +45,9 @@ export function EnrollmentSection({
 }) {
   const [state, formAction] = useActionState<TokenState, FormData>(createEnrollmentToken, {});
   const [pending, startTransition] = useTransition();
+  // Controlled only so the box can say what the tick means. Radix writes the
+  // hidden `autoApprove` input either way, so the form posts the same.
+  const [autoApprove, setAutoApprove] = useState(true);
 
   const sample = `{
   "serverUrl": "${publicUrl}",
@@ -69,7 +72,7 @@ export function EnrollmentSection({
           <div className="flex flex-col gap-2 rounded-md border border-success/40 bg-success/10 p-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <KeyRound className="h-4 w-4" />
-              Copy this now — it is not shown again
+              Copy this now (it is not shown again)
             </div>
             <code className="block break-all rounded bg-background p-2 font-mono text-xs">
               {state.token}
@@ -160,11 +163,26 @@ export function EnrollmentSection({
                 className="w-32"
               />
             </div>
-            <div className="flex items-center gap-2 pb-2.5">
-              <Checkbox id="token-auto-approve" name="autoApprove" defaultChecked />
-              <Label htmlFor="token-auto-approve" className="font-normal">
-                Auto-approve devices
-              </Label>
+            {/* Boxed and labelled from above like the two fields beside it: a
+                bare checkbox sitting on the baseline had to be nudged down by
+                hand to line up, and still read as an afterthought rather than
+                the third thing a token decides. */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="token-auto-approve">Auto-approve devices</Label>
+              <label
+                htmlFor="token-auto-approve"
+                className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-input bg-card px-3 text-sm"
+              >
+                <Checkbox
+                  id="token-auto-approve"
+                  name="autoApprove"
+                  checked={autoApprove}
+                  onCheckedChange={(value) => setAutoApprove(value === true)}
+                />
+                <span className="text-muted-foreground">
+                  {autoApprove ? "Joins the fleet" : "Waits for review"}
+                </span>
+              </label>
             </div>
             <Button type="submit" variant="outline">
               <Plus />

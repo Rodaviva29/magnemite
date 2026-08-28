@@ -1,5 +1,4 @@
 import { prisma } from "@magnemite/db";
-import { getHubSettings } from "../hubSettings.js";
 import { bus } from "../../bus.js";
 import { log } from "../../log.js";
 import { runAutoUpdate } from "../autoUpdate.js";
@@ -11,7 +10,16 @@ const CHECK_INTERVAL_MS = 30_000;
 
 let timer: NodeJS.Timeout | null = null;
 let inFlight = false;
-let lastPolledAt = 0;
+
+/**
+ * When each feed was last read, keyed by feed id.
+ *
+ * In memory rather than a column: it is a scheduling detail, not a fact about
+ * the feed, and a hub restart polls everything ten seconds in anyway. A feed
+ * that has never been read is due immediately, which is what makes a newly
+ * added source appear without waiting out its interval.
+ */
+const lastPolledByFeed = new Map<string, number>();
 
 /** What each feed did the last time it was asked, for the Status page. */
 export type SourcePollStat = {
@@ -72,12 +80,18 @@ export type PollSummary = {
   errors: { feed: string; error: string }[];
 };
 
-export async function pollAllSources(): Promise<PollSummary> {
+/**
+ * Read the feeds and store what they list.
+ *
+ * `only` narrows the pass to the feeds whose interval has come round; with it
+ * absent every enabled feed is read, which is what "Check now" and the first
+ * poll after a restart both want.
+ */
+export async function pollAllSources(only?: ReadonlySet<string>): Promise<PollSummary> {
   // A poll already under way is doing this call's work for it. Saying so is
   // better than a silent no-op that looks like a dead button.
   if (inFlight) return { ran: false, targets: 0, feeds: 0, listed: 0, discovered: 0, errors: [] };
   inFlight = true;
-  lastPolledAt = Date.now();
 
   const feedsSeen = new Set<string>();
   // Keyed by feed: the same feed is polled once per target, and one broken
@@ -122,24 +136,31 @@ export async function pollAllSources(): Promise<PollSummary> {
       // that exists — a feed is an index of many apps, and two targets rarely
       // want the same set. Disabling a feed skips it everywhere without
       // unpairing it from anything.
-      const feeds = target.sources
-        .map((link) => link.feed)
-        .filter((feed) => feed.enabled)
+      const enabled = target.sources.map((link) => link.feed).filter((feed) => feed.enabled);
+
+      const feeds = enabled
+        // Feeds keep their own intervals, so a pass usually reads some of them
+        // and leaves the rest until their turn.
+        .filter((feed) => !only || only.has(feed.id))
         // `dedupe` keeps the first sighting of a build, so priority order is
         // what makes the lowest-priority feed the one whose URL is downloaded.
         .sort((a, b) => a.priority - b.priority);
 
-      if (feeds.length === 0) {
+      if (enabled.length === 0) {
         log.warn(
           { target: target.packageName },
           "no enabled version sources selected — nothing to poll",
         );
         continue;
       }
+      // Every one of this target's feeds was read recently enough. Nothing new
+      // can have arrived for it, so there is nothing to run auto-update on.
+      if (feeds.length === 0) continue;
 
       const found: DiscoveredVersion[] = [];
 
       for (const feed of feeds) {
+        lastPolledByFeed.set(feed.id, Date.now());
         try {
           const listed = await pollFeed(feed, target);
           found.push(...listed);
@@ -276,20 +297,38 @@ export async function pollAllSources(): Promise<PollSummary> {
 }
 
 /**
- * Ticks every `CHECK_INTERVAL_MS` and polls once `sourcePollMinutes` (read
- * live from Settings on every check) has actually elapsed, rather than
- * setting a fixed interval up front — so changing the interval from the
- * dashboard takes effect without a hub restart.
+ * Ticks every `CHECK_INTERVAL_MS` and reads whichever feeds have come round,
+ * rather than setting a fixed interval up front — so an interval changed from
+ * the dashboard takes effect without a hub restart.
+ *
+ * The intervals are per feed now, so this asks which of them are due instead
+ * of whether "the poll" is. A pass that finds none does nothing at all.
  */
 async function maybeTick() {
   // Everything in here is behind `void maybeTick()`, so a rejection that
-  // escaped — reading the settings included, not just the poll itself — would
-  // be an unhandled one.
+  // escaped — reading the feeds included, not just the poll itself — would be
+  // an unhandled one.
   try {
-    const settings = await getHubSettings();
-    const intervalMs = settings.sourcePollMinutes * 60_000;
-    if (Date.now() - lastPolledAt < intervalMs) return;
-    await pollAllSources();
+    // Only feeds something is actually polled from. A source paired to no
+    // target is due forever and would wake a full pass every tick to discover
+    // it has nothing to read.
+    const feeds = await prisma.sourceFeed.findMany({
+      where: {
+        enabled: true,
+        targets: { some: { appTarget: { enabled: true, manual: false } } },
+      },
+      select: { id: true, pollMinutes: true },
+    });
+
+    const now = Date.now();
+    const due = new Set(
+      feeds
+        .filter((feed) => now - (lastPolledByFeed.get(feed.id) ?? 0) >= feed.pollMinutes * 60_000)
+        .map((feed) => feed.id),
+    );
+    if (due.size === 0) return;
+
+    await pollAllSources(due);
   } catch (err) {
     log.error({ err }, "source poll failed");
   }

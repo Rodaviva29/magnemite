@@ -1,7 +1,7 @@
 ---
 title: Monitoring and automations
 description: Rules that watch a box, act when it stops working, and say so in Discord.
-icon: Siren
+icon: Binoculars
 ---
 
 A box can be online, heartbeating every twenty seconds, and scanning nothing.
@@ -13,6 +13,12 @@ fine.
 **Settings → Monitoring** turns those situations into rules. A rule is a signal,
 how many bad readings in a row it takes to count, and a ladder of what to do
 about it — soft first, hard second.
+
+The rules are a list, one row each: the signal it watches, what it acts on, and
+its ladder as chips in the order it is climbed. The switch on a row turns a rule
+on or off in place — the thing done most often here, and it should not cost
+opening anything. Clicking the row opens the rule itself in a dialog, where the
+fields are grouped by the four questions above.
 
 The **Monitoring** page in the sidebar is the other half: what the rules
 actually saw and did, across the fleet, searchable and filterable by severity.
@@ -27,15 +33,15 @@ is only where the rules are written.
 
 ## What it watches
 
-| Signal | Answered by | What it means |
-| --- | --- | --- |
-| **Service is down** | a probe, or the process list | The scanner's service is not running |
-| **App is not in focus** | the box | Something else owns the screen — usually the launcher |
-| **App is not responding** | the box | The package is sitting on an ANR dialog |
-| **Health check is failing** | a probe | The scanner is logging faults faster than work |
-| **Loop has stalled** | a probe | The scanner is alive and has stopped doing anything |
-| **Box is unreachable** | the hub | The socket has been gone longer than the alert delay |
-| **Rotom lost the box** | the hub | Rotom is not seeing it, or would not hand it work |
+| Signal                      | Answered by                  | What it means                                         |
+| --------------------------- | ---------------------------- | ----------------------------------------------------- |
+| **Service is down**         | a probe, or the process list | The scanner's service is not running                  |
+| **App is not in focus**     | the box                      | Something else owns the screen — usually the launcher |
+| **App is not responding**   | the box                      | The package is sitting on an ANR dialog               |
+| **Health check is failing** | a probe                      | The scanner is logging faults faster than work        |
+| **Loop has stalled**        | a probe                      | The scanner is alive and has stopped doing anything   |
+| **Box is unreachable**      | the hub                      | The socket has been gone longer than the alert delay  |
+| **Rotom lost the box**      | the hub                      | Rotom is not seeing it, or would not hand it work     |
 
 The split in that middle column matters more than it looks. The first five are
 knowable only on the box, so they need an agent new enough to look — the tab
@@ -96,23 +102,24 @@ damage Magnemite itself asked for.
 
 ## What it can do
 
-| Action | What it runs |
-| --- | --- |
-| Only tell me | nothing |
-| Restart the app | `am force-stop {pkg}` then relaunch |
-| Kill the app | `am force-stop {pkg}` |
-| Clear the cache and restart | force-stop, delete `/data/data/{pkg}/cache`, relaunch |
-| Send ENTER | `input keyevent 66` — dismisses an ANR dialog |
-| Start the service | `am startservice …` |
-| Run a command | whatever you type |
-| Reboot the box | the same reboot the device page sends |
-| Restart the scanner in Rotom | Rotom's own `restart` action |
+| Action                       | What it runs                                          |
+| ---------------------------- | ----------------------------------------------------- |
+| Only tell me                 | nothing                                               |
+| Restart the app              | `am force-stop {pkg}` then relaunch                   |
+| Kill the app                 | `am force-stop {pkg}`                                 |
+| Clear the cache and restart  | force-stop, delete `/data/data/{pkg}/cache`, relaunch |
+| Send ENTER                   | `input keyevent 66` — dismisses an ANR dialog         |
+| Start the service            | `am startservice …`                                   |
+| Run a command                | whatever you type                                     |
+| Reboot the box               | the same reboot the device page sends                 |
+| Restart the scanner in Rotom | Rotom's own `restart` action                          |
 
-Every shell-backed one has an **editable command**, pre-filled with the default
-above and with `{pkg}` standing in for the rule's package. The catalog exists so
-that an alert can say "cleared the cache and restarted" rather than quoting a
-command line; the editability exists because your MITM is not the one this was
-written against.
+Every shell-backed one can carry an **override command**, with `{pkg}` standing
+in for the rule's package; empty runs the default above. The overrides are
+folded away behind **Command overrides** in the ladder, and unfold on their own
+for a rule that already uses one. The catalog exists so that an alert can say
+"cleared the cache and restarted" rather than quoting a command line; the
+override exists because your MITM is not the one this was written against.
 
 ## The refusals
 
@@ -148,21 +155,23 @@ known to turn into a fleet rebooting itself in a loop:
 
 ## The settings, one by one
 
-Everything in the **Monitoring** card. The right-hand column is what goes wrong
-if the number is wrong, which is usually the faster way to pick one.
+Everything in the **How it watches** card, under four headings — timing, grace,
+ceilings, and noise and history. The right-hand column is what goes wrong if the
+number is wrong, which is usually the faster way to pick one.
 
-| Setting | Default | What it does · what a bad value costs |
-| --- | --- | --- |
-| **Act on what it sees** | off | The master switch. Off, no probe is sent to any box and nothing is touched — rules can still be written and read. |
-| **Pass interval** | the heartbeat | Shown, not set. A pass reads what the boxes last said and they say it once per beat, so faster would re-read one reading and count a fault twice, and slower is only lag. Change the heartbeat in **Settings → Hub** if you want a different cadence. |
-| **Unreachable after** | 300s | How long a box may be gone before "Box is unreachable" fires. Must be at least the offline timeout, or a box is alerted about before it is even marked offline. Too low and every reboot, deploy and flaky uplink becomes an alert. |
-| **Rotom stale after** | 600s | How long since Rotom last saw a box before that counts as disconnected. Floored at 120s because the Rotom sync itself only runs once a minute — anything tighter alerts on the sync's own lag. |
-| **Grace after a reboot** | 600s | Nothing touches a box for this long after Magnemite rebooted it. Set it shorter than the box takes to boot and its own reboot reads as unreachable, so it gets rebooted again — forever. |
-| **Grace after a hub restart** | 180s | Nothing acts for this long after the hub starts. A restart drops every socket at once and the fleet reconnects over several seconds; without this, a deploy looks like a fleet-wide outage. |
-| **Max actions per box per hour** | 4 | Circuit breaker. Past it the box gets one critical alert and is then left alone until the hour rolls. This is what bounds a rule that turns out to be wrong. |
-| **Max reboots per box per day** | 6 | The same, for the expensive half of the ladder. Counted separately because a reboot costs a scanning session and the other actions do not. |
-| **Repeat an alert after** | 30 min | The same signal on the same box is not announced again inside this. The action still happens and is still recorded — only the Discord message is held. 0 announces every time. |
-| **Keep history for** | 30 days | How long the Monitoring page's feed is kept. 0 keeps it forever. |
+| Setting                                 | Default       | What it does · what a bad value costs                                                                                                                                                                                                                                                                       |
+| --------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Act on what it sees**                 | off           | The master switch. Off, no probe is sent to any box and nothing is touched — rules can still be written and read.                                                                                                                                                                                           |
+| **Pass interval**                       | the heartbeat | Shown, not set. A pass reads what the boxes last said and they say it once per beat, so faster would re-read one reading and count a fault twice, and slower is only lag. Change the heartbeat in **Settings → Hub** if you want a different cadence.                                                       |
+| **Unreachable after**                   | 300s          | How long a box may be gone before "Box is unreachable" fires. Must be at least the offline timeout, or a box is alerted about before it is even marked offline. Too low and every reboot, deploy and flaky uplink becomes an alert.                                                                         |
+| **Ask Rotom every**                     | 60s           | How often Rotom is asked what it thinks of the whole fleet — one request, and only when the integration is on in `.env`. Everything Rotom-shaped is this fresh at best, the Scanner column included. Too tight is rude to somebody else's server; too slow and a dead scanner sits unnoticed for that long. |
+| **Rotom stale after**                   | 600s          | How long since Rotom last saw a box before that counts as disconnected. Floored at two of **Ask Rotom every**, the field directly above it (60s by default) — a box is never known to be fresher than the last time anyone asked, so anything tighter alerts on the sync's own lag.                         |
+| **Grace · After a reboot**              | 600s          | Nothing touches a box for this long after Magnemite rebooted it. Set it shorter than the box takes to boot and its own reboot reads as unreachable, so it gets rebooted again — forever.                                                                                                                    |
+| **Grace · After a hub restart**         | 180s          | Nothing acts for this long after the hub starts. A restart drops every socket at once and the fleet reconnects over several seconds; without this, a deploy looks like a fleet-wide outage.                                                                                                                 |
+| **Ceilings · Actions per box per hour** | 4             | Circuit breaker. Past it the box gets one critical alert and is then left alone until the hour rolls. This is what bounds a rule that turns out to be wrong.                                                                                                                                                |
+| **Ceilings · Reboots per box per day**  | 6             | The same, for the expensive half of the ladder. Counted separately because a reboot costs a scanning session and the other actions do not.                                                                                                                                                                  |
+| **Repeat an alert after**               | 30 min        | The same signal on the same box is not announced again inside this. The action still happens and is still recorded — only the Discord message is held. 0 announces every time.                                                                                                                              |
+| **Keep history for**                    | 30 days       | How long the Monitoring page's feed is kept. 0 keeps it forever.                                                                                                                                                                                                                                            |
 
 <Callout type="warn" title="The two graces and the two ceilings are the safety of this feature">
   Everything else here is tuning. Those four are what stand between a useful watchdog and a fleet

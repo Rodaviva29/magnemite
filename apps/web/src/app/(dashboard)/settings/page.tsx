@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { getHubSettings, getMonitorSettings, prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { AppTargetCard, type FeedChoice } from "@/components/settings/app-target-card";
@@ -128,13 +129,14 @@ export default async function SettingsPage() {
   const sections: SettingsSection[] = [
     {
       id: "hub",
-      content: <HubSettingsForm settings={hubSettings} disabled={!canOperate} />,
+      content: <HubSettingsForm key="hub" settings={hubSettings} disabled={!canOperate} />,
     },
     {
       id: "monitoring",
       count: monitorRules.filter((rule) => rule.enabled).length,
       content: (
         <MonitoringSection
+          key="monitoring"
           settings={monitorSettings}
           // Read-only here: the pass runs once per heartbeat, which is the
           // boxes' own beat and lives in the Hub tab.
@@ -172,7 +174,7 @@ export default async function SettingsPage() {
       id: "apps",
       count: targets.length,
       content: (
-        <>
+        <Fragment key="apps">
           {/* Nothing configured yet, but the card still shows what a target
               gets you — greyed out and unsubmittable — so the tab reads as a
               place waiting to be filled rather than an empty one. */}
@@ -191,6 +193,8 @@ export default async function SettingsPage() {
                 autoApprove: target.autoApprove,
                 canaryCount: target.canaryCount,
                 soakMinutes: target.soakMinutes,
+                retryBackoffSeconds: target.retryBackoffSeconds,
+                updateCooldownMinutes: target.updateCooldownMinutes,
                 maxAttempts: target.maxAttempts,
                 windowStart: target.windowStart,
                 windowEnd: target.windowEnd,
@@ -202,7 +206,7 @@ export default async function SettingsPage() {
           ))}
 
           {canOperate ? <CreateAppTargetForm feeds={feedChoices} /> : null}
-        </>
+        </Fragment>
       ),
     },
     {
@@ -210,6 +214,7 @@ export default async function SettingsPage() {
       count: feeds.length,
       content: (
         <SourcesSection
+          key="sources"
           feeds={feeds.map((feed) => ({
             id: feed.id,
             name: feed.name,
@@ -217,6 +222,7 @@ export default async function SettingsPage() {
             baseUrl: feed.baseUrl,
             enabled: feed.enabled,
             priority: feed.priority,
+            pollMinutes: feed.pollMinutes,
             versionCount: feed._count.versions,
             targetCount: targetsByFeed.get(feed.id)?.length ?? 0,
             orphanedTargets: soleSourceByFeed.get(feed.id) ?? [],
@@ -230,6 +236,7 @@ export default async function SettingsPage() {
       count: watched.length,
       content: (
         <WatchedPackagesSection
+          key="columns"
           packages={watched.map((row) => ({
             id: row.id,
             packageName: row.packageName,
@@ -248,6 +255,7 @@ export default async function SettingsPage() {
       count: groups.length,
       content: (
         <GroupsSection
+          key="groups"
           groups={groups.map((g) => ({
             id: g.id,
             name: g.name,
@@ -267,6 +275,7 @@ export default async function SettingsPage() {
       count: tokens.filter((t) => !t.revoked).length,
       content: (
         <EnrollmentSection
+          key="enrollment"
           tokens={tokens.map((t) => ({
             id: t.id,
             label: t.label,

@@ -49,6 +49,7 @@ export type CreateRolloutInput = {
   postInstallHook?: string | null;
   canaryCount?: number;
   soakMinutes?: number;
+  retryBackoffSeconds?: number;
   maxConcurrency?: number | null;
   maxAttempts?: number;
   skipUpToDate?: boolean;

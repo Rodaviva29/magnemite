@@ -33,6 +33,11 @@ type System interface {
 	Shell(ctx context.Context, script string) (string, error)
 	// Disk reports free and total bytes on the filesystem holding path.
 	Disk(path string) (free uint64, total uint64, err error)
+	// SystemServicesUp reports whether the binder services an install needs
+	// are registered. False while system_server is restarting — which on
+	// these boxes is not the same thing as the box being down, because the
+	// kernel and this agent both live straight through it.
+	SystemServicesUp(ctx context.Context) bool
 	UptimeSeconds() int64
 	// LoadAvg is the 1/5/15-minute run queue average out of /proc/loadavg.
 	LoadAvg() (one float64, five float64, fifteen float64)
@@ -94,6 +99,31 @@ func (a *Android) Exec(ctx context.Context, name string, args ...string) (string
 
 func (a *Android) Shell(ctx context.Context, script string) (string, error) {
 	return a.Exec(ctx, "sh", "-c", script)
+}
+
+// The two services every install touches: `pm` talks to one and the hooks'
+// `am` talks to the other. Both live in system_server, so either one missing
+// means the same thing.
+var installServices = []string{"package", "activity"}
+
+// SystemServicesUp asks servicemanager directly rather than reading
+// sys.boot_completed.
+//
+// A runtime restart — system_server killed, zygote respawning it — leaves the
+// kernel, the property that says booting finished, and this agent all
+// untouched, so the property can say 1 while `pm` still has nothing to talk
+// to. What matters is whether the binder service is registered, which is the
+// one question `service check` answers.
+func (a *Android) SystemServicesUp(ctx context.Context) bool {
+	for _, name := range installServices {
+		out, err := a.Exec(ctx, "service", "check", name)
+		// "Service package: found" when it is up, "not found" when it is not,
+		// so the space matters: `Contains(out, "found")` matches both.
+		if err != nil || !strings.Contains(out, ": found") {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Android) LogcatStream(ctx context.Context) (io.ReadCloser, error) {

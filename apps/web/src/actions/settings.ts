@@ -16,6 +16,17 @@ import type { ActionState } from "./rollouts";
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/**
+ * How often to read one index, in minutes.
+ *
+ * Falls back to the old fleet-wide default rather than rejecting: a stale form
+ * that posts nothing should leave a source on a sane cadence, not on zero.
+ */
+function pollMinutes(formData: FormData): number {
+  const parsed = Number(formData.get("pollMinutes"));
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 15;
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -40,8 +51,6 @@ export async function updateHubSettings(
 
   const maxConcurrentJobs = int("maxConcurrentJobs", 1);
   const jobStallTimeoutSeconds = int("jobStallTimeoutSeconds", 1);
-  const sourcePollMinutes = int("sourcePollMinutes", 1);
-  const updateCooldownMinutes = int("updateCooldownMinutes", 0);
   // Floored against the heartbeat below, since that is now configurable: a
   // shorter interval cannot produce more points, it just stores every beat.
   const metricsSampleSeconds = int("metricsSampleSeconds", 1);
@@ -57,8 +66,6 @@ export async function updateHubSettings(
   if (
     maxConcurrentJobs === null ||
     jobStallTimeoutSeconds === null ||
-    sourcePollMinutes === null ||
-    updateCooldownMinutes === null ||
     metricsSampleSeconds === null ||
     metricsRetentionDays === null ||
     agentUpdateConcurrency === null ||
@@ -67,7 +74,7 @@ export async function updateHubSettings(
   ) {
     return {
       error:
-        "Every field needs a whole number — 1 or more, except the cooldown and the history retention. The heartbeat starts at 5 and the offline timeout at 30.",
+        "Every field needs a whole number — 1 or more, except the history retention. The heartbeat starts at 5 and the offline timeout at 30.",
     };
   }
 
@@ -89,8 +96,6 @@ export async function updateHubSettings(
   const patch: Partial<HubSettingsValues> = {
     maxConcurrentJobs,
     jobStallTimeoutSeconds,
-    sourcePollMinutes,
-    updateCooldownMinutes,
     metricsSampleSeconds,
     metricsRetentionDays,
     heartbeatSeconds,
@@ -319,6 +324,11 @@ export async function updateAppTarget(
   if (sent("canaryCount")) data.canaryCount = int("canaryCount", 1);
   if (sent("soakMinutes")) data.soakMinutes = int("soakMinutes", 30);
   if (sent("maxAttempts")) data.maxAttempts = Math.max(1, int("maxAttempts", 3));
+  if (sent("retryBackoffSeconds")) data.retryBackoffSeconds = int("retryBackoffSeconds", 60);
+  // Used to be one number for the whole fleet in Settings → Hub. 0 is a real
+  // value here — it means ship as soon as a build is discovered — which is why
+  // it goes through the same `sent` guard as the rest of the policy.
+  if (sent("updateCooldownMinutes")) data.updateCooldownMinutes = int("updateCooldownMinutes", 0);
 
   if (sent("windowStart") || sent("windowEnd")) {
     const windowStart = String(formData.get("windowStart") ?? "").trim();
@@ -520,6 +530,7 @@ export async function createSourceFeed(
       name,
       indexUrl,
       baseUrl: baseUrl || null,
+      pollMinutes: pollMinutes(formData),
       // New sources go last, so adding one never changes where existing
       // builds are downloaded from.
       priority:
@@ -560,6 +571,7 @@ export async function updateSourceFeed(
 
   const parsedPriority = Number(formData.get("priority"));
   const enabled = formData.get("enabled") === "on";
+  const minutes = pollMinutes(formData);
 
   const before = await prisma.sourceFeed.findUnique({
     where: { id },
@@ -573,6 +585,7 @@ export async function updateSourceFeed(
       indexUrl,
       baseUrl: baseUrl || null,
       enabled,
+      pollMinutes: minutes,
       ...(Number.isFinite(parsedPriority) && parsedPriority > 0
         ? { priority: Math.floor(parsedPriority) }
         : {}),

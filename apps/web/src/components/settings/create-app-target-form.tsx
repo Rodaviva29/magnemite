@@ -23,7 +23,6 @@ export function CreateAppTargetForm({ feeds }: { feeds: FeedChoice[] }) {
         </CardTitle>
         <CardDescription>
           A package this fleet tracks versions for, and the sources its builds are discovered at.
-          Auto-update policy, canary count and the rest are editable afterward, once it exists.
         </CardDescription>
       </CardHeader>
 
@@ -80,7 +79,9 @@ export function CreateAppTargetForm({ feeds }: { feeds: FeedChoice[] }) {
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-4">
+          {/* Right, where every other submit on this page is: the eye leaves a
+              form at its last field, not back at the left margin. */}
+          <div className="flex justify-end">
             <Button type="submit" size="sm" variant="secondary" disabled={feeds.length === 0}>
               <Plus className="h-4 w-4" />
               Add target

@@ -17,6 +17,7 @@ export type CreateRolloutInput = {
   soakMinutes?: number;
   maxConcurrency?: number | null;
   maxAttempts?: number;
+  retryBackoffSeconds?: number;
   /** Devices already on the target version get a SKIPPED job instead of a real one. */
   skipUpToDate?: boolean;
   createdById?: string | null;
@@ -77,6 +78,7 @@ export async function createRollout(input: CreateRolloutInput) {
       soakMinutes: input.soakMinutes ?? 0,
       maxConcurrency: input.maxConcurrency ?? null,
       maxAttempts: input.maxAttempts ?? target.maxAttempts,
+      retryBackoffSeconds: input.retryBackoffSeconds ?? target.retryBackoffSeconds,
       createdById: input.createdById ?? null,
       note: input.note ?? null,
       startedAt: new Date(),

@@ -100,13 +100,38 @@ func (i *Installer) Run(ctx context.Context, job proto.InstallJob, rep Reporter)
 		))
 	}
 
-	// --- 2. download -----------------------------------------------------
+	// --- 2. wait for system_server ---------------------------------------
+	if err := i.waitForSystem(ctx, rep); err != nil {
+		return fail(err)
+	}
+
+	// --- 3. pre-install hook ---------------------------------------------
+	//
+	// Before the download, not after the extract: on these boxes the scanner
+	// is what saturates the uplink, and a 170 MB pull that has to share it
+	// costs the scanner its Rotom socket. It reconnects with no backoff at
+	// all, and the storm is still going when `pm install-commit` asks
+	// system_server for the heaviest thing it ever does. Stopping first is
+	// what keeps those from overlapping.
+	if strings.TrimSpace(job.PreInstallHook) != "" {
+		rep.Log(proto.LevelInfo, "running pre-install hook")
+		if out, err := i.Sys.Shell(ctx, job.PreInstallHook); err != nil {
+			// The scanner refusing to stop should not abort the update.
+			rep.Log(proto.LevelWarn, fmt.Sprintf("pre-install hook failed: %v %s", err, out))
+		}
+	}
+
+	// From here on the box is stopped, so the hook that starts it again has
+	// to run on every way out — not just the one where the install worked.
+	defer i.runPostInstallHook(job, rep)
+
+	// --- 4. download -----------------------------------------------------
 	rep.Progress(proto.StateDownloading, 0, "starting download")
 	if err := i.download(ctx, job, bundlePath, rep); err != nil {
 		return fail(err)
 	}
 
-	// --- 3. extract ------------------------------------------------------
+	// --- 5. extract ------------------------------------------------------
 	rep.Progress(proto.StateExtracting, 0, "reading bundle")
 	info := i.Sys.DeviceInfo(ctx)
 	entries, err := apkm.List(bundlePath)
@@ -143,16 +168,7 @@ func (i *Installer) Run(ctx context.Context, job proto.InstallJob, rep Reporter)
 	}
 	rep.Progress(proto.StateExtracting, 100, fmt.Sprintf("extracted %d apks", len(paths)))
 
-	// --- 4. pre-install hook --------------------------------------------
-	if strings.TrimSpace(job.PreInstallHook) != "" {
-		rep.Log(proto.LevelInfo, "running pre-install hook")
-		if out, err := i.Sys.Shell(ctx, job.PreInstallHook); err != nil {
-			// The scanner refusing to stop should not abort the update.
-			rep.Log(proto.LevelWarn, fmt.Sprintf("pre-install hook failed: %v %s", err, out))
-		}
-	}
-
-	// --- 5. install ------------------------------------------------------
+	// --- 6. install ------------------------------------------------------
 	rep.Progress(proto.StateInstalling, 0, "opening install session")
 
 	mode := proto.InstallModeInPlace
@@ -203,19 +219,11 @@ func (i *Installer) Run(ctx context.Context, job proto.InstallJob, rep Reporter)
 		return Result{InstallMode: mode, DataWiped: dataWiped, Err: err}
 	}
 
-	// --- 6. verify -------------------------------------------------------
+	// --- 7. verify -------------------------------------------------------
 	rep.Progress(proto.StateVerifying, 0, "checking installed version")
 	installed, verr := i.verify(ctx, job)
 	if verr != nil {
 		return Result{InstallMode: mode, DataWiped: dataWiped, Err: verr}
-	}
-
-	// --- 7. post-install hook -------------------------------------------
-	if strings.TrimSpace(job.PostInstallHook) != "" {
-		rep.Log(proto.LevelInfo, "running post-install hook")
-		if out, err := i.Sys.Shell(ctx, job.PostInstallHook); err != nil {
-			rep.Log(proto.LevelWarn, fmt.Sprintf("post-install hook failed: %v %s", err, out))
-		}
 	}
 
 	// The bundle has done its job; on a 8 GB box 170 MB is worth reclaiming.
@@ -227,6 +235,80 @@ func (i *Installer) Run(ctx context.Context, job proto.InstallJob, rep Reporter)
 		DataWiped:            dataWiped,
 		InstalledVersion:     installed.VersionName,
 		InstalledVersionCode: installed.VersionCode,
+	}
+}
+
+// --- system_server ---------------------------------------------------------
+
+const (
+	// Long enough for a runtime restart on a slow box — those take well under
+	// a minute, and the ceiling is only here so a box that never comes back
+	// fails with an answer instead of holding the job for its full hour.
+	systemWaitTimeout = 5 * time.Minute
+	// Cheap: two `service check` calls, and only while something is wrong.
+	systemPollInterval = 3 * time.Second
+)
+
+// waitForSystem holds the job until system_server is answering again.
+//
+// A retry normally arrives seconds after the attempt that failed, and when
+// that attempt was the one that took system_server down with it, the box is
+// still rebuilding its Android. Without this, `am` reports "Can't find
+// service: activity" and `pm install-create` reports "Can't find service:
+// package" — a healthy box, mid-restart, burning an attempt in under a second
+// for a reason that had nothing to do with the update.
+func (i *Installer) waitForSystem(ctx context.Context, rep Reporter) error {
+	if i.Sys.SystemServicesUp(ctx) {
+		return nil
+	}
+
+	rep.Log(proto.LevelWarn, "system_server is not answering, waiting for it")
+	deadline := time.Now().Add(systemWaitTimeout)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(systemPollInterval):
+		}
+
+		if i.Sys.SystemServicesUp(ctx) {
+			rep.Log(proto.LevelInfo, "system_server is back")
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("system_server did not come back within %s", systemWaitTimeout)
+		}
+	}
+}
+
+// --- post-install hook -----------------------------------------------------
+
+// How long the restore gets. It only has to start what the pre-install hook
+// stopped, so this is a ceiling on a wedged command rather than a budget.
+const postHookTimeout = 2 * time.Minute
+
+// runPostInstallHook puts the box back the way the pre-install hook found it.
+//
+// Deferred, so it runs on every exit from Run and not only the successful
+// one: a download that 404s, a commit that takes system_server down with it,
+// a job that hits its deadline — those are the moments a box is most likely
+// to be left stopped, and the least likely to have anyone looking.
+//
+// It gets a context of its own for the same reason. The job's is already
+// cancelled when Run returns on a timeout, and handing that to Shell would
+// fail the restore instantly in exactly the case that needs it most.
+func (i *Installer) runPostInstallHook(job proto.InstallJob, rep Reporter) {
+	if strings.TrimSpace(job.PostInstallHook) == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), postHookTimeout)
+	defer cancel()
+
+	rep.Log(proto.LevelInfo, "running post-install hook")
+	if out, err := i.Sys.Shell(ctx, job.PostInstallHook); err != nil {
+		rep.Log(proto.LevelWarn, fmt.Sprintf("post-install hook failed: %v %s", err, out))
 	}
 }
 
