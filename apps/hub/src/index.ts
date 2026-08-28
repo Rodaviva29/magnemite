@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { prisma, syncAdminFromEnv } from "@magnemite/db";
+import { getHubSettings, prisma, seedMissingHubSettings, syncAdminFromEnv } from "@magnemite/db";
 import { env } from "./env.js";
 import { log } from "./log.js";
 import { authzRoutes } from "./routes/authz.js";
@@ -23,11 +23,42 @@ import { attachDeviceSocket } from "./ws/deviceSocket.js";
 
 const OFFLINE_SWEEP_MS = 30_000;
 
+/**
+ * Two settings used to be environment variables.
+ *
+ * A hub that still has one set adopts its value once, so upgrading does not
+ * quietly reset a tuned fleet to the defaults. Only when there is no row yet:
+ * after that the dashboard owns the value and the variable is ignored, which
+ * is worth knowing before wondering why editing it changes nothing.
+ */
+async function adoptLegacyEnvSettings() {
+  const legacy: Record<string, string | undefined> = {
+    agentUpdateConcurrency: process.env.AGENT_UPDATE_CONCURRENCY,
+    deviceOfflineTimeoutSeconds: process.env.DEVICE_OFFLINE_TIMEOUT,
+  };
+
+  const patch: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(legacy)) {
+    const parsed = Number(raw);
+    if (raw !== undefined && Number.isInteger(parsed) && parsed > 0) patch[key] = parsed;
+  }
+  if (Object.keys(patch).length === 0) return;
+
+  const adopted = await seedMissingHubSettings(patch);
+  if (adopted > 0) {
+    log.warn(
+      { adopted: Object.keys(patch) },
+      "adopted settings from environment variables that no longer apply — they are editable in Settings → Hub now, and the variables can be removed",
+    );
+  }
+}
+
 async function main() {
   // Keeps the admin login in sync with ADMIN_EMAIL/ADMIN_PASSWORD on every
   // boot — restarting the hub is the whole story for changing it or
   // recovering a lost password, no seed step required.
   await syncAdminFromEnv();
+  await adoptLegacyEnvSettings();
   await ensureArtifactDir();
   // Publishes the agent binaries this image was built with, so boxes on an
   // older build are updated as they reconnect.
@@ -75,9 +106,11 @@ async function main() {
   // Catches sockets that died without a close frame — a box losing power
   // leaves the connection hanging until TCP notices.
   const sweeper = setInterval(() => {
-    void sweepOffline(env.DEVICE_OFFLINE_TIMEOUT).catch((err) =>
-      log.error({ err }, "offline sweep failed"),
-    );
+    // Read per tick rather than captured once: it is a live setting, so
+    // widening it for a site on a flaky uplink takes effect without a restart.
+    void getHubSettings()
+      .then((settings) => sweepOffline(settings.deviceOfflineTimeoutSeconds))
+      .catch((err) => log.error({ err }, "offline sweep failed"));
   }, OFFLINE_SWEEP_MS);
 
   // Optional: keeps each device's Rotom identity and scanning state current,

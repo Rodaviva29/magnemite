@@ -48,6 +48,10 @@ export async function updateHubSettings(
   // 0 is meaningful here — it turns health recording off and drops what is
   // already stored on the next prune.
   const metricsRetentionDays = int("metricsRetentionDays", 0);
+  const agentUpdateConcurrency = int("agentUpdateConcurrency", 1);
+  // Three missed 20-second heartbeats is the floor that stops a box flapping
+  // offline on one dropped beat.
+  const deviceOfflineTimeoutSeconds = int("deviceOfflineTimeoutSeconds", 30);
 
   if (
     maxConcurrentJobs === null ||
@@ -55,11 +59,13 @@ export async function updateHubSettings(
     sourcePollMinutes === null ||
     updateCooldownMinutes === null ||
     metricsSampleSeconds === null ||
-    metricsRetentionDays === null
+    metricsRetentionDays === null ||
+    agentUpdateConcurrency === null ||
+    deviceOfflineTimeoutSeconds === null
   ) {
     return {
       error:
-        "Every field needs a whole number — 1 or more, except the cooldown and the history retention. The sample interval starts at 20.",
+        "Every field needs a whole number — 1 or more, except the cooldown and the history retention. The sample interval starts at 20 and the offline timeout at 30.",
     };
   }
 
@@ -70,20 +76,38 @@ export async function updateHubSettings(
     updateCooldownMinutes,
     metricsSampleSeconds,
     metricsRetentionDays,
+    agentUpdateConcurrency,
+    deviceOfflineTimeoutSeconds,
   };
   await updateHubSettingsInDb(patch);
+
+  // The hub holds its own copy and no longer re-reads on a timer, so it is
+  // told rather than left to notice. The reply is the confirmation: if it does
+  // not come, the values are still saved but the hub is running on the old
+  // ones, and that has to be said rather than left to be discovered.
+  let told = true;
+  try {
+    await hub.refreshSettings();
+  } catch {
+    told = false;
+  }
 
   await prisma.auditLog.create({
     data: {
       userId: user.id,
       userEmail: user.email,
       action: "settings.hub",
-      meta: patch,
+      meta: { ...patch, hubNotified: told },
     },
   });
 
   revalidatePath("/settings");
-  return { ok: true, message: "Saved." };
+  return {
+    ok: true,
+    message: told
+      ? "Saved."
+      : "Saved, but the hub could not be told — it is still running on the old values. Restart it, or save again once it is back.",
+  };
 }
 
 /** Pre/post-install hooks and the concurrency cap for one device group. */

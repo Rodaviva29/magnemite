@@ -219,7 +219,7 @@ async function handleMessage(ws: WebSocket, deviceId: string, ip: string | null,
       // A box on an older binary than the hub ships gets told to update
       // itself. It re-execs and comes straight back with a new hello, which
       // is where the update is confirmed.
-      maybeUpdateAgent(
+      void maybeUpdateAgent(
         {
           id: deviceId,
           abi: msg.device.abi ?? null,
@@ -227,7 +227,7 @@ async function handleMessage(ws: WebSocket, deviceId: string, ip: string | null,
           currentJobId: msg.currentJobId ?? null,
         },
         (m) => ws.send(JSON.stringify(m)),
-      );
+      ).catch((err) => log.error({ err, deviceId }, "agent update check failed"));
       nudge();
       break;
     }

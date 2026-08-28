@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ServerMessage } from "@magnemite/protocol";
-import { prisma } from "@magnemite/db";
+import { getHubSettings, prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
@@ -138,7 +138,7 @@ export function agentTargetVersion(): string | null {
 
 /**
  * Boxes told to update and not yet seen on the new version. Bounded by
- * AGENT_UPDATE_CONCURRENCY so a fleet-wide version bump rolls through in
+ * the concurrent-agent-updates setting, so a fleet-wide version bump rolls through in
  * batches instead of all at once.
  */
 const inFlight = new Map<string, number>();
@@ -211,7 +211,11 @@ export async function recordAgentUpdateFailure(
   log.warn({ deviceId, version, error }, "agent update failed on the box");
 }
 
-export function maybeUpdateAgent(
+/**
+ * Async only because the concurrency cap is a live setting now — every other
+ * decision here is local state. Neither caller uses the result.
+ */
+export async function maybeUpdateAgent(
   device: {
     id: string;
     abi: string | null;
@@ -219,7 +223,7 @@ export function maybeUpdateAgent(
     currentJobId: string | null;
   },
   send: (msg: ServerMessage) => void,
-): boolean {
+): Promise<boolean> {
   if (!release) return false;
   // Already there — and this is also how a box that just updated frees its
   // slot and closes its history row.
@@ -242,7 +246,9 @@ export function maybeUpdateAgent(
 
   reapInFlight();
   if (inFlight.has(device.id)) return false;
-  if (inFlight.size >= env.AGENT_UPDATE_CONCURRENCY) return false;
+
+  const { agentUpdateConcurrency } = await getHubSettings();
+  if (inFlight.size >= agentUpdateConcurrency) return false;
 
   inFlight.set(device.id, Date.now());
   send({ type: "agent_update", url: build.url, sha256: build.sha256, version: release.version });
@@ -275,7 +281,7 @@ export function startAgentUpdateSweep() {
   if (sweepTimer || !release) return;
   sweepTimer = setInterval(() => {
     for (const conn of listConnections()) {
-      maybeUpdateAgent(
+      void maybeUpdateAgent(
         {
           id: conn.deviceId,
           abi: conn.abi,
@@ -283,7 +289,7 @@ export function startAgentUpdateSweep() {
           currentJobId: conn.currentJobId,
         },
         conn.send,
-      );
+      ).catch((err) => log.error({ err, deviceId: conn.deviceId }, "agent update check failed"));
     }
   }, SWEEP_MS);
   sweepTimer.unref?.();

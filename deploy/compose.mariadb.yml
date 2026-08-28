@@ -59,7 +59,6 @@ services:
       # the fleet to them as boxes reconnect. Set to "false" to pin the agents
       # and drive updates by hand instead.
       AGENT_AUTO_UPDATE: ${AGENT_AUTO_UPDATE:-true}
-      AGENT_UPDATE_CONCURRENCY: ${AGENT_UPDATE_CONCURRENCY:-5}
       ROTOM_ENABLED: ${ROTOM_ENABLED:-false}
       ROTOM_URL: ${ROTOM_URL:-}
       ROTOM_SECRET: ${ROTOM_SECRET:-}

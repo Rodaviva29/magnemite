@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import fsp from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { getHubSettings, prisma, serialize } from "@magnemite/db";
+import { getHubSettings, invalidateHubSettingsCache, prisma, serialize } from "@magnemite/db";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
@@ -111,6 +111,19 @@ export async function internalRoutes(app: FastifyInstance) {
 
   app.post("/internal/nudge", async () => {
     nudge();
+    return { ok: true };
+  });
+
+  /**
+   * The dashboard has written new hub settings.
+   *
+   * It rings this rather than the hub re-reading on a timer, and the answer is
+   * the confirmation the dashboard needs: no reply means it could not be told,
+   * which it says out loud instead of leaving the hub quietly on old values.
+   */
+  app.post("/internal/settings", async () => {
+    invalidateHubSettingsCache();
+    log.info("hub settings changed — cache dropped");
     return { ok: true };
   });
 

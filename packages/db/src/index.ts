@@ -133,6 +133,18 @@ export type HubSettingsValues = {
    * not spend the disk.
    */
   metricsRetentionDays: number;
+  /**
+   * How many boxes may be swapping their agent binary at once. The sibling of
+   * `maxConcurrentJobs`, for the other thing the whole fleet does at the same
+   * time: reconnecting after a hub deploy.
+   */
+  agentUpdateConcurrency: number;
+  /**
+   * Seconds without a heartbeat before a box is marked offline. Boxes beat
+   * every 20 seconds, so this is really "how many missed beats" — the default
+   * is three of them plus a margin.
+   */
+  deviceOfflineTimeoutSeconds: number;
 };
 
 const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
@@ -142,27 +154,36 @@ const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
   updateCooldownMinutes: 0,
   metricsSampleSeconds: 60,
   metricsRetentionDays: 7,
+  agentUpdateConcurrency: 5,
+  deviceOfflineTimeoutSeconds: 70,
 };
 
 const HUB_SETTINGS_KEYS = Object.keys(HUB_SETTINGS_DEFAULTS) as (keyof HubSettingsValues)[];
 
 /**
- * Briefly cached. The scheduler reads these on every tick *and* on every
- * nudge — a job finishing, a box reconnecting — so during a rollout this is
- * the hottest read in the system, for four numbers that change about never.
+ * Held until something says it is stale, rather than re-read on a timer.
  *
- * The TTL is short enough that a change from the dashboard is picked up
- * within seconds, which is what matters: the hub reads its own copy, and the
- * Next server that writes them is a different process.
+ * The scheduler reads these on every tick *and* on every nudge — a job
+ * finishing, a box reconnecting — so during a rollout this is the hottest read
+ * in the system, for a handful of numbers that change about never. A timer
+ * here is pure waste: it was set to five seconds, the same as the scheduler's
+ * tick, so nearly every read missed and went to the database anyway.
+ *
+ * Two things clear it instead, which between them cover everything that can
+ * actually change the values:
+ *
+ *   the dashboard   writes them, then tells the hub through /internal/settings
+ *   a restart       starts with nothing cached and reads on first use
+ *
+ * What that leaves is a value changed straight in the database by hand, with
+ * no restart after. That one needs a restart, or one Save from the dashboard
+ * to ring the bell — a manual change with a manual fix, which is not worth a
+ * query every few seconds forever.
  */
-const HUB_SETTINGS_TTL_MS = 5_000;
-let hubSettingsCache: { at: number; value: HubSettingsValues } | null = null;
+let hubSettingsCache: HubSettingsValues | null = null;
 
 export async function getHubSettings(): Promise<HubSettingsValues> {
-  const now = Date.now();
-  if (hubSettingsCache && now - hubSettingsCache.at < HUB_SETTINGS_TTL_MS) {
-    return { ...hubSettingsCache.value };
-  }
+  if (hubSettingsCache) return { ...hubSettingsCache };
 
   const rows = await prisma.setting.findMany({ where: { key: { in: HUB_SETTINGS_KEYS } } });
   const values = { ...HUB_SETTINGS_DEFAULTS };
@@ -172,8 +193,18 @@ export async function getHubSettings(): Promise<HubSettingsValues> {
     }
   }
 
-  hubSettingsCache = { at: now, value: values };
+  hubSettingsCache = values;
   return { ...values };
+}
+
+/**
+ * Drop this process's copy, so the next read goes to the database.
+ *
+ * Called on the hub when the dashboard says it has written new values. The
+ * dashboard's own copy is dropped by `updateHubSettings` itself.
+ */
+export function invalidateHubSettingsCache(): void {
+  hubSettingsCache = null;
 }
 
 export async function updateHubSettings(patch: Partial<HubSettingsValues>): Promise<void> {
@@ -190,6 +221,26 @@ export async function updateHubSettings(patch: Partial<HubSettingsValues>): Prom
   // So the process that just wrote them re-renders with the new values rather
   // than its own stale copy.
   hubSettingsCache = null;
+}
+
+/**
+ * Write settings that have no row yet, leaving any that do alone.
+ *
+ * For values that used to be environment variables: a hub that still has one
+ * set adopts it once, so upgrading does not quietly reset a tuned fleet to the
+ * defaults. Once the row exists the dashboard owns it and the variable is
+ * ignored, which is why this never overwrites.
+ */
+export async function seedMissingHubSettings(patch: Partial<HubSettingsValues>): Promise<number> {
+  const entries = Object.entries(patch) as [keyof HubSettingsValues, number][];
+  if (entries.length === 0) return 0;
+
+  const { count } = await prisma.setting.createMany({
+    data: entries.map(([key, value]) => ({ key, value })),
+    skipDuplicates: true,
+  });
+  if (count > 0) hubSettingsCache = null;
+  return count;
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ export type HubSettingsRow = {
   updateCooldownMinutes: number;
   metricsSampleSeconds: number;
   metricsRetentionDays: number;
+  agentUpdateConcurrency: number;
+  deviceOfflineTimeoutSeconds: number;
 };
 
 export function HubSettingsForm({
@@ -116,6 +118,39 @@ export function HubSettingsForm({
               <p className="text-xs text-muted-foreground">
                 How often a box's CPU, memory, storage, temperature and per-app usage are kept for
                 the history charts. Boxes beat every 20s; anything shorter just stores every beat.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="agentUpdateConcurrency">Concurrent agent updates</Label>
+              <Input
+                id="agentUpdateConcurrency"
+                name="agentUpdateConcurrency"
+                type="number"
+                min={1}
+                defaultValue={settings.agentUpdateConcurrency}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                How many boxes may swap their agent binary at once. The whole fleet reconnecting
+                after a hub deploy is when this matters.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="deviceOfflineTimeoutSeconds">Device offline timeout (seconds)</Label>
+              <Input
+                id="deviceOfflineTimeoutSeconds"
+                name="deviceOfflineTimeoutSeconds"
+                type="number"
+                min={30}
+                defaultValue={settings.deviceOfflineTimeoutSeconds}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                Silence from a box before it is marked offline. Boxes beat every 20 seconds, so this
+                is really how many missed beats you will tolerate — raise it for a site on a flaky
+                uplink.
               </p>
             </div>
 

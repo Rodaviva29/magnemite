@@ -32,15 +32,10 @@ const schema = z.object({
     .transform((v) => v !== "false" && v !== "0"),
   /** Where those binaries live, next to the VERSION they were built from. */
   AGENT_BIN_DIR: z.string().default("/app/agent-bin"),
-  /**
-   * How many boxes may be swapping their binary at once. A self-update is a
-   * ~6 MB download and an exec, but the whole fleet reconnecting at the same
-   * second is still the hub's worst moment, so it converges in batches.
-   */
-  AGENT_UPDATE_CONCURRENCY: z.coerce.number().int().positive().default(5),
-
-  /** Seconds without a heartbeat before a device is marked offline. */
-  DEVICE_OFFLINE_TIMEOUT: z.coerce.number().int().positive().default(70),
+  // How many boxes may swap their binary at once, and how long a box may go
+  // quiet before it counts as offline, both live in Settings → Hub now. A hub
+  // still carrying AGENT_UPDATE_CONCURRENCY or DEVICE_OFFLINE_TIMEOUT adopts
+  // the value once on first boot and then ignores the variable.
 
   ROTOM_ENABLED: z
     .string()

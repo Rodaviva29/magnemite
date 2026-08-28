@@ -111,6 +111,8 @@ export const hub = {
   cacheVersion: (id: string) => call(`/internal/versions/${id}/cache`),
   pruneVersions: (keepLatest?: number) =>
     call<{ removed: number }>("/internal/versions/prune", { keepLatest }),
+  /** Tell the hub its cached settings are stale. */
+  refreshSettings: () => call<{ ok: boolean }>("/internal/settings"),
   pollSources: () =>
     call<{
       ran: boolean;

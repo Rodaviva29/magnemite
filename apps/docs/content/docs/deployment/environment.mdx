@@ -20,46 +20,46 @@ resource's **Environment** tab; the rest have defaults.
 
 ## Database
 
-| Variable            | Default      | What it is                                                                                                                                                                                                                                                                                              |
-| ------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PROVIDER`       | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside compose; matters by hand only outside Docker or when running Prisma directly. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
-| `DB_USER`           | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                         |
-| `DB_PASSWORD`       | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                       |
-| `DB_NAME`           | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                            |
-| `DATABASE_URL`      | —            | Only used when running Prisma or the apps **outside** Docker. Inside compose it is built from the `DB_*` values and points at the `postgres`/`mariadb` service.                                                                                                                                        |
+| Variable       | Default      | What it is                                                                                                                                                                                                                                                                                              |
+| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PROVIDER`  | `postgresql` | Which Prisma connector to use: `postgresql` or `mysql` (also covers MariaDB — Prisma has no separate provider for it). Set for you inside compose; matters by hand only outside Docker or when running Prisma directly. See [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb). |
+| `DB_USER`      | `magnemite`  | The database user. Used by both `deploy/compose.yml` and `deploy/compose.mariadb.yml` — only one of the two ever runs at once.                                                                                                                                                                          |
+| `DB_PASSWORD`  | —            | The database password. Same, both compose files.                                                                                                                                                                                                                                                        |
+| `DB_NAME`      | `magnemite`  | The database name. Same, both compose files.                                                                                                                                                                                                                                                            |
+| `DATABASE_URL` | —            | Only used when running Prisma or the apps **outside** Docker. Inside compose it is built from the `DB_*` values and points at the `postgres`/`mariadb` service.                                                                                                                                         |
 
 ## Auth and the first admin
 
-| Variable         | Default                                                         | What it is                                                                                                                               |
-| ---------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`    | —                                                               | Signs Better Auth cookies. `openssl rand -base64 32`. Coolify generates `SERVICE_BASE64_64_AUTHSECRET`.                                  |
+| Variable         | Default                                                         | What it is                                                                                                                                |
+| ---------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`    | —                                                               | Signs Better Auth cookies. `openssl rand -base64 32`. Coolify generates `SERVICE_BASE64_64_AUTHSECRET`.                                   |
 | `ADMIN_EMAIL`    | `admin@example.com` (compose) / `admin@magnemite.com` (Coolify) | Login identifier for the admin account. Nothing is ever sent to it, but it must be a well-formed address — `admin@localhost` is rejected. |
-| `ADMIN_PASSWORD` | —                                                               | Admin password. Coolify generates `SERVICE_PASSWORD_ADMIN`.                                                                       |
+| `ADMIN_PASSWORD` | —                                                               | Admin password. Coolify generates `SERVICE_PASSWORD_ADMIN`.                                                                               |
 
 <Callout type="info">
   `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set on the **hub** service, because the hub syncs the admin
   account to them on every boot — restart the hub after changing either, and there is no `.env` file
-  inside the container for it to read otherwise. That restart is also the way back in if you lose the
-  login.
+  inside the container for it to read otherwise. That restart is also the way back in if you lose
+  the login.
 </Callout>
 
 ## Hub
 
-| Variable                   | Default                      | What it is                                                                                                                                |
-| -------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `HUB_PORT`                 | `3001`                       |                                                                                                                                           |
-| `HUB_INTERNAL_SECRET`      | —                            | Shared secret for web → hub internal calls (SSE, dispatch nudges, rollout control). Coolify generates `SERVICE_PASSWORD_HUBSECRET`.       |
-| `ARTIFACT_DIR`             | `/data/artifacts` in compose | Where cached `.apkm` bundles live. Must match the volume mounted into Caddy as `/srv/artifacts`.                                          |
-| `SERVE_ARTIFACTS`          | `false`                      | Serve `/files/*` from Node. Leave `false` in both deployments; `true` only for local development without Caddy.                           |
-| `AGENT_AUTO_UPDATE`        | `true`                       | Tell boxes on an older build to update themselves to the binary this hub image ships. See [updating the agent](/docs/fleet/agent-update). |
-| `AGENT_UPDATE_CONCURRENCY` | `5`                          | How many boxes may be swapping their agent binary at once.                                                                                |
-| `AGENT_BIN_DIR`            | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
+| Variable              | Default                      | What it is                                                                                                                                |
+| --------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `HUB_PORT`            | `3001`                       |                                                                                                                                           |
+| `HUB_INTERNAL_SECRET` | —                            | Shared secret for web → hub internal calls (SSE, dispatch nudges, rollout control). Coolify generates `SERVICE_PASSWORD_HUBSECRET`.       |
+| `ARTIFACT_DIR`        | `/data/artifacts` in compose | Where cached `.apkm` bundles live. Must match the volume mounted into Caddy as `/srv/artifacts`.                                          |
+| `SERVE_ARTIFACTS`     | `false`                      | Serve `/files/*` from Node. Leave `false` in both deployments; `true` only for local development without Caddy.                           |
+| `AGENT_AUTO_UPDATE`   | `true`                       | Tell boxes on an older build to update themselves to the binary this hub image ships. See [updating the agent](/docs/fleet/agent-update). |
+| `AGENT_BIN_DIR`       | `/app/agent-bin`             | Where the hub image keeps those binaries, next to the `agent=` version they were built from.                                              |
 
 <Callout type="info">
-  Max concurrent jobs, job stall timeout, source poll interval, the auto-update cooldown, and the
-  health sample interval and retention are not env vars — they live in **Settings → Hub settings**,
-  editable at runtime with no restart. See [rollouts](/docs/fleet/rollouts),
-  [auto-update](/docs/fleet/auto-update) and [health history](/docs/fleet/health).
+  Max concurrent jobs, job stall timeout, source poll interval, the auto-update cooldown, the health
+  sample interval and retention, concurrent agent updates and the device offline timeout are not env
+  vars — they live in **Settings → Hub**, editable at runtime with no restart. See
+  [rollouts](/docs/fleet/rollouts), [auto-update](/docs/fleet/auto-update) and [health
+  history](/docs/fleet/health).
 </Callout>
 
 ## Version sources

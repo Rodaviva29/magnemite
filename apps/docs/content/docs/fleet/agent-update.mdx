@@ -63,16 +63,17 @@ update.
 
 </Steps>
 
-Updates roll out in batches of `AGENT_UPDATE_CONCURRENCY` (5 by default). A box
-that was powered off for a month catches up the moment it dials in.
+Updates roll out in batches, capped by **concurrent agent updates** in
+**Settings → Hub** (5 by default). A box that was powered off for a month
+catches up the moment it dials in.
 
 ## Settings
 
-| Variable                   | Default          | What it does                                                                             |
-| -------------------------- | ---------------- | ---------------------------------------------------------------------------------------- |
-| `AGENT_AUTO_UPDATE`        | `true`           | Set to `false` to pin the fleet and drive updates by hand.                               |
-| `AGENT_UPDATE_CONCURRENCY` | `5`              | How many boxes may be swapping their binary at once.                                     |
-| `AGENT_BIN_DIR`            | `/app/agent-bin` | Where the image keeps the binaries. Only worth changing if you build the image yourself. |
+| Setting                  | Where          | Default          | What it does                                                                             |
+| ------------------------ | -------------- | ---------------- | ---------------------------------------------------------------------------------------- |
+| Concurrent agent updates | Settings → Hub | `5`              | How many boxes may be swapping their binary at once.                                     |
+| `AGENT_AUTO_UPDATE`      | env            | `true`           | Set to `false` to pin the fleet and drive updates by hand.                               |
+| `AGENT_BIN_DIR`          | env            | `/app/agent-bin` | Where the image keeps the binaries. Only worth changing if you build the image yourself. |
 
 **Settings → Health** shows the target version, and how many boxes are updating
 right now, on the Hub card. Each device's own version is on its page.
