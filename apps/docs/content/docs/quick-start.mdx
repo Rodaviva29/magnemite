@@ -8,7 +8,6 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Two ways to run the stack: [docker compose behind your own
 proxy](/docs/deployment/docker-compose), or [Coolify](/docs/deployment/coolify).
-Below is the compose path end to end.
 
 <Steps>
 
@@ -19,13 +18,14 @@ Below is the compose path end to end.
 ```sh
 git clone https://github.com/Rodaviva29/magnemite.git && cd magnemite
 cp .env.example .env
-$EDITOR .env      # MAGNEMITE_PUBLIC_URL, then three secrets: openssl rand -base64 32
+$EDITOR .env      # DATABASE_URL, MAGNEMITE_PUBLIC_URL, two secrets
 make up
 ```
 
-The stack publishes plain HTTP on `EDGE_PORT` (8080) and never binds 80 or 443.
-Point a virtual host on your reverse proxy at `http://127.0.0.1:8080` and
-terminate TLS there.
+The stack runs no database of its own — `DATABASE_URL` points at one you
+already have. It publishes plain HTTP on `EDGE_PORT` (8080) and never binds 80
+or 443: point a virtual host on your reverse proxy at `http://127.0.0.1:8080`
+and terminate TLS there.
 
 </Step>
 

@@ -25,11 +25,10 @@ resource's **Environment** tab.
 
 ## Database
 
-| Variable                              | Default      | What it is                                                                                                                      |
-| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PROVIDER`                         | `postgresql` | `postgresql` or `mysql` (which also covers MariaDB). Must match `DATABASE_URL`; changing it needs a **rebuild**, not a restart. |
-| `DB_USER` · `DB_PASSWORD` · `DB_NAME` | `magnemite`  | Used by the compose files that run their own Postgres.                                                                          |
-| `DATABASE_URL`                        | —            | Required by the Coolify files and `compose.mariadb.yml`, which run no database. `compose.yml` builds it from the `DB_*` values. |
+| Variable       | Default | What it is                                                                                                                        |
+| -------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL` | —       | Required everywhere: no deployment runs a database of its own. Resolved from inside the containers, so not a host-published port. |
+| `DB_PROVIDER`  | `mysql` | `mysql` (also covers MariaDB) or `postgresql`. Must match `DATABASE_URL`; changing it needs a **rebuild**, not a restart.         |
 
 ## Auth and the first admin
 

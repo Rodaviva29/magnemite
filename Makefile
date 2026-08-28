@@ -16,9 +16,9 @@ GO_IMAGE    ?= golang:1.23-alpine
 # Compose looks for .env next to the compose file, and this project's lives at
 # the repo root, where everything else reads it from.
 #
-# COMPOSE_FILE picks the datasource: deploy/compose.yml (Postgres, default) or
-# deploy/compose.mariadb.yml (MariaDB) -- e.g. `make up COMPOSE_FILE=deploy/compose.mariadb.yml`.
-COMPOSE_FILE ?= deploy/compose.yml
+# The self-hosted stack. It runs no database of its own: DATABASE_URL in .env
+# points at one you already run, of either engine.
+COMPOSE_FILE ?= deploy/docker-compose.yml
 COMPOSE     := docker compose --env-file .env -f $(COMPOSE_FILE)
 ROOT        := $(shell pwd)
 LDFLAGS     := -s -w -X main.version=$(VERSION)

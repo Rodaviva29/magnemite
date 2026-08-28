@@ -1,47 +1,50 @@
 ---
 title: Docker, behind a proxy
-description: One virtual host, TLS from your own reverse proxy, four containers.
+description: One virtual host, TLS from your own reverse proxy, three containers and a database you already run.
 icon: Container
 ---
 
-`deploy/compose.yml` is the self-contained deployment: our own Caddy publishes
-one plain-HTTP port, serves the dashboard and the artifacts, and proxies what
-belongs to the hub. Nothing binds 80 or 443 — the reverse proxy already
-fronting your server terminates TLS and forwards to `EDGE_PORT`.
+`deploy/docker-compose.yml` is the self-hosted deployment: our own Caddy
+publishes one plain-HTTP port, serves the dashboard and the artifacts, and
+proxies what belongs to the hub. Nothing binds 80 or 443 — the reverse proxy
+already fronting your server terminates TLS and forwards to `EDGE_PORT`.
 
 ## What runs
 
-| Service    | Image / build         | Ports                              |
-| ---------- | --------------------- | ---------------------------------- |
-| `postgres` | `postgres:17-alpine`  | `127.0.0.1:5433` → 5432, host-only |
-| `hub`      | `apps/hub/Dockerfile` | 3001, internal                     |
-| `web`      | `apps/web/Dockerfile` | 3000, internal                     |
-| `caddy`    | `caddy:2-alpine`      | `EDGE_PORT` (8080) → 8080, HTTP    |
+| Service | Image / build         | Ports                           |
+| ------- | --------------------- | ------------------------------- |
+| `hub`   | `apps/hub/Dockerfile` | 3001, internal                  |
+| `web`   | `apps/web/Dockerfile` | 3000, internal                  |
+| `caddy` | `deploy/edge`         | `EDGE_PORT` (8080) → 8080, HTTP |
 
-Postgres is published on `127.0.0.1:5433` on purpose: enough for Prisma Studio
-or `psql` from the host, reachable from nowhere else.
+No database service: it connects to one you already run, MariaDB/MySQL or
+Postgres, over `DATABASE_URL`.
 
 ## Configuration
 
-Everything comes from `.env` at the repo root — copy `.env.example`. Two
-matter most:
+Everything comes from `.env` at the repo root — copy `.env.example`:
 
 ```sh title=".env"
 EDGE_PORT=8080
 MAGNEMITE_PUBLIC_URL=https://magnemite.example.com
+DB_PROVIDER=mysql
+DATABASE_URL=mysql://magnemite:…@db.example.com:3306/magnemite
 ```
 
 Both audiences share one virtual host here, so compose derives
-`MAGNEMITE_DASHBOARD_URL` and `BETTER_AUTH_URL` from `MAGNEMITE_PUBLIC_URL`.
-Full list: [environment reference](/docs/deployment/environment).
-
-Generate the secrets, don't invent them:
+`MAGNEMITE_DASHBOARD_URL` from `MAGNEMITE_PUBLIC_URL`. Full list:
+[environment reference](/docs/deployment/environment).
 
 ```sh
 openssl rand -base64 32   # AUTH_SECRET
 openssl rand -base64 32   # HUB_INTERNAL_SECRET
-openssl rand -base64 24   # DB_PASSWORD
 ```
+
+<Callout type="warn">
+  `DATABASE_URL` is resolved inside the container, so a host-published port like `127.0.0.1:5433` is
+  the one address it cannot use. And `DB_PROVIDER` has to match the URL: changing it is a
+  **rebuild**, because the Prisma Client is generated into the images.
+</Callout>
 
 ## Running it
 
@@ -53,12 +56,12 @@ openssl rand -base64 24   # DB_PASSWORD
 | `make migrate` | `pnpm --filter @magnemite/db run deploy` inside `hub` |
 | `make seed`    | optional starter data and a first enrollment token    |
 
-Without `make`, both flags are required — the compose files live under
-`deploy/`, `.env` lives at the repo root, and Compose would otherwise start
-with every variable blank:
+Without `make`, both flags are required — the compose file lives under
+`deploy/`, `.env` at the repo root, and Compose would otherwise start with
+every variable blank:
 
 ```sh
-docker compose --env-file .env -f deploy/compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
 ## What your proxy must do
@@ -68,21 +71,16 @@ forward WebSocket upgrades on `/ws/device`, and must not buffer `/api/events`
 (SSE, an idle stream that must never time out) or `/files/*` (~170 MB
 responses agents resume with `Range`).
 
-The edge routes `/files/*` to a `file_server` behind `forward_auth`,
-`/ws/device`, `/api/enroll`, `/api/logs/*` and `/healthz` to the hub, and
+Caddy serves `/files/*` off the artifacts volume behind `forward_auth`, proxies
+`/ws/device`, `/api/enroll`, `/api/logs/*` and `/healthz` to the hub, and sends
 everything else to the dashboard. `/internal/*` is deliberately absent: the
 dashboard reaches it over the compose network, nothing outside can.
-
-<Callout type="warn">
-  Leave `SERVE_ARTIFACTS=false`. Caddy streams cached `.apkm` files off the shared volume with
-  native `Range`; `true` puts ~35 GB of a fleet-wide rollout through Node for no benefit.
-</Callout>
 
 ## Upgrading
 
 ```sh
 git pull
-docker compose --env-file .env -f deploy/compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 make migrate
 ```
 
@@ -92,22 +90,8 @@ queued jobs resume. To leave them alone, name the service:
 
 ## Postgres or MariaDB
 
-`deploy/compose.mariadb.yml` is the same stack with **no database service**: it
-connects to one you already run, over `DATABASE_URL`.
-
-```sh
-make up COMPOSE_FILE=deploy/compose.mariadb.yml
-```
-
 Prisma has no `mariadb` provider — MariaDB speaks MySQL's protocol, so
-`DB_PROVIDER` is `mysql` there. Set it to `postgresql` and the same file serves
-an external Postgres.
-
-<Callout type="warn" title="Two things bite here">
-  The `DATABASE_URL` in `.env.example` points at the host-published port, which is the one address a
-  container cannot use — give this file the database's own address. And changing `DB_PROVIDER` is a
-  **rebuild**, not a restart: the Prisma Client is generated into the images.
-</Callout>
+`DB_PROVIDER=mysql` covers both; `postgresql` serves a Postgres.
 
 The two engines keep separate migration histories (`prisma/migrations` and
 `prisma/migrations-mysql`), and nothing copies data between them. Decide the

@@ -34,8 +34,7 @@ cap concurrency below the fleet-wide limit.
 The backoff exists for one failure in particular: a box that has just restarted
 its `system_server` needs the best part of a minute, and a retry inside that
 window fails instantly on hardware that is about to be fine. Zero retries on
-the next scheduler tick. The **Retry** button ignores the hold — an operator
-pressing it is making a fresh decision.
+the next scheduler tick; the **Retry** button ignores the hold entirely.
 
 ## Concurrency
 

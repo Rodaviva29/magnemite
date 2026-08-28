@@ -93,7 +93,7 @@ build, so a running hub always carries the exact binary it wants the fleet on.
 ```sh
 sed -i 's/^agent=.*/agent=1.0.1/' VERSION
 git commit -am "agent 1.0.1" && git push
-docker compose --env-file .env -f deploy/compose.yml up -d --build hub
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build hub
 ```
 
 </Step>

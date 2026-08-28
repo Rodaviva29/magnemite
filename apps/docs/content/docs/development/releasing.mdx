@@ -89,7 +89,7 @@ $EDITOR VERSION
 git commit -am "agent: report the LAN address"
 git push
 # redeploy the hub
-docker compose --env-file .env -f deploy/compose.yml up -d --build hub
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build hub
 ```
 
 The hub's image cross-compiles the agent, publishes the binaries, and tells
@@ -109,7 +109,7 @@ their own with backoff and queued jobs resume, so it is a few minutes of noise
 rather than damage — but on a large fleet, pick your moment. Narrowing a deploy
 so only the dashboard restarts is one setting on
 [Coolify](/docs/deployment/coolify#deploying-without-dropping-the-fleet), and free under plain compose
-(`docker compose --env-file .env -f deploy/compose.yml up -d --build web`).
+(`docker compose --env-file .env -f deploy/docker-compose.yml up -d --build web`).
 
 ## Checklist
 

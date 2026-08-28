@@ -42,11 +42,9 @@ One filter row scopes every chart below it: **time range** (presets longer than
 the retention are disabled), **apps** (colours are fixed per package, eight at a
 time), and a **table** of the same numbers as text.
 
-Each chart carries `avg`, `p95` and `max` for its window. The p95 is there
-because a mean hides the spike, and the spike is what is being looked for.
-Charts are bucketed to about one point per pixel-column before they leave the
-server; the statistics are computed from the raw rows, because an average of
-averages is not the average.
+Each chart carries `avg`, `p95` and `max` for its window, computed from the raw
+rows rather than from the points drawn — the lines themselves are bucketed to
+about one per pixel-column before they leave the server.
 
 ## Retention
 

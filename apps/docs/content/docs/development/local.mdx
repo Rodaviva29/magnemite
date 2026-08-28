@@ -6,7 +6,8 @@ icon: SquareTerminal
 
 ```sh
 pnpm install
-docker compose --env-file .env -f deploy/compose.yml up -d postgres
+# The stack ships no database, so bring one up however you like:
+docker run -d --name magnemite-db -p 127.0.0.1:5433:5432   -e POSTGRES_USER=magnemite -e POSTGRES_PASSWORD=magnemite   -e POSTGRES_DB=magnemite postgres:17-alpine
 pnpm --filter @magnemite/db exec dotenv -e ../../.env -- prisma migrate dev
 pnpm db:seed   # optional: starter app target, sources, group, first token
 
@@ -25,13 +26,12 @@ MAGNEMITE_PUBLIC_URL=http://localhost:3001
 ```
 
 With no Caddy in front, the hub serves `/files/*` itself and stands in for it.
-`DATABASE_URL` points at the host-mapped `127.0.0.1:5433`, which is the port
-compose publishes Postgres on for exactly this.
+`DATABASE_URL` points at whatever database you brought up.
 
-To develop against MariaDB instead, bring up `mariadb` from
-`deploy/compose.mariadb.yml` (host port `127.0.0.1:3307`) and set
-`DB_PROVIDER=mysql` and a `mysql://` `DATABASE_URL` in your `.env` before
-running `prisma migrate dev` — see [Postgres or MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb).
+For MariaDB instead, set `DB_PROVIDER=mysql` and a `mysql://` `DATABASE_URL`
+**before** running `prisma migrate dev` — the two engines keep separate
+migration histories, see [Postgres or
+MariaDB](/docs/deployment/docker-compose#postgres-or-mariadb).
 
 <Callout type="warn">
   Leave `SERVE_ARTIFACTS` **off** in either deployment. Both put Caddy in front of `/files/*`, and
