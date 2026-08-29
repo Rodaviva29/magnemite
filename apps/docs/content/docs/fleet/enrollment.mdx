@@ -57,8 +57,8 @@ empty. It retries the same dead token forever, a minute apart.
 
 <Callout type="warn" title="device token rejected > re-enroll this box">
   The box reached a hub that has never heard of its token. Either it was re-pointed at a new one, or
-  its device row was deleted. Nothing on the box fixes this by itself, the config has to be
-  replaced by hand.
+  its device row was deleted. Nothing on the box fixes this by itself, the config has to be replaced
+  by hand.
 </Callout>
 
 Read what it points at now:
@@ -67,7 +67,7 @@ Read what it points at now:
 adb shell su -c 'cat /data/adb/magnemite/config.json'
 ```
 
-An enrolled box shows a `deviceToken` and no `enrollmentToken`. 
+An enrolled box shows a `deviceToken` and no `enrollmentToken`.
 
 The agent deletes the second the moment it has the first. Replace both, along with the URL:
 
@@ -78,7 +78,7 @@ adb shell su -c 'chmod 600 /data/adb/magnemite/config.json'
 ```
 
 The file is the same shape as a factory-fresh one: `serverUrl`, a fresh
-`enrollmentToken` from the new hub, no `deviceToken`. Then restart the agent 
+`enrollmentToken` from the new hub, no `deviceToken`. Then restart the agent
 (`service.sh` brings it back within ten seconds and it enrolls against the new
 hub) or reboot the device, it works too.
 
@@ -100,6 +100,62 @@ adb shell su -c 'rm -f /data/adb/magnemite/config.json'
 
 The module's `customize.sh` installs the config bundled in the zip **only when
 none exists**, which is why re-flashing over an enrolled box prints _"Keeping
-the existing config"_ and changes nothing. 
+the existing config"_ and changes nothing.
 
 Delete first, then re-flash. If you forgot how, [check here](/docs/fleet/agent#flash-it).
+
+## Names
+
+A box names itself when it enrols: manufacturer, model and the last six of its
+serial, so `Magnemite FakeBox ke-00132`. Unique enough to tell two boxes apart
+on a bench, and no use at all once forty of them are on a shelf.
+
+The name is a label, not an identity — the serial is what Magnemite matches a
+box by across re-enrolments and IP changes. So renaming is free, and nothing
+downstream breaks when you do it.
+
+### Renaming many at once
+
+Pick boxes on **Fleet** and press **Rename N selected**, or open a group in
+**Settings → Device groups** and press **Rename boxes** to take all of its
+approved boxes. Either way you get a preview of every old → new pair before
+anything is written.
+
+Two ways to fill the names in.
+
+**A pattern**, when you are naming a site into a scheme:
+
+```
+{group}-{n:02}     lisboa-01, lisboa-02, lisboa-03
+tv-{serial:4}      tv-002A, tv-19F3, tv-7C08
+```
+
+| Token                        | Is                                                                                                                    |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `{n}`                        | the counter. `{n:03}` pads it to `007`, and never truncates a bigger number                                           |
+| `{serial}`                   | the serial. `{serial:4}` is the **last** four — the first characters are a vendor prefix and identical across a fleet |
+| `{group}`                    | the group's name                                                                                                      |
+| `{model}` / `{manufacturer}` | what the box reported                                                                                                 |
+| `{name}`                     | the name it has now, for prefixing an existing scheme                                                                 |
+
+The counter follows an order you pick — what is on screen, the serial, the
+current name, or when the box enrolled — and you can set where it starts and how
+much it steps, for continuing a series at 41 or leaving gaps of ten.
+
+**From the boxes**, when Magnemite is arriving at a fleet that is already
+running. It reads each box's MITM config and takes the name already in it, so
+you adopt the scheme instead of retyping it. The field it reads is wherever that
+group's template puts `{{device.name}}`, so the two cannot disagree. Boxes that
+are offline, or whose group has no config, are skipped and named later.
+
+<Callout title="Two boxes may share a name">
+  Nothing stops you, because sometimes two sites really do both have a `spare`. The preview marks
+  them so the accidental case — a pattern with no `{n}` — is obvious before you press the button.
+  You just will not tell them apart in the table or in an alert.
+</Callout>
+
+<Callout type="warn" title="The config on the box keeps the old name">
+  A rename changes the name in Magnemite. The config file already written to a box still holds the
+  name it was written with, and goes out with that box's next MITM deploy — there is no separate
+  push. Until then the scanner reports its old name to Rotom.
+</Callout>

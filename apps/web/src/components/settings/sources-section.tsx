@@ -122,7 +122,12 @@ function SourceForm({ feed, disabled }: { feed: SourceFeedRow; disabled: boolean
       {/* Dimmed as one block, so it reads as a source that is switched off
           rather than four fields that happen to have faded. They stay editable
           — setting a paused feed up before turning it on is the normal order. */}
-      <div className={cn("grid gap-3 transition-opacity sm:grid-cols-2", !enabled && "opacity-60")}>
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-3 transition-opacity sm:grid-cols-2",
+          !enabled && "opacity-60",
+        )}
+      >
         <div className="flex flex-col gap-2 sm:col-span-2">
           <Label htmlFor={`index-${feed.id}`}>Index URL</Label>
           <Input
@@ -245,7 +250,7 @@ function CreateSourceForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-3 border-t border-border pt-5">
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="new-source-name">Name</Label>
           <Input id="new-source-name" name="name" placeholder="Silva" required />

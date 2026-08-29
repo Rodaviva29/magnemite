@@ -5,7 +5,15 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("rounded-xl border border-border bg-card text-card-foreground", className)}
+      className={cn(
+        // `min-w-0` because a card is nearly always a grid or flex child, and
+        // there the default `min-width: auto` lets one long unbreakable string
+        // inside — a path, a version, a URL — widen the card past its column
+        // and take the page's horizontal scroll with it. Cards are meant to
+        // fit their track and let their own content truncate.
+        "min-w-0 rounded-xl border border-border bg-card text-card-foreground",
+        className,
+      )}
       {...props}
     />
   ),

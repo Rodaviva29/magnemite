@@ -1,0 +1,191 @@
+---
+title: Settings reference
+description: Every value the dashboard lets you set, and what it is before you touch it.
+icon: SlidersHorizontal
+---
+
+The counterpart to the [environment reference](/docs/deployment/environment).
+Nothing here is an env var: it is stored in the database and changed from
+**Settings**, or from the form that starts the thing it governs. A fresh
+install already has every value below, the defaults are what the fleet runs on
+until you decide otherwise.
+
+Two kinds of default live on this page, and the difference matters when a
+number surprises you:
+
+- **Stored defaults**: held in the database. Changing one changes the fleet.
+- **Form defaults**: what a field is pre-filled with. They apply to the one
+  rollout you are starting, and the next form opens pre-filled the same way
+  again.
+
+## Settings → Tuning
+
+Fleet-wide, read by the hub on every scheduler tick. A save takes effect within
+seconds, the dashboard tells the hub to drop its cached copy (**with the exception of the
+heartbeat**, which rides the `welcome` and reaches each box on its next
+connection).
+
+| Setting                      | Default  | Min  | What it does                                                                                            |
+| ---------------------------- | -------- | ---- | ------------------------------------------------------------------------------------------------------- |
+| **Heartbeat**                | `20s`    | `5`  | How often a box reports in. Lives on the boxes; an agent too old to read it keeps beating at 20s.       |
+| **Offline after**            | `70s`    | `30` | Silence before a box is marked offline. Three missed beats plus a margin.                               |
+| **Concurrent installs**      | `10`     | `1`  | Fleet-wide cap on boxes downloading or installing at once. A group can lower it for its own boxes.      |
+| **Concurrent agent updates** | `5`      | `1`  | How many boxes may swap their agent binary at once — the fleet reconnecting after a hub deploy.         |
+| **Job stalls after**         | `900s`   | `1`  | Silence from a box mid-job before that job is re-queued to it.                                          |
+| **Sample every**             | `60s`    | `5`  | How often a health sample is kept for the charts. Boxes beat faster; the rest are dropped.              |
+| **Keep for**                 | `7 days` | `0`  | How long those samples live. `0` turns health recording off and drops what is stored on the next prune. |
+
+<Callout type="warn" title="Three of these are coupled">
+  The form refuses the combination rather than letting a fleet flap between online and offline:
+  **offline after ≥ 3 × heartbeat**, and **sample every ≥ heartbeat**. At the default 20s heartbeat
+  that is 60s and 20s. Raising the heartbeat without raising both is the mistake this check exists
+  for.
+</Callout>
+
+## Settings → Monitoring
+
+Stored under a `monitor.` prefix and read by the evaluation pass. Most are
+ceilings rather than features — [monitoring](/docs/fleet/monitoring) has the
+why for each.
+
+| Setting                      | Default   | Min        | What it does                                                                                      |
+| ---------------------------- | --------- | ---------- | ------------------------------------------------------------------------------------------------- |
+| **Enabled**                  | `off`     | —          | The master switch. Off, so upgrading a fleet never starts remediating by itself.                  |
+| **Ask Rotom every**          | `60s`     | `10`       | Resolution of everything Rotom-shaped. Ignored when the Rotom integration is off.                 |
+| **Rotom stale after**        | `600s`    | `2 × sync` | Silence from Rotom before a box counts as disconnected. Measured against the sync interval above. |
+| **After a reboot**           | `600s`    | `60`       | No action on a box for this long after we rebooted it, so a slow boot is not rebooted again.      |
+| **After a hub restart**      | `180s`    | `0`        | Nothing acts for this long after the hub starts, while the whole fleet reconnects.                |
+| **Actions per box per hour** | `4`       | `1`        | Circuit breaker. Past it, the box is alerted about and left alone.                                |
+| **Reboots per box per day**  | `6`       | `1`        | The same, for the expensive half of the ladder.                                                   |
+| **Repeat an alert after**    | `30 min`  | `0`        | The same signal on the same box is not re-announced inside this.                                  |
+| **Keep history for**         | `30 days` | `0`        | Monitor history retention. `0` keeps it forever.                                                  |
+| **Discord webhook**          | empty     | —          | Empty turns notifications off while leaving remediation running.                                  |
+| **Announce from**            | `WARN`    | —          | `INFO`, `WARN` or `CRITICAL`. Below it, a signal is acted on but not announced.                   |
+| **Mention role**             | empty     | —          | Pinged on `CRITICAL` only. Empty pings nobody.                                                    |
+
+The pass itself has no interval to set: it runs once per heartbeat, because it
+reads what the boxes last said and they say it once per beat.
+
+### A monitoring rule
+
+From **Settings → Monitoring → Add rule**. Seeded rules are written
+**disabled**, and only onto a fleet that has none.
+
+| Field             | Default        | What it does                                                                                  |
+| ----------------- | -------------- | --------------------------------------------------------------------------------------------- |
+| **Enabled**       | `off`          | New and seeded rules both arrive off.                                                         |
+| **Signal**        | `SERVICE_DOWN` | What the rule watches.                                                                        |
+| **Probe**         | `none`         | The command sent to the boxes, when the signal needs one.                                     |
+| **Group**         | fleet-wide     | A group-scoped rule replaces the fleet-wide one for that group rather than stacking.          |
+| **Threshold**     | `1`            | Consecutive bad samples before the ladder starts. `1` acts immediately.                       |
+| **Cooldown**      | `300s`         | After an action, how long before this rule may act on that box again.                         |
+| **Window**        | none           | `HH:MM`–`HH:MM`. Alerts still go out outside it; only the actions are held.                   |
+| **Notify**        | `on`           | Whether the rule announces itself at all.                                                     |
+| **Notify level**  | `WARN`         | The level it announces at.                                                                    |
+| **Probe timeout** | `10s`          | Budget on the box. A probe that runs out reads as _unknown_, which neither counts nor resets. |
+| **Log lines**     | `200`          | For the log-scanning probes: how much tail is read.                                           |
+| **Fail at**       | `1`            | How many pattern matches count as a failure.                                                  |
+
+## Settings → Apps
+
+Per app target. This is the **auto-update policy**: what happens on its own
+when a source publishes a build.
+
+| Field                  | Default     | What it does                                                                                    |
+| ---------------------- | ----------- | ----------------------------------------------------------------------------------------------- |
+| **Enabled**            | `on`        | Whether the target is tracked at all.                                                           |
+| **Architecture**       | `arm64-v8a` | Only versions built for this ABI are tracked.                                                   |
+| **Automatic rollouts** | `off`       | Off, so a discovered build waits for somebody.                                                  |
+| **Auto-approve**       | `off`       | Mark new versions approved on discovery instead of by hand.                                     |
+| **Canary devices**     | `1`         | Updated first; the rest wait for them to succeed.                                               |
+| **Soak**               | `30 min`    | Wait after the canary succeeds before releasing the fleet.                                      |
+| **Max concurrency**    | inherits    | Empty falls back to **Tuning → Concurrent installs**.                                           |
+| **Attempts**           | `3`         | Tries per device before the job is failed.                                                      |
+| **Retry backoff**      | `60s`       | Hold on a failed job, doubling per attempt, capped at 30 minutes by the hub.                    |
+| **Cooldown**           | `0 min`     | Since this app's last automatic rollout finished. `0` ships a new build as soon as it is found. |
+| **Window**             | none        | `HH:MM`–`HH:MM`. Automatic rollouts only dispatch inside it.                                    |
+| **Sources**            | all ticked  | Which feeds are polled for this package. A target with none selected is never polled.           |
+
+A target created by a **manual upload** is marked `manual` and has none of
+this: no source to poll, no policy. The Fleet and Versions pages skip it, while
+the boxes still report its installed version like any other.
+
+## Settings → Version sources
+
+| Field           | Default  | What it does                                                                                                                                               |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Enabled**     | `on`     | Whether the feed is polled.                                                                                                                                |
+| **Priority**    | `100`    | Lowest wins when two feeds list the same build. The build is stored **once**; this picks whose URL.                                                        |
+| **Check every** | `15 min` | Per feed, because the feeds are somebody else's servers and set their own polite interval.                                                                 |
+| **Base URL**    | empty    | Only needed when the index lists bare filenames. The UnownHash mirror wants `https://mirror.unownhash.com/apks/` — with that path, or every download 404s. |
+
+<Callout type="info">
+  A feed can be working perfectly and still show zero versions, because the other feed won every
+  build on priority. That is what this page is for.
+</Callout>
+
+## Settings → Groups
+
+| Field                 | Default      | What it does                                                                      |
+| --------------------- | ------------ | --------------------------------------------------------------------------------- |
+| **Pre-install hook**  | none         | Root shell before the install session opens. Typically `am force-stop <pkg>`.     |
+| **Post-install hook** | none         | Root shell after the install verifies. Typically restarts the scanner.            |
+| **Max concurrency**   | inherits     | Overrides **Tuning → Concurrent installs** for this group's boxes.                |
+| **MITM package**      | none         | The MITM this group runs. Drives the MITM column and what a config write targets. |
+| **MITM label**        | package tail | Column header. Falls back to the last dotted segment of the package name.         |
+| **Config path**       | none         | Where the file goes on the box, e.g. `/data/local/tmp/aegis_config.json`.         |
+| **Config**            | empty        | The template written per box, with `device` placeholders substituted first.       |
+
+## Settings → Enrollment
+
+| Field            | Default   | What it does                                          |
+| ---------------- | --------- | ----------------------------------------------------- |
+| **Auto-approve** | `on`      | Boxes enrolling with this token skip manual approval. |
+| **Max uses**     | unlimited | Empty means no cap.                                   |
+| **Expires**      | never     | Empty means no expiry.                                |
+
+A device is `approved: false` until a token says otherwise or somebody approves
+it, and a new user account is a **VIEWER**.
+
+## The deploy forms
+
+Per rollout, not stored. These are deliberately not the app target's policy — a
+rollout started by hand, watched, is a different decision from one that fires
+at 4am.
+
+### Fleet → Deploy
+
+| Field                                    | Pre-filled | Note                                                                                                               |
+| ---------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Canary devices**                       | `1`        |                                                                                                                    |
+| **Soak**                                 | `15 min`   | Shorter than the app target's 30, because somebody is watching this one.                                           |
+| **Attempts**                             | `3`        |                                                                                                                    |
+| **Retry backoff**                        | `60s`      | Doubles per attempt, capped at 30 minutes.                                                                         |
+| **Force a clean install**                | `off`      | Wipes app data on every targeted box. The agent already falls back to it when Android rejects an in-place upgrade. |
+| **Skip devices already on this version** | `on`       | Uncheck to force a reinstall everywhere.                                                                           |
+
+### Manual deploy
+
+| Field                                  | Pre-filled | Note                                                                                                                                                                                                                                                       |
+| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Write the group's config**           | `on`       | Only offered when the app being installed is some group's MITM. Writing the config is the point of deploying one, and there is no other way for an edited config to reach the boxes — so it is on, and it asks for confirmation before the install starts. |
+| **Hooks**                              | worked out | `NORMAL` when the group's MITM is already on a picked box, `POST_ONLY` when this deploy is what puts it there, `NONE` otherwise. A guess, and overridable.                                                                                                 |
+| **Force clean**                        | `off`      |                                                                                                                                                                                                                                                            |
+| **Canary · soak**                      | `0` · `0`  | A manual deploy is the boxes you picked, all at once.                                                                                                                                                                                                      |
+| **Skip boxes already on this version** | `off`      | The opposite of the fleet form, and offered rather than forced: the same version going out again by hand usually means the first build was wrong, and the version string cannot tell a rebuild from a repeat.                                              |
+
+## Where a value lives
+
+`.env` is what the stack needs to **boot and connect** — database, secrets,
+ports, URLs. Everything on this page is what is **tuned while it runs**, wants
+changing without a deploy, and is the same in every environment.
+
+Several values moved from the first to the second, and the old variables are
+now **ignored in silence**: a leftover `AGENT_UPDATE_CONCURRENCY` or
+`DEVICE_OFFLINE_TIMEOUT` in `.env` does nothing at all.
+
+<Callout type="warn" title="Changing a setting straight in the database">
+  The hub caches these and is told to drop its copy when the dashboard saves. Nothing polls. A value
+  written directly with `psql` or `mysql` therefore needs a hub restart, or one Save from the
+  dashboard, before the hub runs on it.
+</Callout>

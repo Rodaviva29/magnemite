@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Readable } from "node:stream";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { prisma } from "@magnemite/db";
 import { bus } from "../bus.js";
@@ -44,6 +44,13 @@ export type UploadInput = {
   arch?: string | null;
   note?: string | null;
   uploadedById?: string | null;
+  /**
+   * Where this came from, when there is such a place. An upload has none — the
+   * artifact *is* the upload — but a build fetched from a link does, and
+   * keeping it is what lets `Free old bundles` reclaim the file without the
+   * version becoming unusable: Cache re-fetches it exactly like a source's.
+   */
+  remoteUrl?: string | null;
 };
 
 export type UploadResult = {
@@ -79,6 +86,154 @@ function slug(value: string): string {
  */
 function needsWrapping(filename: string): boolean {
   return path.extname(filename).toLowerCase() === ".apk";
+}
+
+/**
+ * The other way a build arrives: a URL instead of a file.
+ *
+ * The upload path runs the bytes through the operator's browser, the
+ * dashboard and whatever proxy sits in front of it, and one of those has a
+ * body limit that a 250 MB bundle does not fit under — Cloudflare's free plan
+ * stops at 100 MB and answers 413. Fetching server-side skips all three: the
+ * bytes go from wherever they are published straight onto the artifacts
+ * volume, and nothing in between has to carry them.
+ *
+ * Deliberately the *same* function underneath. What lands on disk, what is
+ * read out of the manifest and what is written to the database is identical to
+ * an upload — only the source of the stream differs.
+ */
+export type RemoteInput = Omit<UploadInput, "stream" | "filename"> & {
+  url: string;
+  /** Overrides the name taken from the URL, when the URL has nothing useful. */
+  filename?: string | null;
+};
+
+/** What a link has to look like before the hub will fetch it. */
+function parseRemoteUrl(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw new Error("that is not a URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("only http and https links can be fetched");
+  }
+  return url;
+}
+
+/**
+ * The name to store the download under. A URL's last path segment is usually
+ * the filename, and it is what decides whether a bare APK gets wrapped — so a
+ * link that ends in nothing useful is treated as an .apk, which is the common
+ * case and the safe one: wrapping something already a bundle is what would
+ * break, and a bundle's URL says .apkm or .xapk.
+ */
+function filenameFromUrl(url: URL, disposition: string | null): string {
+  const fromHeader = disposition?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)?.[1];
+  const candidate = decodeURIComponent(
+    (fromHeader ?? url.pathname.split("/").pop() ?? "").trim(),
+  ).trim();
+  if (/\.(apk|apkm|xapk|zip)$/i.test(candidate)) return candidate;
+  return candidate ? `${candidate}.apk` : "download.apk";
+}
+
+export type ProbeResult = {
+  url: string;
+  status: number;
+  /** Null when the server does not say — a chunked response, usually. */
+  sizeBytes: number | null;
+  contentType: string | null;
+  filename: string;
+  /** True when the server refused a HEAD and this came from a ranged GET. */
+  viaRange: boolean;
+};
+
+/**
+ * Ask the far end about a link without downloading it.
+ *
+ * Answers what is cheap to answer — is it there, how big is it, what is it
+ * called. Not the version: that lives in the manifest, at the end of a zip
+ * that has not been fetched yet, so it is read on import like an upload's.
+ */
+export async function probeRemote(rawUrl: string): Promise<ProbeResult> {
+  const url = parseRemoteUrl(rawUrl);
+
+  let res: Response;
+  let viaRange = false;
+  try {
+    res = await fetch(url, { method: "HEAD", redirect: "follow" });
+    // A fair number of file hosts answer HEAD with 403 or 405 and serve the
+    // GET perfectly well. One ranged byte is enough to tell them apart.
+    if (!res.ok) {
+      viaRange = true;
+      res = await fetch(url, { headers: { Range: "bytes=0-0" }, redirect: "follow" });
+      await res.body?.cancel();
+    }
+  } catch (err) {
+    throw new Error(
+      `could not reach that link (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+
+  // A ranged request answers 206 and its content-length is the one byte asked
+  // for; the total is in content-range.
+  const range = res.headers.get("content-range");
+  const total = range?.match(/\/(\d+)$/)?.[1];
+  const length = total ?? res.headers.get("content-length");
+
+  return {
+    url: res.url || url.toString(),
+    status: res.status,
+    sizeBytes: length ? Number(length) : null,
+    contentType: res.headers.get("content-type"),
+    filename: filenameFromUrl(
+      new URL(res.url || url.toString()),
+      res.headers.get("content-disposition"),
+    ),
+    viaRange,
+  };
+}
+
+/** Fetch a published build and store it exactly as an upload of it would be. */
+export async function storeFromUrl(input: RemoteInput): Promise<UploadResult> {
+  const url = parseRemoteUrl(input.url);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { redirect: "follow" });
+  } catch (err) {
+    throw new Error(
+      `could not reach that link (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+  if (!res.ok || !res.body) {
+    throw new Error(`the link answered HTTP ${res.status}`);
+  }
+
+  // A link to a download *page* rather than to the file answers 200 with HTML,
+  // and without this the failure surfaces 200 MB later as "could not read a
+  // package name out of this file", which points at the wrong thing entirely.
+  const contentType = res.headers.get("content-type") ?? "";
+  if (/^text\/html/i.test(contentType)) {
+    await res.body.cancel();
+    throw new Error("that link returns a web page, not a file — link to the download itself");
+  }
+
+  const filename =
+    input.filename?.trim() ||
+    filenameFromUrl(new URL(res.url || url.toString()), res.headers.get("content-disposition"));
+
+  log.info({ url: url.toString(), filename }, "fetching a build from a link");
+
+  return storeUpload({
+    ...input,
+    filename,
+    // The URL after redirects, so a re-cache goes where the bytes actually are.
+    remoteUrl: res.url || url.toString(),
+    // Node's fetch gives a web stream; storeUpload pipes a Node one.
+    stream: Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
+  });
 }
 
 export async function storeUpload(input: UploadInput): Promise<UploadResult> {
@@ -184,6 +339,10 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
       },
       update: {
         filename,
+        // Re-importing the same label from a different link should follow the
+        // new one, and a re-upload of a build that used to come from a link
+        // should stop claiming it does.
+        remoteUrl: input.remoteUrl?.trim() ?? "",
         artifactPath: finalPath,
         sizeBytes: BigInt(size),
         sha256,
@@ -202,8 +361,10 @@ export async function storeUpload(input: UploadInput): Promise<UploadResult> {
         buildCode: manifest.versionCode,
         source: "MANUAL",
         arch,
-        // There is no upstream to re-fetch from: the artifact is the upload.
-        remoteUrl: "",
+        // Empty for an upload: there is no upstream, the artifact is the file
+        // that was handed over. A link import keeps its URL and stays
+        // re-cacheable after a prune.
+        remoteUrl: input.remoteUrl?.trim() ?? "",
         filename,
         artifactPath: finalPath,
         sizeBytes: BigInt(size),

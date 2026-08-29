@@ -174,7 +174,7 @@ function RuleForm({
         {/* Name and scope carry no heading of their own: they are what the
             rule is called and where it applies, not part of any of the four
             questions below. */}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Name" htmlFor={id("name")}>
             <Input
               id={id("name")}
@@ -253,7 +253,7 @@ function RuleForm({
 
         {/* --- when it counts ------------------------------------------------ */}
         <Section title="When it counts">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
               label="Bad readings in a row"
               htmlFor={id("threshold")}
@@ -317,7 +317,7 @@ function RuleForm({
         >
           <StepsEditor steps={steps} onChange={setSteps} />
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
               label="Severity"
               htmlFor={id("notifyLevel")}
@@ -444,7 +444,7 @@ function ProbeFields({
           )}
 
           {probeKind === "logMatch" ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Lines to read" htmlFor={id("probeLines")}>
                 <Input
                   id={id("probeLines")}

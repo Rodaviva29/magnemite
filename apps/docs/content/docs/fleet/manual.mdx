@@ -36,6 +36,62 @@ from; nothing to do on your side.
 
 Manifest's `versionName` is used for the app version.
 
+Two ways to hand it over, and what ends up stored is identical either way:
+
+|                   | Where the bytes go        | Use it when                                           |
+| ----------------- | ------------------------- | ----------------------------------------------------- |
+| **Upload a file** | Browser → dashboard → hub | The build is on your machine and is not huge          |
+| **From a link**   | Published URL → hub       | It is already published somewhere, or the upload 413s |
+
+<Callout type="warn" title="Upload failed (HTTP 413)">
+
+That is not Magnemite. **413 Payload Too Large** comes from whatever sits in
+front of the dashboard, and it is almost always Cloudflare: the free plan caps
+a request body at **100 MB** (Pro 200 MB, Business 500 MB, Enterprise higher).
+A bundle of splits is regularly 170–250 MB, so it never reaches the hub — the
+proxy answers before the dashboard sees a byte.
+
+Other proxies do the same with their own numbers: nginx is
+`client_max_body_size` (1 MB by default), Traefik and Caddy pass it through
+unless configured otherwise.
+
+Three ways out, best first:
+
+1. **Use "From a link"** below. The hub fetches the build itself, so the bytes
+   never cross the proxy. Nothing to configure, and it works on the free plan.
+2. **Bypass the proxy for the dashboard's hostname** — a `DNS only` record on
+   Cloudflare rather than proxied. You lose the CDN in front of the dashboard.
+3. **Raise the limit**, if your proxy is your own. Cloudflare's cap is per
+   plan and cannot be raised from the dashboard.
+
+</Callout>
+
+#### From a link
+
+Paste a URL that serves the `.apk`, `.apkm` or `.xapk` and the **hub** fetches
+it, straight onto the artifacts volume. Only `http` and `https` links are
+accepted. It is not a shortcut of any kind — the file is hashed, wrapped if it
+is a bare APK, and recorded exactly as an upload is.
+
+**Fetch and store** checks the link before it downloads anything. That check is
+a `HEAD` — reachable, how big, what it is called, where it redirects to — and
+it costs nothing, so it is not a button you have to remember to press: a dead
+link, a typo, or a page that answers HTML instead of a file fails in a moment,
+before a few hundred megabytes are committed to.
+
+What it finds stays on screen while the download runs, which is the only
+progress there is to show for a transfer happening on the hub rather than in
+your browser.
+
+The check does _not_ report the version, and that is deliberate rather than
+missing: the version lives in the manifest inside the file, so it is read when
+the file actually lands — the same as an upload's.
+
+<Callout type="info">
+  A link import takes as long as the download takes. A 250 MB bundle off a fast mirror is under a
+  minute; the page waits.
+</Callout>
+
 </Step>
 
 <Step>
@@ -55,6 +111,16 @@ Pre-hooks and post-install hooks travel with **this rollout**. Left empty, each 
 falls back to its group's hooks (very useful if run different Man-in-the-Middle).
 
 Option `Clean install` uninstalls first and wipes app data on every box.
+
+`Skip boxes already on this version` compares what each box reports for this
+package against the version being installed — read from the APK's own manifest,
+not typed, and gives the matching boxes a `SKIPPED` job instead of an install.
+It is **off** by default, which is the opposite of the fleet's deploy form and
+deliberate: a rollout there is a version moving forward, so a box already on it
+has nothing to do, while a manual deploy of the same version usually means the
+first build was wrong and is going out again. The version string cannot tell a
+rebuild from a repeat. The summary line above the button counts how many boxes
+would be skipped before you start.
 
 If enabled, when the package being installed is a group's own MITM, that group's config is
 written to each of its boxes as part of the job, after the install verifies and

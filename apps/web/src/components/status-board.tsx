@@ -109,7 +109,7 @@ export function StatusBoard({ health, error }: { health: HubHealth | null; error
           </p>
         </div>
 
-        <Button variant="outline" disabled={pending} onClick={recheck}>
+        <Button variant="outline" disabled={pending} onClick={recheck} className="w-full sm:w-auto">
           <RefreshCw className={cn(pending && "animate-spin")} />
           Check again
         </Button>
@@ -130,7 +130,7 @@ export function StatusBoard({ health, error }: { health: HubHealth | null; error
       ) : null}
 
       {health ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {health.checks.map((check) => (
             <IntegrationCard key={check.key} check={check} />
           ))}
@@ -166,7 +166,9 @@ function IntegrationCard({ check }: { check: IntegrationCheck }) {
           </span>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold leading-none tracking-tight">{check.label}</h2>
-            <p className="mt-1.5 text-sm text-muted-foreground">{check.summary}</p>
+            {/* A summary is often a URL or a version string with nowhere to
+                break, and on a phone that is what widens the card. */}
+            <p className="mt-1.5 break-words text-sm text-muted-foreground">{check.summary}</p>
           </div>
         </div>
 
@@ -181,10 +183,21 @@ function IntegrationCard({ check }: { check: IntegrationCheck }) {
           <dl className="flex flex-col gap-1.5 border-t border-border pt-3 text-xs">
             {check.facts.map((fact) => (
               <div key={fact.label} className="flex items-baseline justify-between gap-3">
-                <dt className="shrink-0 text-muted-foreground">{fact.label}</dt>
+                {/* Both sides shrink. The label used to be `shrink-0` and the
+                    value had no `min-w-0`, so on a phone neither could give:
+                    a long path pushed itself past the card and took the page's
+                    width with it. Now the label truncates first and the value
+                    keeps its right edge, which is the half worth reading. */}
+                <dt className="min-w-0 truncate text-muted-foreground" title={fact.label}>
+                  {fact.label}
+                </dt>
                 {/* `when` reads the clock, so the server's copy and the
                     browser's can differ by a second at hydration. */}
-                <dd className="truncate font-mono" title={fact.value} suppressHydrationWarning>
+                <dd
+                  className="min-w-0 flex-1 truncate text-right font-mono"
+                  title={fact.value}
+                  suppressHydrationWarning
+                >
                   {ISO.test(fact.value) ? when(fact.value) : fact.value}
                 </dd>
               </div>
@@ -201,7 +214,7 @@ function IntegrationCard({ check }: { check: IntegrationCheck }) {
                 : "border-warning/30 bg-warning/5 text-warning",
             )}
           >
-            {check.detail}
+            <span className="break-words">{check.detail}</span>
           </p>
         ) : null}
 

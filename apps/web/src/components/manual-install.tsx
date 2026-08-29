@@ -6,19 +6,26 @@ import {
   AlertTriangle,
   CheckCircle2,
   FileJson,
+  Link2,
   Package,
   Trash2,
   Upload,
   Wand2,
   X,
 } from "lucide-react";
-import { deleteManualVersion, startManualInstall } from "@/actions/manual";
+import {
+  checkBuildUrl,
+  deleteManualVersion,
+  importBuildFromUrl,
+  startManualInstall,
+} from "@/actions/manual";
 import type { HookMode } from "@/lib/hub";
 import { readApkInfoFromFile, type ApkInfo } from "@/lib/apk-info";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -159,6 +166,11 @@ export function ManualInstall({
   const [preHook, setPreHook] = useState("");
   const [postHook, setPostHook] = useState("");
   const [forceClean, setForceClean] = useState(false);
+  // Off, unlike the fleet's deploy form. The commonest manual deploy is the
+  // same version again — a build that was wrong, rebuilt — and the version
+  // string cannot tell those two apart, so skipping is the answer to a
+  // different question than the one usually being asked here.
+  const [skipUpToDate, setSkipUpToDate] = useState(false);
   // Follows the suggestion until somebody picks for themselves, and then stops
   // moving. A control that kept re-deciding under the cursor as boxes are
   // ticked would be worse than one that never suggested anything.
@@ -169,8 +181,27 @@ export function ManualInstall({
   const [writeConfig, setWriteConfig] = useState(true);
   const [note, setNote] = useState("");
 
+  // --- from a link ---------------------------------------------------------
+  // The second way a build arrives. An upload has to fit through the browser
+  // and every proxy in front of the dashboard; a link is fetched by the hub,
+  // which is what gets a 250 MB bundle past a 100 MB body limit.
+  const [source, setSource] = useState<"file" | "url">("file");
+  const [url, setUrl] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [probe, setProbe] = useState<{
+    url: string;
+    sizeBytes: number | null;
+    contentType: string | null;
+    filename: string;
+  } | null>(null);
+
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // The "are you sure" for a deploy that also rewrites configs. Its own error
+  // slot: a failure has to be readable without the dialog closing over it.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   const buildsForPackage = useMemo(
     () => (packageName ? builds.filter((b) => b.packageName === packageName) : builds),
@@ -234,14 +265,42 @@ export function ManualInstall({
     const fresh = packageName
       ? chosen.filter((device) => !device.installed[packageName]).length
       : chosen.length;
-    return { total: chosen.length, fresh, updates: chosen.length - fresh };
-  }, [devices, picked, packageName]);
+    // Boxes reporting exactly the version being installed. The same comparison
+    // the hub makes when skipping, so the number here is the number of jobs
+    // that would come out SKIPPED.
+    const same =
+      packageName && selected
+        ? chosen.filter((device) => device.installed[packageName] === selected.version).length
+        : 0;
+    return { total: chosen.length, fresh, updates: chosen.length - fresh, same };
+  }, [devices, picked, packageName, selected]);
 
   /** Groups whose MITM is the app being installed — the ones whose config rides along. */
   const configuredGroups = useMemo(
     () => (packageName ? groups.filter((g) => g.mitmPackageName === packageName) : []),
     [groups, packageName],
   );
+
+  /**
+   * How many of the picked boxes actually have a config written, which is not
+   * the same as how many are being installed on: only the boxes in a group
+   * whose MITM this is. A deploy of 40 boxes that rewrites 6 configs should
+   * say 6.
+   */
+  const configWriteCount = useMemo(() => {
+    if (configuredGroups.length === 0) return 0;
+    const ids = new Set(configuredGroups.map((g) => g.id));
+    return devices.filter((d) => picked.has(d.id) && d.groupId && ids.has(d.groupId)).length;
+  }, [configuredGroups, devices, picked]);
+
+  /**
+   * Writing a config is the one part of a manual deploy that overwrites
+   * something already on the box, and unlike the install it has no previous
+   * version to go back to — the file it replaces existed only there. The
+   * switch above is on by default, which is right, and is also exactly why
+   * this asks before the write rather than after.
+   */
+  const needsConfirm = configuredGroups.length > 0 && writeConfig && configWriteCount > 0;
 
   /**
    * Which hooks this deploy should be allowed to run, worked out rather than
@@ -327,6 +386,54 @@ export function ManualInstall({
   }
 
   /**
+   * Fetch it, store it, and select it — the link's answer to Upload.
+   *
+   * Two calls behind one button. The first is a HEAD, which costs nothing and
+   * fails fast on the mistakes that are worth failing fast on: a dead link, a
+   * typo, a page that returns HTML. Only then is a few hundred megabytes
+   * committed to, and what the HEAD learned — the name, the size — is on
+   * screen while that download runs, which is the only progress there is to
+   * show for a transfer happening on the hub.
+   */
+  function importLink() {
+    setUploadError(null);
+    setProbe(null);
+    setChecking(true);
+
+    void (async () => {
+      const check = await checkBuildUrl(url).finally(() => setChecking(false));
+      if (check.error) {
+        setUploadError(check.error);
+        return;
+      }
+      setProbe(check.probe ?? null);
+
+      setFetching(true);
+      await importBuildFromUrl({ url, packageName: packageName || undefined })
+        .then((result) => {
+          if (result.error || !result.build) {
+            setUploadError(result.error ?? "The hub did not store that build.");
+            return;
+          }
+          setSelected({
+            id: result.build.appVersionId,
+            packageName: result.build.packageName,
+            displayName: result.build.packageName.split(".").pop() ?? "",
+            version: result.build.version,
+            arch: "arm64-v8a",
+            sizeBytes: result.build.sizeBytes,
+            sha256: result.build.sha256,
+            uploadedAt: new Date().toISOString(),
+          });
+          setProbe(null);
+          setUrl("");
+          router.refresh();
+        })
+        .finally(() => setFetching(false));
+    })();
+  }
+
+  /**
    * XHR rather than fetch: this is the one request in the app where the
    * operator needs to watch a progress bar, and `fetch` still cannot report
    * upload progress.
@@ -386,28 +493,57 @@ export function ManualInstall({
     xhr.send(file);
   }
 
+  /**
+   * Starts the rollout and navigates on success. Returns the message to show
+   * when it fails, because the two callers show it in different places: the
+   * button at the top of the page, the dialog inside itself.
+   */
+  async function runInstall(): Promise<string | null> {
+    if (!selected) return null;
+
+    const result = await startManualInstall({
+      appVersionId: selected.id,
+      deviceIds: [...picked],
+      preInstallHook: preHook.trim() || null,
+      postInstallHook: postHook.trim() || null,
+      hookMode: effectiveHookMode,
+      writeConfig,
+      forceClean,
+      skipUpToDate,
+      maxConcurrency: null,
+      note: note.trim() || null,
+    });
+
+    if (result.error) return result.error;
+    router.push(`/rollouts/${result.rolloutId}`);
+    return null;
+  }
+
+  /** The button. Asks first when this deploy also rewrites configs. */
   function install() {
     if (!selected) return;
     setError(null);
 
-    startTransition(async () => {
-      const result = await startManualInstall({
-        appVersionId: selected.id,
-        deviceIds: [...picked],
-        preInstallHook: preHook.trim() || null,
-        postInstallHook: postHook.trim() || null,
-        hookMode: effectiveHookMode,
-        writeConfig,
-        forceClean,
-        maxConcurrency: null,
-        note: note.trim() || null,
-      });
+    if (needsConfirm) {
+      setConfirmError(null);
+      setConfirmOpen(true);
+      return;
+    }
 
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      router.push(`/rollouts/${result.rolloutId}`);
+    startTransition(async () => {
+      const message = await runInstall();
+      if (message) setError(message);
+    });
+  }
+
+  function confirmInstall() {
+    setConfirmError(null);
+    startTransition(async () => {
+      const message = await runInstall();
+      // Left open on failure so the reason is read where the decision was
+      // made, the same as every other confirmation on the dashboard.
+      if (message) setConfirmError(message);
+      else setConfirmOpen(false);
     });
   }
 
@@ -501,7 +637,7 @@ export function ManualInstall({
             app&apos;s data. The agent falls back to uninstall-and-install and says so on the job.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="package">Package</Label>
             <Select
@@ -550,95 +686,193 @@ export function ManualInstall({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="flex min-w-64 flex-1 flex-col gap-1.5">
-                <Label htmlFor="file">File</Label>
-                {/* The browser's own file control cannot be sized or centred
+          {/* Two ways in, and the second one exists because of a limit that
+              has nothing to do with this app: an upload travels through the
+              browser and every proxy in front of the dashboard, and one of
+              them stops a body well below the size of a bundle of splits. A
+              link is fetched by the hub instead. */}
+          <div className="flex w-fit rounded-lg border border-border bg-subtle p-0.5">
+            {(
+              [
+                { key: "file", label: "Upload a file", icon: Upload },
+                { key: "url", label: "From a link", icon: Link2 },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                disabled={!canOperate || uploading || fetching}
+                onClick={() => {
+                  setSource(option.key);
+                  setUploadError(null);
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  source === option.key
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <option.icon className="h-3.5 w-3.5" />
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          {source === "url" ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="build-url">Link to the build</Label>
+                  <Input
+                    id="build-url"
+                    value={url}
+                    onChange={(e) => {
+                      setUrl(e.target.value);
+                      setProbe(null);
+                    }}
+                    placeholder="https://example.com/builds/app-1.4.2.apkm"
+                    className="font-mono text-xs"
+                    disabled={!canOperate || fetching}
+                  />
+                </div>
+                <Button
+                  onClick={importLink}
+                  disabled={!canOperate || !url.trim() || checking || fetching}
+                >
+                  <Link2 />
+                  {checking ? "Checking…" : fetching ? "Fetching…" : "Fetch and store"}
+                </Button>
+              </div>
+
+              {/* What the HEAD learned, held on screen while the download it
+                  cleared is running. The version is not in it and cannot be:
+                  that lives in the manifest inside the file, so it appears
+                  when the file lands, the same as an upload's. */}
+              {probe ? (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+                  <span className="font-mono font-medium text-foreground">{probe.filename}</span>
+                  <span className="text-muted-foreground">
+                    {probe.sizeBytes === null ? "size not declared" : formatBytes(probe.sizeBytes)}
+                  </span>
+                  {probe.contentType ? (
+                    <span className="font-mono text-muted-foreground">· {probe.contentType}</span>
+                  ) : null}
+                  {probe.url !== url.trim() ? (
+                    <span className="truncate text-muted-foreground">
+                      · redirects to {probe.url}
+                    </span>
+                  ) : null}
+                  <span className="basis-full text-muted-foreground">
+                    {fetching
+                      ? "Downloading it onto the hub. The package and version are read from the manifest when it lands."
+                      : "The package and version are read from the manifest when the file arrives, the same as an upload's."}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Fetched by the hub, straight onto the artifacts volume — nothing passes through
+                  the browser, so no proxy body limit applies. The link is checked before anything
+                  is downloaded, and a big bundle then takes as long as the download does.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="file">File</Label>
+                  {/* The browser's own file control cannot be sized or centred
                     reliably — its button is a pseudo-element whose metrics differ
                     per engine — so the input is hidden and a real Button drives
                     it. Same height and same styling as every other field here. */}
-                <div
-                  className={cn(
-                    "flex h-9 w-full items-center gap-2.5 rounded-lg border border-input bg-card pl-1.5 pr-3",
-                    (!canOperate || uploading) && "opacity-40",
-                  )}
-                >
-                  <Button
-                    asChild
-                    variant="secondary"
-                    size="sm"
-                    className="h-7 shrink-0"
-                    disabled={!canOperate || uploading}
+                  <div
+                    className={cn(
+                      "flex h-9 w-full items-center gap-2.5 rounded-lg border border-input bg-card pl-1.5 pr-3",
+                      (!canOperate || uploading) && "opacity-40",
+                    )}
                   >
-                    <label htmlFor="file" className="cursor-pointer">
-                      Choose file
-                    </label>
-                  </Button>
-                  <span className="truncate text-sm text-muted-foreground">
-                    {file ? `${file.name} · ${formatBytes(file.size)}` : "No file selected"}
-                  </span>
-                  {file && !uploading ? (
-                    <button
-                      type="button"
-                      onClick={clearFile}
-                      aria-label="Remove the chosen file"
-                      className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                    <Button
+                      asChild
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 shrink-0"
+                      disabled={!canOperate || uploading}
                     >
-                      <X className="h-4 w-4" />
-                    </button>
-                  ) : null}
+                      <label htmlFor="file" className="cursor-pointer">
+                        Choose file
+                      </label>
+                    </Button>
+                    <span className="truncate text-sm text-muted-foreground">
+                      {file ? `${file.name} · ${formatBytes(file.size)}` : "No file selected"}
+                    </span>
+                    {file && !uploading ? (
+                      <button
+                        type="button"
+                        onClick={clearFile}
+                        aria-label="Remove the chosen file"
+                        className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <input
+                    id="file"
+                    ref={fileInput}
+                    type="file"
+                    accept=".apk,.apkm,.xapk,.zip"
+                    disabled={!canOperate || uploading}
+                    onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
+                    className="sr-only"
+                  />
                 </div>
-                <input
-                  id="file"
-                  ref={fileInput}
-                  type="file"
-                  accept=".apk,.apkm,.xapk,.zip"
-                  disabled={!canOperate || uploading}
-                  onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
-                  className="sr-only"
-                />
+                <Button onClick={upload} disabled={!canUpload}>
+                  <Upload />
+                  {uploading ? `Uploading ${uploadPct}%` : "Upload"}
+                </Button>
               </div>
-              <Button onClick={upload} disabled={!canUpload}>
-                <Upload />
-                {uploading ? `Uploading ${uploadPct}%` : "Upload"}
-              </Button>
-            </div>
-            {/* Which build this is, answered before a few hundred megabytes
+              {/* Which build this is, answered before a few hundred megabytes
                 of upload rather than after — the commonest mistake here is
                 picking the wrong file out of a folder of near-identical
                 names. Read from the manifest, not the file name, so it is
                 the version that will actually be stored. */}
-            {file ? (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                {reading ? (
-                  <span className="text-muted-foreground">Reading the manifest…</span>
-                ) : detectedVersion ? (
-                  <>
-                    <span className="text-muted-foreground">Version</span>
-                    <span className="font-mono font-medium text-foreground">{detectedVersion}</span>
-                    {info?.versionName && info.versionCode ? (
-                      <span className="font-mono text-muted-foreground">
-                        · build {info.versionCode}
+              {file ? (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  {reading ? (
+                    <span className="text-muted-foreground">Reading the manifest…</span>
+                  ) : detectedVersion ? (
+                    <>
+                      <span className="text-muted-foreground">Version</span>
+                      <span className="font-mono font-medium text-foreground">
+                        {detectedVersion}
                       </span>
-                    ) : null}
-                    {/* The package the file declares, flagged only when it
+                      {info?.versionName && info.versionCode ? (
+                        <span className="font-mono text-muted-foreground">
+                          · build {info.versionCode}
+                        </span>
+                      ) : null}
+                      {/* The package the file declares, flagged only when it
                         disagrees with the one chosen above — that mismatch
                         is the mistake worth catching. */}
-                    {info?.packageName && info.packageName !== packageName ? (
-                      <span className="font-mono text-warning">· {info.packageName}</span>
-                    ) : info?.packageName ? (
-                      <span className="font-mono text-muted-foreground">· {info.packageName}</span>
-                    ) : null}
-                  </>
-                ) : (
-                  <span className="text-muted-foreground">
-                    Could not read a version out of this file — the hub will try again on upload.
-                  </span>
-                )}
-              </div>
-            ) : null}
-          </div>
+                      {info?.packageName && info.packageName !== packageName ? (
+                        <span className="font-mono text-warning">· {info.packageName}</span>
+                      ) : info?.packageName ? (
+                        <span className="font-mono text-muted-foreground">
+                          · {info.packageName}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Could not read a version out of this file — the hub will try again on upload.
+                    </span>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
 
           {uploading ? <Progress value={uploadPct ?? 0} /> : null}
 
@@ -880,7 +1114,7 @@ export function ManualInstall({
             <div
               role="radiogroup"
               aria-label="Which hooks run"
-              className="grid gap-2 sm:grid-cols-3"
+              className="grid grid-cols-1 gap-2 sm:grid-cols-3"
             >
               {HOOK_MODES.map((option) => {
                 const active = effectiveHookMode === option.id;
@@ -922,7 +1156,7 @@ export function ManualInstall({
             </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="pre">Pre-install hook</Label>
               <Textarea
@@ -990,6 +1224,27 @@ export function ManualInstall({
               </span>
               <Switch checked={forceClean} onCheckedChange={setForceClean} disabled={!canOperate} />
             </label>
+
+            {/* Off by default, which is the opposite of the fleet's deploy
+                form and deliberate: there, a rollout is a version moving
+                forward and a box already on it has nothing to do. Here the
+                same version going out twice usually means the first build was
+                wrong, and the version string cannot tell the two apart. */}
+            <label className="flex items-start justify-between gap-4">
+              <span>
+                <span className="text-sm font-medium">Skip boxes already on this version</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {selected && split.same > 0
+                    ? `${split.same} of the ${split.total} picked report ${selected.version}. They would be marked skipped instead of installed.`
+                    : "Leave off to reinstall everywhere, a rebuilt APK under the same version is still a different build."}
+                </span>
+              </span>
+              <Switch
+                checked={skipUpToDate}
+                onCheckedChange={setSkipUpToDate}
+                disabled={!canOperate}
+              />
+            </label>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -1024,6 +1279,7 @@ export function ManualInstall({
                     ? ` · all updates`
                     : ""}
               {forceClean ? " · data will be wiped" : ""}
+              {skipUpToDate && split.same > 0 ? ` · ${split.same} skipped` : ""}
             </>
           ) : (
             "Upload a build or pick one above."
@@ -1041,6 +1297,48 @@ export function ManualInstall({
               : "Install now"}
         </Button>
       </div>
+
+      {/* Asked only when a config is written: an install alone is recoverable
+          by installing something else, and a rewritten config is not. */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) setConfirmError(null);
+        }}
+        title="Write the group config too?"
+        description={
+          <>
+            This deploy installs <span className="font-mono text-xs">{selected?.packageName}</span>{" "}
+            on <span className="text-foreground">{split.total}</span> box
+            {split.total === 1 ? "" : "es"} and overwrites the config on{" "}
+            <span className="text-foreground">{configWriteCount}</span> of them with{" "}
+            {configuredGroups.length === 1 ? "the group's" : "their group's"} current one.
+          </>
+        }
+        confirmLabel="Install and write"
+        pendingLabel="Starting…"
+        pending={pending}
+        error={confirmError}
+        onConfirm={confirmInstall}
+      >
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-subtle px-3 py-2 text-xs text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">
+              {configuredGroups.map((g) => g.name).join(", ")}
+            </span>{" "}
+            {configuredGroups.length === 1 ? "has" : "have"} this app as their MITM. Whatever is on
+            those boxes now, including anything edited on the box by hand, is replaced, and there is
+            no copy of it anywhere else.
+          </p>
+          {forceClean ? (
+            <p className="text-destructive">
+              Force clean is on as well, so the app&apos;s data is wiped before it is installed.
+            </p>
+          ) : null}
+          <p>If you don't want to overwrite, toggle it off at the top of the page.</p>
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

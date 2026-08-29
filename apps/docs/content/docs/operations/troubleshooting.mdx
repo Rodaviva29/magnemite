@@ -83,7 +83,7 @@ The hub only sends `agent_update` to a box whose reported version differs from
 its target, that is not mid-job, and whose ABI it has a build for. Check
 the **Status** page for the target version and `AGENT_AUTO_UPDATE`, the
 device page for the version that box reports, and the box's own log for
-`self-update:` lines. 
+`self-update:` lines.
 
 Check the full flow in [updating the agent](/docs/fleet/agent#the-agent-updates-itself).
 
@@ -102,6 +102,7 @@ A full rollout to 200 boxes is ~35 GB off your server. **Settings → Tuning →
 </Callout>
 
 ## A box enrolled but never appears online?
+
 I know the feeling, such a headache. Check the following:
 
 | Check                  | How                                                                                    |
@@ -111,6 +112,38 @@ I know the feeling, such a headache. Check the following:
 | Approved?              | With auto-approve off, a box sits as _pending approval_ and receives nothing.          |
 | Token still valid?     | A revoked enrollment token blocks _new_ enrollments; a revoked device is disconnected. |
 | DNS?                   | See [DNS on Android](/docs/operations/troubleshooting#dns-on-android) above.           |
+
+When the table settles nothing, read the agent's own log. It is written by the
+Magisk service to `/data/adb/magnemite/agent.log`, rotated to `agent.log.1` at
+2 MB, and it is where enrollment and connection failures actually print:
+
+```sh
+# the whole log, and the rotated previous one
+adb shell su -c 'cat /data/adb/magnemite/agent.log'
+adb shell su -c 'cat /data/adb/magnemite/agent.log.1'
+
+# follow it live while you retry
+adb shell su -c 'tail -f /data/adb/magnemite/agent.log'
+
+# just the enrollment and connection lines
+adb shell su -c 'grep -E "enroll|connect|reconnecting|connection lost" /data/adb/magnemite/agent.log'
+```
+
+| Line                                       | Means                                                                             |
+| ------------------------------------------ | --------------------------------------------------------------------------------- |
+| `enrolling with <url>`                     | It read `serverUrl` — check it is the hub's, not the dashboard                    |
+| `enrolled as "<name>"`                     | Enrollment worked; the device row exists                                          |
+| `connected to <ws url>`                    | The socket is up — the box should be online                                       |
+| `connection lost` / `reconnecting in` | It reaches the hub but the socket keeps dropping, usually the edge port or proxy |
+
+No log file at all means the module never started. Check it is enabled and that
+the binary is there:
+
+```sh
+adb shell su -c 'ls -l /data/adb/modules/magnemite-agent/'
+adb shell su -c 'ps -A | grep magnemite'
+adb logcat -d | grep -i magnemite
+```
 
 ## Downloads 401 at the edge
 

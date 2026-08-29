@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { Boxes, Plus, Trash2 } from "lucide-react";
+import { Boxes, Pencil, Plus, Trash2 } from "lucide-react";
 import { CONFIG_PLACEHOLDERS } from "@/lib/config-placeholders";
 import { createGroup, deleteGroup, updateGroup } from "@/actions/settings";
 import type { ActionState } from "@/actions/rollouts";
@@ -11,6 +11,7 @@ import { Input, Textarea } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Label } from "@/components/ui/label";
 import { SaveButton } from "@/components/ui/save-button";
+import { RenameDevicesDialog } from "@/components/rename-devices-dialog";
 
 export type GroupRow = {
   id: string;
@@ -156,6 +157,20 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
           <span className="text-xs text-muted-foreground">
             {group.deviceCount} device{group.deviceCount === 1 ? "" : "s"}
           </span>
+          {!disabled && group.approvedCount > 0 ? (
+            // `type="button"`, or it submits the group's settings form around it.
+            <RenameDevicesDialog
+              source={{ groupId: group.id }}
+              // No table here, so there is no order on screen to inherit.
+              orders={["serial", "name", "created"]}
+              trigger={
+                <Button type="button" variant="outline" size="sm" disabled={pending}>
+                  <Pencil className="h-4 w-4" />
+                  Rename boxes
+                </Button>
+              }
+            />
+          ) : null}
           {!disabled ? (
             <Button
               type="button"
@@ -171,7 +186,7 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor={`pre-${group.id}`}>Pre-install hook</Label>
           <Textarea
@@ -239,7 +254,7 @@ function GroupForm({ group, disabled }: { group: GroupRow; disabled: boolean }) 
           ) : null}
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="flex flex-col gap-2">
             <Label htmlFor={`mitm-pkg-${group.id}`}>MITM package</Label>
             <Input

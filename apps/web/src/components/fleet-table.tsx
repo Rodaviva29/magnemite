@@ -7,14 +7,17 @@ import {
   AlertTriangle,
   CheckCircle2,
   MoreHorizontal,
+  Pencil,
   Power,
   Rocket,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import type { JobState, VersionSource } from "@magnemite/db";
 import type { MitmColumn } from "@/lib/mitm-columns";
 import { startRollout, type ActionState } from "@/actions/rollouts";
 import { rebootDevice, setDeviceApproval } from "@/actions/devices";
+import { RenameDevicesDialog } from "@/components/rename-devices-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -210,6 +213,13 @@ export function FleetTable({
     });
   }
 
+  // The picked boxes in the order they are on screen, not `[...selected]` —
+  // a Set iterates in insertion order, which is the order the checkboxes were
+  // ticked. That is invisible for a rollout and wrong for a rename, where the
+  // counter follows this list and would otherwise number the fleet seemingly at
+  // random. `matching` rather than `visible` because selection spans pages.
+  const selectedInOrder = matching.filter((r) => selected.has(r.id)).map((r) => r.id);
+
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -222,23 +232,17 @@ export function FleetTable({
           </p>
         </div>
 
+        {/* Only "Update all" stays up here — it is the one action that does not
+            depend on a selection. Everything that acts on picked boxes lives in
+            the bar that appears at the bottom once there are any. */}
         {canOperate ? (
-          <div className="flex gap-2">
-            <RolloutDialog
-              versions={versions}
-              deviceIds={[...selected]}
-              label={selected.size > 0 ? `Update ${selected.size} selected` : "Update selected"}
-              disabled={selected.size === 0}
-              variant="default"
-            />
-            <RolloutDialog
-              versions={versions}
-              deviceIds={[]}
-              label="Update all"
-              disabled={rows.length === 0}
-              variant="outline"
-            />
-          </div>
+          <RolloutDialog
+            versions={versions}
+            deviceIds={[]}
+            label="Update all"
+            disabled={rows.length === 0}
+            variant="outline"
+          />
         ) : null}
       </header>
 
@@ -346,6 +350,47 @@ export function FleetTable({
         </Table>
         <TablePaginationBar pagination={pagination} unit="devices" />
       </div>
+
+      {/* What to do with the boxes you picked, where your eyes already are —
+          on the rows, not back up at the header. It appears only when there is
+          a selection, so the actions never sit there greyed out explaining
+          nothing.
+
+          The wrapper spans the viewport to centre the bar and is
+          pointer-events-none, or an invisible full-width strip would eat clicks
+          on whatever is behind it. z-40 keeps it under the dialogs it opens. */}
+      {canOperate && selected.size > 0 ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-lg">
+            <span className="px-1 text-sm tabular-nums">{selected.size} selected</span>
+            <RolloutDialog
+              versions={versions}
+              deviceIds={selectedInOrder}
+              label="Update"
+              disabled={false}
+              variant="default"
+            />
+            <RenameDevicesDialog
+              source={{ deviceIds: selectedInOrder }}
+              orders={["table", "serial", "name", "created"]}
+              trigger={
+                <Button variant="outline">
+                  <Pencil />
+                  Rename
+                </Button>
+              }
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Clear the selection"
+              onClick={() => setSelected(new Set())}
+            >
+              <X />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

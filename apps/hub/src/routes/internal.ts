@@ -18,7 +18,7 @@ import { sendTestAlert } from "../services/notify.js";
 import { cancelRollout, createRollout, resumeRollout } from "../services/rollouts.js";
 import { type RotomAction, deviceAction, rotomEnabled, syncDevices } from "../services/rotom.js";
 import { nudge } from "../services/scheduler.js";
-import { storeUpload } from "../services/uploads.js";
+import { probeRemote, storeFromUrl, storeUpload } from "../services/uploads.js";
 import { pollAllSources } from "../services/sources/poller.js";
 
 const createRolloutBody = z.object({
@@ -111,6 +111,53 @@ export async function internalRoutes(app: FastifyInstance) {
       return reply.send(result);
     } catch (err) {
       log.warn({ err, packageName, version }, "manual upload failed");
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /**
+   * The same thing from a link.
+   *
+   * An upload has to fit through the operator's browser, the dashboard and
+   * whatever proxy fronts it — and Cloudflare's free plan stops a body at
+   * 100 MB, which a 250 MB bundle is not. Fetching it here skips all three.
+   */
+  const remoteBody = z.object({
+    url: z.string().min(1),
+    packageName: z.string().optional(),
+    version: z.string().optional(),
+    displayName: z.string().optional(),
+    arch: z.string().optional(),
+    filename: z.string().optional(),
+  });
+
+  app.post("/internal/uploads/probe", async (request, reply) => {
+    const body = z.object({ url: z.string().min(1) }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "a url is required" });
+
+    try {
+      return await probeRemote(body.data.url);
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/internal/uploads/from-url", async (request, reply) => {
+    const body = remoteBody.safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "a url is required" });
+
+    try {
+      const result = await storeFromUrl({
+        url: body.data.url,
+        filename: body.data.filename ?? null,
+        packageName: body.data.packageName,
+        version: body.data.version,
+        displayName: body.data.displayName ?? null,
+        arch: body.data.arch ?? null,
+      });
+      return reply.send(result);
+    } catch (err) {
+      log.warn({ err, url: body.data.url }, "fetching a build from a link failed");
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });

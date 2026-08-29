@@ -70,6 +70,29 @@ export type CreateRolloutInput = {
   note?: string | null;
 };
 
+/** What the hub could tell about a link without downloading it. */
+export type RemoteProbe = {
+  url: string;
+  status: number;
+  sizeBytes: number | null;
+  contentType: string | null;
+  filename: string;
+  viaRange: boolean;
+};
+
+/** A build the hub has stored, however it arrived. */
+export type StoredBuild = {
+  appVersionId: string;
+  appTargetId: string;
+  packageName: string;
+  version: string;
+  filename: string;
+  sizeBytes: number;
+  sha256: string;
+  wrapped: boolean;
+  detected: boolean;
+};
+
 /** Mirrors the shape built by the hub's services/health.ts. */
 export type IntegrationState = "OK" | "DEGRADED" | "DOWN" | "OFF";
 
@@ -140,6 +163,18 @@ export const hub = {
       discovered: number;
       errors: { feed: string; error: string }[];
     }>("/internal/sources/poll"),
+  /**
+   * Ask the far end about a build URL without downloading it. Cheap enough to
+   * run while somebody is still typing the link.
+   */
+  probeBuildUrl: (url: string) => call<RemoteProbe>("/internal/uploads/probe", { url }),
+  /**
+   * Fetch a published build straight onto the artifacts volume, skipping the
+   * browser and every proxy between it and here — which is what makes this the
+   * way past a 413 on a large bundle.
+   */
+  importBuildFromUrl: (input: { url: string; packageName?: string; filename?: string }) =>
+    call<StoredBuild>("/internal/uploads/from-url", input),
   /** Integration probes for the Status page. `force` skips the hub's cache. */
   health: (force = false) => call<HubHealth>("/internal/health", { force }),
 };

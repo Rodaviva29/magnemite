@@ -143,7 +143,7 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
         ) : null}
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Hardware</CardTitle>

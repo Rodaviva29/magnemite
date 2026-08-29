@@ -285,7 +285,7 @@ export function SettingsShell({ sections }: { sections: SettingsSection[] }) {
       </header>
 
       <div
-        className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start"
+        className="grid grid-cols-1 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start"
         style={{ "--settings-header": `${headerHeight}px` } as CSSProperties}
       >
         {/* Sticky on desktop so the rail stays reachable from the bottom of a

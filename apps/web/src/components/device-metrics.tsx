@@ -153,7 +153,7 @@ export function DeviceMetrics({ view }: { view: MetricsView }) {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {view.charts.map((chart) => (
           <Card
             key={chart.id}

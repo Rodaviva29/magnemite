@@ -93,6 +93,18 @@ export function Nav({
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
 
+  // The page behind the drawer must not scroll under a thumb aimed at the
+  // menu. Restored on close rather than cleared, so a page that had its own
+  // overflow set keeps it.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [drawerOpen]);
+
   function toggleCollapsed() {
     setCollapsed((prev) => {
       const next = !prev;
@@ -128,10 +140,21 @@ export function Nav({
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 flex-col border-r border-border bg-subtle",
-          "transition-[width,transform] duration-200 ease-out",
-          drawerOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:sticky lg:top-0 lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-border bg-subtle",
+          // `h-screen` is 100vh, which on a phone is taller than what the
+          // browser actually shows — the theme toggle at the bottom ended up
+          // under the URL bar. `dvh` is the visible height.
+          "h-[100dvh] w-[min(17rem,85vw)]",
+          // `visibility` rides along with the transform for a reason: closed,
+          // the drawer is only translated off-screen, and its links stay in
+          // the tab order — a phone keyboard walks into a menu nobody can see.
+          // `invisible` takes it out of the tree and out of focus, and
+          // transitioning it means the slide-out still plays before it goes.
+          // Not `aria-hidden`: that cannot be undone per breakpoint, and on a
+          // desktop the sidebar is on screen with `drawerOpen` false.
+          "transition-[width,transform,visibility] duration-200 ease-out",
+          drawerOpen ? "translate-x-0 visible" : "invisible -translate-x-full",
+          "lg:visible lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
           collapsed ? "lg:w-[68px]" : "lg:w-60",
         )}
       >
@@ -247,7 +270,11 @@ export function Nav({
                       {href === "/rollouts" && activeRollouts > 0 ? (
                         <Badge
                           className={cn(
-                            "ml-auto bg-primary text-primary-foreground tabular-nums",
+                            // A rounded square rather than the Badge's pill:
+                            // `min-w-6` so a single digit is not a narrow sliver
+                            // next to a two-digit count, and the rail does not
+                            // reflow when a rollout finishes.
+                            "ml-auto min-w-6 rounded-md bg-primary px-1.5 text-primary-foreground tabular-nums",
                             collapsed && "lg:hidden",
                           )}
                         >

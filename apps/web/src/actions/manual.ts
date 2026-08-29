@@ -13,6 +13,8 @@ export type ManualInstallInput = {
   hookMode: HookMode;
   writeConfig: boolean;
   forceClean: boolean;
+  /** Boxes reporting this exact version get a SKIPPED job instead of an install. */
+  skipUpToDate: boolean;
   maxConcurrency: number | null;
   note: string | null;
 };
@@ -38,12 +40,9 @@ export async function startManualInstall(input: ManualInstallInput): Promise<Man
       appVersionId: input.appVersionId,
       deviceIds: input.deviceIds,
       forceClean: input.forceClean,
-      // Always off from here, and sent rather than omitted: `createRollout`
-      // defaults it to true, so leaving it out would flip the behaviour to
-      // skipping. There is nothing to be up to date with on a first install,
-      // and a re-upload under the same label is usually a different build —
-      // skipping either would quietly do nothing.
-      skipUpToDate: false,
+      // Always sent, never omitted: `createRollout` defaults it to true, so
+      // leaving it out would turn the form's "off" into skipping.
+      skipUpToDate: input.skipUpToDate,
       preInstallHook: input.preInstallHook,
       postInstallHook: input.postInstallHook,
       hookMode: input.hookMode,
@@ -72,6 +71,107 @@ export async function startManualInstall(input: ManualInstallInput): Promise<Man
   revalidatePath("/rollouts");
   revalidatePath("/manual");
   return { rolloutId };
+}
+
+export type CheckBuildUrlResult = {
+  error?: string;
+  probe?: {
+    url: string;
+    sizeBytes: number | null;
+    contentType: string | null;
+    filename: string;
+  };
+};
+
+/**
+ * Ask the hub what is at the end of a link, without fetching the whole thing.
+ *
+ * Answers what a HEAD can answer — that it is there, how big it is, what it is
+ * called. Not the version: that is in the manifest at the end of a zip nobody
+ * has downloaded yet, and it is read on import, exactly as an upload's is.
+ */
+export async function checkBuildUrl(url: string): Promise<CheckBuildUrlResult> {
+  await requireOperator();
+
+  const trimmed = url.trim();
+  if (!trimmed) return { error: "Paste a link first." };
+
+  try {
+    const probe = await hub.probeBuildUrl(trimmed);
+    if (probe.status >= 400) {
+      return { error: `That link answered HTTP ${probe.status}.` };
+    }
+    return {
+      probe: {
+        url: probe.url,
+        sizeBytes: probe.sizeBytes,
+        contentType: probe.contentType,
+        filename: probe.filename,
+      },
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export type ImportBuildResult = {
+  error?: string;
+  build?: {
+    appVersionId: string;
+    packageName: string;
+    version: string;
+    sizeBytes: number;
+    sha256: string;
+  };
+};
+
+/**
+ * Store a build from a link instead of an upload.
+ *
+ * The bytes never touch the browser or the proxy in front of the dashboard,
+ * which is the whole point: a 250 MB bundle does not fit through a Cloudflare
+ * body limit, and it does not have to. What is stored is identical either way.
+ */
+export async function importBuildFromUrl(input: {
+  url: string;
+  packageName?: string;
+}): Promise<ImportBuildResult> {
+  const user = await requireOperator();
+
+  const url = input.url.trim();
+  if (!url) return { error: "Paste a link first." };
+
+  let build: Awaited<ReturnType<typeof hub.importBuildFromUrl>>;
+  try {
+    build = await hub.importBuildFromUrl({
+      url,
+      packageName: input.packageName?.trim() || undefined,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "version.import",
+      targetType: "AppVersion",
+      targetId: build.appVersionId,
+      meta: { url, packageName: build.packageName, version: build.version },
+    },
+  });
+
+  revalidatePath("/manual");
+  return {
+    build: {
+      appVersionId: build.appVersionId,
+      packageName: build.packageName,
+      version: build.version,
+      sizeBytes: build.sizeBytes,
+      sha256: build.sha256,
+    },
+  };
 }
 
 /**
