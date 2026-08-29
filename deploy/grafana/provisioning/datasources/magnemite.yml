@@ -1,0 +1,35 @@
+# Grafana datasource for Magnemite's MariaDB.
+#
+# Point Grafana at a *read-only* user, not the one in DATABASE_URL: every panel
+# here is a SELECT, and a dashboard has no business being able to write to the
+# fleet's database.
+#
+#   CREATE USER 'grafana'@'%' IDENTIFIED BY '...';
+#   GRANT SELECT ON magnemite.* TO 'grafana'@'%';
+#
+# Provisioned datasources are read-only in the UI on purpose — edit this file
+# and restart Grafana instead.
+apiVersion: 1
+
+datasources:
+  - name: Magnemite
+    # The dashboards reference this uid, so keep it if you rename the source.
+    uid: magnemite-mariadb
+    type: mysql
+    access: proxy
+    # host:port of the MariaDB behind the hub. Same server the hub's
+    # DATABASE_URL points at.
+    url: ${MAGNEMITE_DB_HOST:-127.0.0.1:3306}
+    database: ${MAGNEMITE_DB_NAME:-magnemite}
+    user: ${MAGNEMITE_DB_USER:-grafana}
+    secureJsonData:
+      password: ${MAGNEMITE_DB_PASSWORD}
+    jsonData:
+      maxOpenConns: 4
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      # Rows are written with the hub's clock. Set this to the timezone that
+      # clock is in, or timestamps land in the wrong hour on the charts.
+      timezone: ${MAGNEMITE_DB_TIMEZONE:-UTC}
+    isDefault: false
+    editable: false

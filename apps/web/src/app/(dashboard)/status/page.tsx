@@ -1,9 +1,13 @@
-import { version as nextVersion } from "next/package.json";
+// The default import, not `{ version }`: a JSON module only has a default
+// export, and the bundler warns that its named-export support is going away.
+import nextPackage from "next/package.json";
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { hub, type HubHealth } from "@/lib/hub";
 import { WEB_VERSION } from "@/lib/version";
 import { StatusBoard } from "@/components/status-board";
+
+const nextVersion = nextPackage.version;
 
 export const dynamic = "force-dynamic";
 

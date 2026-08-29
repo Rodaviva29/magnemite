@@ -34,14 +34,16 @@ export async function setDeviceApproval(deviceId: string, approved: boolean): Pr
 }
 
 /**
- * Everywhere a device name is rendered.
+ * Everywhere a device's name or group is rendered.
  *
  * `renameDevice` used to revalidate `/` and the device page only, so a renamed
  * box kept its old name on the manual deploy picker, the monitoring feed and
  * any open rollout until something else happened to invalidate them. The
  * dynamic form is the only option for a batch, where there is no single id.
+ *
+ * The group is shown on exactly the same pages, so a move needs the same list.
  */
-function revalidateDeviceNames(): void {
+function revalidateDeviceViews(): void {
   revalidatePath("/");
   revalidatePath("/manual");
   revalidatePath("/monitoring");
@@ -76,19 +78,95 @@ export async function renameDevice(deviceId: string, name: string): Promise<Acti
     },
   });
 
-  revalidateDeviceNames();
+  revalidateDeviceViews();
   return { ok: true };
 }
 
 export async function setDeviceGroup(deviceId: string, groupId: string): Promise<ActionState> {
-  await requireOperator();
-  await prisma.device.update({
-    where: { id: deviceId },
+  return setDevicesGroup([deviceId], groupId);
+}
+
+/**
+ * Move boxes between groups, one or forty.
+ *
+ * A group carries the pre/post-install hooks, the MITM config and the
+ * concurrency cap, so this is not cosmetic: the same box installs differently
+ * after the move. Hence the audit row naming every box it touched, and hence
+ * the empty-string group id meaning "no group" rather than being rejected —
+ * taking boxes out of a group is a real thing to want.
+ *
+ * Nothing is pushed to the boxes here. The new group's config reaches them the
+ * next time something deploys to them, exactly as it does after editing the
+ * group itself.
+ */
+export async function setDevicesGroup(
+  deviceIds: string[],
+  groupId: string,
+): Promise<ActionState & { moved?: number }> {
+  const user = await requireOperator();
+  if (deviceIds.length === 0) return { error: "No boxes picked." };
+
+  const target = groupId
+    ? await prisma.deviceGroup.findUnique({ where: { id: groupId }, select: { name: true } })
+    : null;
+  if (groupId && !target) return { error: "That group is gone. Reload the page." };
+
+  const devices = await prisma.device.findMany({
+    where: { id: { in: deviceIds } },
+    select: {
+      id: true,
+      serial: true,
+      name: true,
+      groupId: true,
+      group: { select: { name: true } },
+    },
+  });
+  if (devices.length !== deviceIds.length) {
+    return { error: "A box in the selection is no longer there. Reload the page." };
+  }
+
+  // Only the ones that actually change, so the audit row is not full of boxes
+  // that were already there and the count means what it says.
+  const moved = devices.filter((device) => device.groupId !== (groupId || null));
+  if (moved.length === 0) {
+    return { ok: true, moved: 0, message: "Already there." };
+  }
+
+  await prisma.device.updateMany({
+    where: { id: { in: moved.map((device) => device.id) } },
     data: { groupId: groupId || null },
   });
-  revalidatePath("/");
-  revalidatePath(`/devices/${deviceId}`);
-  return { ok: true };
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "device.setGroup",
+      targetType: "Device",
+      // A single move keeps its device id, so the box's own audit view still
+      // finds it; a batch has no one id to file it under.
+      targetId: moved.length === 1 ? (moved[0]?.id ?? null) : null,
+      meta: {
+        to: target?.name ?? null,
+        devices: devices.length,
+        moved: moved.map((device) => ({
+          serial: device.serial,
+          name: device.name,
+          from: device.group?.name ?? null,
+        })),
+      },
+    },
+  });
+
+  revalidateDeviceViews();
+  return {
+    ok: true,
+    moved: moved.length,
+    message:
+      moved.length === 1
+        ? `Moved to ${target?.name ?? "no group"}.`
+        : `Moved ${moved.length} boxes to ${target?.name ?? "no group"}.`,
+  };
 }
 
 export async function rebootDevice(deviceId: string): Promise<ActionState> {
@@ -541,7 +619,7 @@ export async function renameDevices(
     },
   });
 
-  revalidateDeviceNames();
+  revalidateDeviceViews();
   return {
     ok: true,
     renamed: changes.length,

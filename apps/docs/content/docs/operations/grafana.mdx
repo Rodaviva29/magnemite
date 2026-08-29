@@ -1,0 +1,113 @@
+---
+title: Grafana
+description: Point Grafana straight at the database for load history, per-app usage and long-term charts.
+icon: ChartLine
+---
+
+The dashboard's **Load history** answers "what is this box doing"; Grafana
+answers "what has the fleet been doing", side by side with everything else you
+already graph. There is nothing to export and no agent to add: the readings are
+plain rows in the same MariaDB the hub writes to, so Grafana reads them with
+SQL.
+
+Two provisioned dashboards ship in `deploy/grafana/`:
+
+| Dashboard              | What it shows                                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Fleet**  | Online/offline counts, load per core, memory, temperature, boxes reporting, monitor events. By group. |
+| **Per Device** | One box: load, memory, storage, temperature, per-app CPU/RSS/process count, its monitor log.                     |
+
+## Provision it
+
+Copy the two provisioning files and the dashboards into your Grafana, then set
+the four variables the datasource reads:
+
+```sh
+# provisioning
+cp deploy/grafana/provisioning/datasources/magnemite.yml \
+   /etc/grafana/provisioning/datasources/
+cp deploy/grafana/provisioning/dashboards/magnemite.yml \
+   /etc/grafana/provisioning/dashboards/
+
+# the dashboard JSON, at the path that provider points to
+mkdir -p /var/lib/grafana/dashboards/magnemite
+cp deploy/grafana/dashboards/*.json /var/lib/grafana/dashboards/magnemite/
+```
+
+```sh
+MAGNEMITE_DB_HOST=db.internal:3306
+MAGNEMITE_DB_NAME=magnemite
+MAGNEMITE_DB_USER=grafana
+MAGNEMITE_DB_PASSWORD=a-long-random-password
+MAGNEMITE_DB_TIMEZONE=UTC
+```
+
+Restart Grafana. The dashboards land in a **Magnemite** folder.
+
+<Callout type="info" title="Timezone">
+  Rows are written with the hub's clock. `MAGNEMITE_DB_TIMEZONE` has to be the timezone that clock
+  is in, or every point lands in the wrong hour — which looks like the fleet being busy overnight
+  and idle all day.
+</Callout>
+
+Both provisioning files are marked not editable in the UI on purpose: the JSON
+in the repo is the source of truth, and an edit made in the browser is
+overwritten on the next scan. Change a panel by editing it there, exporting the
+JSON, and saving it back into `deploy/grafana/dashboards/`.
+
+## What the tables hold
+
+| Table                       | One row is                                                        |
+| --------------------------- | ----------------------------------------------------------------- |
+| `DeviceMetricSample`        | One box at one moment: load, cores, memory, storage, temperatures |
+| `DevicePackageMetricSample` | One tracked app on one box at one moment: CPU, RSS, process count |
+| `MonitorEvent`              | Something the monitor saw or did                                  |
+| `Device`                    | The box as of its last heartbeat: live, not history              |
+
+Three things about that data that decide how a panel should be written:
+
+- **A missing reading is null, never zero.** No thermal sensor, an agent too
+  old to report memory, an app that is not running — all store nothing. Panels
+  keep `spanNulls: false` so a gap draws as a gap. Connecting across nulls turns
+  "the scanner was dead from 3am" into a straight line.
+- **`cpuCount` is on the sample, not just on the device.** A load average only
+  means something against the core count of the box _at the time_, and a
+  re-flashed box can come back with a different one. That is why every panel
+  divides by `s.cpuCount` and not by `d.cpuCount`.
+- **Per-app CPU is a share of one core.** 200 means two cores pinned. It is the
+  number `top` shows, deliberately not normalised against the core count.
+
+## How far back it goes
+
+Grafana does not extend the history — it only draws what is stored, and that is
+bounded by **Settings → Tuning**:
+
+| Setting                                    | What it does                                              |
+| ------------------------------------------ | --------------------------------------------------------- |
+| Tuning → Health history → **Sample every** | How often a heartbeat is kept as a sample                 |
+| Tuning → Health history → **Keep for**     | How long a sample survives the prune. `0` records nothing |
+| Monitoring → **Keep history for**          | The same clock for `MonitorEvent`                         |
+
+If you want a quarter of load history in Grafana, raise **Keep for**
+first. 
+
+Raising it does not recover what has already been pruned.
+
+<Callout type="info" title="Big fleets">
+  A 30-day panel over a large fleet scans a lot of rows. The samples are indexed on `[deviceId, at]`
+  and `[at]`, which covers both the per-box and the fleet-wide queries, so the usual fix is a wider
+  `$__interval` (Grafana's min interval on the panel) rather than an index. If that stops being
+  enough, an hourly rollup table fed by a scheduled job is the next step — nothing in the schema
+  depends on the samples being raw.
+</Callout>
+
+## Alerting
+
+Grafana can alert on these queries, and for thresholds about _trends_, memory
+climbing all week, storage falling towards the point an install fails, it is
+the better place for it.
+
+Do not move the fleet's own reflexes there. **Settings → Monitoring** acts on
+what a box reports and can restart an app or reboot the box; Grafana can only
+send a message. Anything whose right answer is "do something to the box" belongs
+in a monitor rule, not an alert. See [Monitoring](/docs/fleet/monitoring).

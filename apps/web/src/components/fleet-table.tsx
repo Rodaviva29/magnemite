@@ -6,6 +6,7 @@ import { useFormStatus } from "react-dom";
 import {
   AlertTriangle,
   CheckCircle2,
+  FolderInput,
   MoreHorizontal,
   Pencil,
   Power,
@@ -18,6 +19,7 @@ import type { MitmColumn } from "@/lib/mitm-columns";
 import { startRollout, type ActionState } from "@/actions/rollouts";
 import { rebootDevice, setDeviceApproval } from "@/actions/devices";
 import { RenameDevicesDialog } from "@/components/rename-devices-dialog";
+import { ChangeGroupDialog } from "@/components/change-group-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -218,7 +220,8 @@ export function FleetTable({
   // ticked. That is invisible for a rollout and wrong for a rename, where the
   // counter follows this list and would otherwise number the fleet seemingly at
   // random. `matching` rather than `visible` because selection spans pages.
-  const selectedInOrder = matching.filter((r) => selected.has(r.id)).map((r) => r.id);
+  const selectedRows = matching.filter((r) => selected.has(r.id));
+  const selectedInOrder = selectedRows.map((r) => r.id);
 
   return (
     <div className="flex flex-col gap-5">
@@ -377,6 +380,16 @@ export function FleetTable({
                 <Button variant="outline">
                   <Pencil />
                   Rename
+                </Button>
+              }
+            />
+            <ChangeGroupDialog
+              devices={selectedRows.map((row) => ({ id: row.id, groupName: row.groupName }))}
+              groups={groups}
+              trigger={
+                <Button variant="outline">
+                  <FolderInput />
+                  Change group
                 </Button>
               }
             />

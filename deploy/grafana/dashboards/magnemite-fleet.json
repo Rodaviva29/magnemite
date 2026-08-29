@@ -1,0 +1,380 @@
+{
+  "uid": "magnemite-fleet",
+  "title": "Magnemite · Fleet",
+  "description": "Fleet-wide load, memory, storage and temperature, read straight off the hub's database. The charts read DeviceMetricSample; the table reads Device, which is the live row.",
+  "tags": ["magnemite"],
+  "timezone": "browser",
+  "editable": false,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "Monitor actions",
+        "enable": true,
+        "iconColor": "red",
+        "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+        "target": {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.at AS time, CONCAT(d.name, ': ', e.message) AS text, e.signal AS tags FROM `MonitorEvent` e JOIN `Device` d ON d.id = e.deviceId WHERE $__timeFilter(e.at) AND e.action IS NOT NULL ORDER BY e.at"
+        }
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "group",
+        "label": "Group",
+        "type": "query",
+        "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+        "includeAll": true,
+        "multi": true,
+        "refresh": 1,
+        "allValue": "__ALL__",
+        "query": "SELECT name AS __text, id AS __value FROM `DeviceGroup` ORDER BY name",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Online",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS `online` FROM `Device` d WHERE d.status = 'ONLINE' AND d.approved = 1 AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring}))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Offline",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS `offline` FROM `Device` d WHERE d.status <> 'ONLINE' AND d.approved = 1 AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring}))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Agent versions",
+      "description": "More than one means a rollout is half done, or a box is not taking the update.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(DISTINCT d.agentVersion) AS `versions` FROM `Device` d WHERE d.approved = 1 AND d.agentVersion IS NOT NULL AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring}))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Monitor actions in this window",
+      "description": "Events that actually did something to a box — a restart or a reboot. Recoveries and notify-only rules have no action and are not counted.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS `actions` FROM `MonitorEvent` e JOIN `Device` d ON d.id = e.deviceId WHERE $__timeFilter(e.at) AND e.action IS NOT NULL AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring}))"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Load per core",
+      "description": "loadAvg1 over the core count stored on the sample itself, so a 4-core and an 8-core box are comparable. 1.0 is fully busy.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.loadAvg1 / NULLIF(s.cpuCount, 0)) AS `fleet average`, MAX(s.loadAvg1 / NULLIF(s.cpuCount, 0)) AS `worst box` FROM `DeviceMetricSample` s JOIN `Device` d ON d.id = s.deviceId WHERE $__timeFilter(s.at) AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring})) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Memory used",
+      "description": "1 - MemAvailable/MemTotal. A box near 100% is about to have the scanner killed.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(100 * (1 - s.memAvailableBytes / NULLIF(s.memTotalBytes, 0))) AS `fleet average`, MAX(100 * (1 - s.memAvailableBytes / NULLIF(s.memTotalBytes, 0))) AS `worst box` FROM `DeviceMetricSample` s JOIN `Device` d ON d.id = s.deviceId WHERE $__timeFilter(s.at) AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring})) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "CPU temperature",
+      "description": "Null on boxes whose ROM exposes no sensor — a gap here reads 'cannot say', not 'cold'.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.cpuTempC) AS `fleet average`, MAX(s.cpuTempC) AS `hottest box` FROM `DeviceMetricSample` s JOIN `Device` d ON d.id = s.deviceId WHERE $__timeFilter(s.at) AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring})) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Boxes reporting",
+      "description": "Distinct devices with a sample in each bucket. A step down is boxes going offline; the whole line dropping at once is usually the hub restarting.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), COUNT(DISTINCT s.deviceId) AS `reporting` FROM `DeviceMetricSample` s JOIN `Device` d ON d.id = s.deviceId WHERE $__timeFilter(s.at) AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring})) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Boxes now",
+      "description": "The live Device row, not a sample. Sorted by free storage, because that is what stops an install.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 20 },
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "free" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "free bytes" },
+            "properties": [{ "id": "unit", "value": "bytes" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "temp" },
+            "properties": [{ "id": "unit", "value": "celsius" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "load per core" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT d.name AS `device`, d.status AS `status`, g.name AS `group`, d.agentVersion AS `agent`, ROUND(100 * d.freeBytes / NULLIF(d.totalBytes, 0), 1) AS `free`, d.freeBytes AS `free bytes`, ROUND(d.loadAvg1 / NULLIF(d.cpuCount, 0), 2) AS `load per core`, d.cpuTempC AS `temp`, d.lastSeenAt AS `last seen` FROM `Device` d LEFT JOIN `DeviceGroup` g ON g.id = d.groupId WHERE d.approved = 1 AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring})) ORDER BY `free` ASC"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Monitor events by signal",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 10, "w": 10, "x": 14, "y": 20 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "mode": "normal", "group": "A" }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(e.at, $__interval), e.signal AS metric, COUNT(*) AS `events` FROM `MonitorEvent` e JOIN `Device` d ON d.id = e.deviceId WHERE $__timeFilter(e.at) AND ('__ALL__' IN (${group:sqlstring}) OR d.groupId IN (${group:sqlstring})) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    }
+  ]
+}

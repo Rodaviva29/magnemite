@@ -1,0 +1,382 @@
+{
+  "uid": "magnemite-device",
+  "title": "Magnemite · Device",
+  "description": "One box over time: the same readings the dashboard's Load history shows, plus per-app CPU and memory and the monitor's own log.",
+  "tags": ["magnemite"],
+  "timezone": "browser",
+  "editable": false,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-6h", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "Monitor actions",
+        "enable": true,
+        "iconColor": "red",
+        "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+        "target": {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.at AS time, e.message AS text, e.signal AS tags FROM `MonitorEvent` e WHERE $__timeFilter(e.at) AND e.deviceId = ${device:sqlstring} AND e.action IS NOT NULL ORDER BY e.at"
+        }
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "device",
+        "label": "Device",
+        "type": "query",
+        "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+        "includeAll": false,
+        "multi": false,
+        "refresh": 1,
+        "query": "SELECT name AS __text, id AS __value FROM `Device` WHERE approved = 1 ORDER BY name"
+      },
+      {
+        "name": "package",
+        "label": "App",
+        "type": "query",
+        "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "allValue": "__ALL__",
+        "query": "SELECT DISTINCT packageName FROM `DevicePackageMetricSample` WHERE deviceId = ${device:sqlstring} ORDER BY packageName",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Load average",
+      "description": "The three /proc/loadavg numbers as reported. Divide by the core count for the comparable figure; the panel below does that.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.loadAvg1) AS `1 min`, AVG(s.loadAvg5) AS `5 min`, AVG(s.loadAvg15) AS `15 min` FROM `DeviceMetricSample` s WHERE $__timeFilter(s.at) AND s.deviceId = ${device:sqlstring} GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Load per core",
+      "description": "loadAvg1 over the core count stored on the sample. 1.0 is fully busy; a re-flashed box that comes back with a different core count still reads correctly.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.loadAvg1 / NULLIF(s.cpuCount, 0)) AS `load per core` FROM `DeviceMetricSample` s WHERE $__timeFilter(s.at) AND s.deviceId = ${device:sqlstring} GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memory",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.memTotalBytes - s.memAvailableBytes) AS `used`, AVG(s.memTotalBytes) AS `total` FROM `DeviceMetricSample` s WHERE $__timeFilter(s.at) AND s.deviceId = ${device:sqlstring} GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Storage free",
+      "description": "The /data partition, the one an install writes to.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.freeBytes) AS `free`, AVG(s.totalBytes) AS `total` FROM `DeviceMetricSample` s WHERE $__timeFilter(s.at) AND s.deviceId = ${device:sqlstring} GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Temperature",
+      "description": "Both readings are null on a ROM that exposes no sensor, which is common on TV hardware. A gap is 'cannot say', not 'cold'.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), AVG(s.cpuTempC) AS `cpu`, AVG(s.batteryTempC) AS `battery` FROM `DeviceMetricSample` s WHERE $__timeFilter(s.at) AND s.deviceId = ${device:sqlstring} GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Sample gaps",
+      "description": "One point per stored sample interval. A gap is the box not reporting at all — offline, or the agent dead — and is the fastest way to tell that apart from an app that stopped.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(s.at, $__interval), COUNT(*) AS `samples` FROM `DeviceMetricSample` s WHERE $__timeFilter(s.at) AND s.deviceId = ${device:sqlstring} GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Per-app CPU",
+      "description": "Share of a single core, the number top shows — 200 means two cores pinned. An app that is not running has no row, so it is a gap and never a zero.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(p.at, $__interval), p.packageName AS metric, AVG(p.cpuPercent) AS `cpu` FROM `DevicePackageMetricSample` p WHERE $__timeFilter(p.at) AND p.deviceId = ${device:sqlstring} AND ('__ALL__' IN (${package:sqlstring}) OR p.packageName IN (${package:sqlstring})) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Per-app memory (RSS)",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(p.at, $__interval), p.packageName AS metric, AVG(p.rssBytes) AS `rss` FROM `DevicePackageMetricSample` p WHERE $__timeFilter(p.at) AND p.deviceId = ${device:sqlstring} AND ('__ALL__' IN (${package:sqlstring}) OR p.packageName IN (${package:sqlstring})) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Per-app process count",
+      "description": "A tracked app dropping to no row while the box keeps sampling is the app dying, not the box.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(p.at, $__interval), p.packageName AS metric, MAX(p.processCount) AS `processes` FROM `DevicePackageMetricSample` p WHERE $__timeFilter(p.at) AND p.deviceId = ${device:sqlstring} AND ('__ALL__' IN (${package:sqlstring}) OR p.packageName IN (${package:sqlstring})) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Monitor events",
+      "description": "Why this box rebooted at 3am. actionOk is null for an event that took no action — a recovery, or a notify-only rule.",
+      "datasource": { "type": "mysql", "uid": "magnemite-mariadb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.at AS `at`, e.signal AS `signal`, e.level AS `level`, e.action AS `action`, e.actionOk AS `ok`, e.message AS `message`, e.detail AS `detail` FROM `MonitorEvent` e WHERE $__timeFilter(e.at) AND e.deviceId = ${device:sqlstring} ORDER BY e.at DESC LIMIT 200"
+        }
+      ]
+    }
+  ]
+}

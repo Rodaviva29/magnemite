@@ -1,0 +1,20 @@
+# Loads every dashboard JSON in deploy/grafana/dashboards.
+#
+# Mount that directory into the Grafana container at the path below (or change
+# the path to wherever you put it).
+apiVersion: 1
+
+providers:
+  - name: magnemite
+    orgId: 1
+    folder: Magnemite
+    type: file
+    # An edit made in the UI is overwritten from disk on the next scan, which
+    # is the point: the JSON in this repo is the source of truth. Save a copy
+    # back into the repo if you want a change to survive.
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards/magnemite
+      foldersFromFilesStructure: false

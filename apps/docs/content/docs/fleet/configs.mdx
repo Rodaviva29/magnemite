@@ -18,11 +18,22 @@ data**.
 | -------------------- | --------------------------------------------------------------------------------------------------- |
 | **MITM package**     | The scanner these boxes run. Also what the [MITM column](/docs/fleet/health#the-mitm-column) shows. |
 | **Column header**    | Shorter name for that column. Defaults to the last dotted segment.                                  |
-| **Config file path** | Where the file goes on the box, eg. `/data/local/tmp/aegis_config.json`.                                |
+| **Config file path** | Where the file goes on the box, eg. `/data/local/tmp/aegis_config.json`.                            |
 | **Config JSON**      | The file's contents, with placeholders.                                                             |
 
 The **Fill from** buttons put in the real shapes for Aegis, Atlas and GC,
 paths and key sets.
+
+## Putting boxes in a group
+
+One box: the **Group** select on its device page. Many: pick them on **Fleet**
+and press **Change group** in the bar at the bottom, the same place **Rename**
+lives. The dialog says where the selection is now and how many actually move,
+boxes already in the target group are left alone.
+
+Moving a box changes what it installs, not what is on it: the new group's
+config, its install hooks and its concurrency cap apply from the next deploy.
+Nothing is pushed at the moment of the move.
 
 ## Placeholders
 
