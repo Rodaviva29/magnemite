@@ -8,17 +8,23 @@ Magnemite is four processes and a database.<br></br>Three of them run on your lo
 
 ## All the pieces
 
-| Piece        | What it is                              | What it does                                                                                                |
-| ------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **agent**    | Go binary, installed as a Magisk module | Dials **out** to the hub over WSS, downloads bundles, drives `pm`                                           |
-| **hub**      | Fastify, port 3001                      | Holds the device sockets, schedules jobs, polls both release sources, caches each `.apkm` once              |
-| **web**      | Next.js, port 3000                      | The dashboard. Reads Postgres directly; anything touching a live socket goes through the hub's internal API |
-| **edge**     | Caddy                                   | Fronts the hub and streams cached bundles straight off the shared volume                                    |
-| **postgres** | Postgres 17                             | Devices, versions, rollouts, jobs, accounts                                                                 |
+| Piece        | What it is                              | What it does                                                                                                    |
+| ------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **agent**    | Go binary, installed as a Magisk module | Dials **out** to the hub over WSS, downloads bundles, drives `pm`                                               |
+| **hub**      | Fastify, port 3001                      | Holds the device sockets, schedules jobs, polls both release sources, caches each `.apkm` once                  |
+| **web**      | Next.js, port 3000                      | The dashboard. Reads the database directly; anything touching a live socket goes through the hub's internal API |
+| **edge**     | Caddy                                   | Fronts the hub and streams cached bundles straight off the shared volume                                        |
+| **database** | MySQL 8, MariaDB 11 or Postgres 17      | Devices, versions, rollouts, jobs, accounts                                                                     |
+
+<Callout type="info" title="Magnemite ships no database service">
+  It connects to one you already run, over `DATABASE_URL`. `DB_PROVIDER` (`mysql`, which also covers
+  MariaDB, or `postgresql`) must match that URL, and changing it needs a **rebuild**, the Prisma
+  client is generated per provider.
+</Callout>
 
 ```
                          ┌──────────┐
-  you ───────────────────►   web    │──────► postgres
+  you ───────────────────►   web    │──────► database
        dashboard domain  └────┬─────┘           ▲
                               │ /internal/*     │
                          ┌────▼─────┐           │
