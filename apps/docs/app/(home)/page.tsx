@@ -227,7 +227,7 @@ export default function HomePage() {
               href="/docs/architecture"
               className="inline-flex items-center gap-1.5 text-sm font-medium text-fd-primary hover:underline"
             >
-              How it fits together <ArrowRight className="size-4" />
+              How this magnet works <ArrowRight className="size-4" />
             </Link>
           </div>
 

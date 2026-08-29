@@ -7,7 +7,7 @@ icon: ShieldCheck
 ## Tokens
 
 - **Each device gets its own bearer token**; only its sha256 is stored. Artifact
-  downloads are gated on it — through Caddy's `forward_auth`, or the hub's own
+  downloads are gated on it, through Caddy's `forward_auth`, or the hub's own
   check when it serves the files.
 - **The enrollment token is dropped** from the box's config once it has traded
   it for a device token, so a stolen box cannot enroll more devices.
@@ -15,11 +15,10 @@ icon: ShieldCheck
 
 ## The dashboard
 
-- Sessions are Better Auth cookies signed with `AUTH_SECRET`, and the request
-  origin is checked against `MAGNEMITE_DASHBOARD_URL`.
-- Sign-up is disabled; accounts are created by an admin.
-- Every server action re-checks the caller's role — the UI hiding a control is
-  a convenience, not the control.
+- Sessions are Better Auth cookies signed with `AUTH_SECRET` (request
+  check in `MAGNEMITE_DASHBOARD_URL`).
+- Sign-up is disabled; accounts are only created by you in the `.env` file.
+- Every server action re-checks the caller's role.
 
 ## The internal API
 
@@ -30,28 +29,20 @@ agents' domain, anything that is not `/ws/device`, `/api/enroll`, `/files/*` or
 
 ## The agent
 
-It runs as root but **changes no device settings of its own accord**. It
+It runs as root but **changes no device settings of its own accord** (by default). It
 installs, reads package versions and free space, collects logs when asked, writes
 the [MITM config](/docs/fleet/configs) its group declares, and runs the shell you
 gave it: the pre/post-install hooks, and whatever an operator types into
 [Execute](/docs/fleet/logs#execute).
 
-Writing a file is the one primitive it grew that is not a shell, and it is
-narrower than one on purpose. It refuses a path that is relative or
+It refuses a path that is relative or
 un-normalised, anything under `/system`, `/vendor`, `/product`, `/apex`,
-`/proc`, `/sys`, `/dev` or `/boot`, and its own `config.json` — that file holds
-the box's device token, and a config write able to overwrite it would be a way to
-rewrite the fleet's credentials from the dashboard.
+`/proc`, `/sys`, `/dev` or `/boot`, and its own `config.json` (holds
+the agent device token).
 
 A MITM config holds credentials of its own: a bearer token, a device auth token,
 an account email. It is never written to the hub's log, never into an audit
-entry, and never sent to a VIEWER's browser — they are told a config exists, not
-what is in it.
-
-That last pair is worth being clear about. An operator account can run arbitrary
-commands as root on every box in the fleet — that is what the hooks have always
-been, and Execute only makes it visible. Treat operator accounts accordingly,
-and keep an eye on the audit log, which records both.
+entry.
 
 ## Integrity of what gets installed
 

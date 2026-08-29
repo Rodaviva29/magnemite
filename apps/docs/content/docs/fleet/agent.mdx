@@ -1,6 +1,6 @@
 ---
 title: The agent on a box
-description: Build the Magisk module with the hub URL baked in, flash it once, and let it update itself from then on.
+description: Build the Magisk module with the hub URL baked in, flash it once, and let it update itself...
 icon: Smartphone
 ---
 
@@ -32,7 +32,7 @@ Magisk compares is derived from it (`1.0.0` → `10000`).
 
 <Callout type="warn">
   `SERVER` is the **hub** URL, never the dashboard's. A box pointed at the dashboard's domain fails
-  the handshake on `/ws/device`.
+  the handshake.
 </Callout>
 
 ## Flash it
@@ -60,28 +60,28 @@ rebooting:
 }
 ```
 
-The same values exist as flags — full list in the [environment
+The same values exist as flags. Full list in the [environment
 reference](/docs/deployment/environment#the-agents-own-configuration).
 
 ## What it does at boot
 
 1. Reads `config.json` (or its flags).
-2. Fixes DNS if `/etc/resolv.conf` is missing — see [DNS on
-   Android](/docs/operations/troubleshooting#dns-on-android).
+2. Fixes DNS if `/etc/resolv.conf` is missing (see [DNS on
+   Android](/docs/operations/troubleshooting#dns-on-android)).
 3. Enrolls if it has no device token, then rewrites the config without the
    enrollment token.
 4. Opens the WebSocket and sends `hello`: serial, model, Android version, ABI,
-   installed versions of the tracked packages.
-5. Heartbeats every 20 seconds and waits for work.
+   installed versions, etc.
+5. Heartbeats every 20 seconds (configurable) and waits for work.
 
 `make agent` cross-compiles `linux/arm64`, `linux/arm` (GOARM=7),
 `linux/amd64` and `windows/amd64`. The module zip carries the two ARM builds
 and picks at install time; the other two are for a [fake
 fleet](/docs/development/fake-fleet).
 
-## The agent updates itself
+## The agent updates itself, oh yeah!
 
-Nothing is flashed again. The hub image cross-compiles the agent during its own
+Thank god. Nothing is flashed again. The hub image cross-compiles the agent during its own
 build, so a running hub always carries the exact binary it wants the fleet on.
 
 <Steps>
@@ -102,8 +102,8 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build hub
 
 ### On hub boot
 
-The binaries are copied into `ARTIFACT_DIR` under `agent/<version>/` — the
-volume the edge already serves `/files/*` from — hashed, and earlier versions
+The binaries are copied into `ARTIFACT_DIR` under `agent/<version>/`, the
+volume the edge already serves `/files/*` from, hashed, and earlier versions
 removed.
 
 </Step>
@@ -137,21 +137,23 @@ Updates go out in batches, capped by **concurrent agent updates** in **Settings
 Every attempt is a row in the device's **Update history**, tagged `agent`:
 `updating` until the box comes back on the new version, then `done`, or
 `failed` with the reason the agent reported. A row stuck on `updating` is a box
-that never returned — no power, or a binary that cannot reach the hub.
+that never returned, no power, or a binary that cannot reach the hub.
 
 <Callout type="info">
   The swap is a rename on one filesystem, so a box that loses power mid-update comes back on either
   the old binary or the new one, never half of one. If the new one cannot start, the module's
-  respawn loop puts `.old` back. `tail /data/adb/magnemite/agent.log` for `self-update:` lines; a
-  `checksum mismatch` means the box was served a different file than the hub published.
+  respawn loop puts `.old` back. `tail /data/adb/magnemite/agent.log` for `self-update:` lines.
+
+  A `checksum mismatch` means the box was served a different file than the hub published.
 </Callout>
 
 ## When the module is needed again
+Scenarios that require a new module zip:
 
-- A **brand-new box** — there is no agent to update.
-- A box that **never comes online** — it cannot be told anything.
-- `service.sh` or `customize.sh` **changed** — those live in the module, not in
-  the binary.
+1. A **brand-new box** (obviously no agent to update).
+2. A box that **never comes online**, it cannot be told anything. Check [troubleshooting](/docs/operations/troubleshooting#a-box-enrolled-but-never-appears-online) first.
+3. `service.sh` or `customize.sh` **changed** (those live in the module, not in
+  the binary).
 
-Reinstalling an old zip over an updated box puts the old binary back, so keep a
-freshly built one for boxes enrolled later.
+> Reinstalling an old zip over an updated box puts the old binary back, so keep a
+freshly built one.

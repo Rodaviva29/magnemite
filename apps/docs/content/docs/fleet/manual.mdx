@@ -10,57 +10,40 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 publish: the scanner, a launcher, a hotfix somebody handed you. You give it a
 file and a set of boxes.
 
-What comes out is an ordinary rollout — same jobs, same retries, same page to
-watch it on. Only the artifact's origin differs.
+What comes out is an ordinary rollout: same jobs, same retries, just a different artifact.
 
-## The four steps
+## The four steps explained in a nutshell.
 
 <Steps>
 
 <Step>
 
-### Which app
+### Which app we are deploying?
 
 The package the APK installs or replaces. The picker lists every group's MITM
-first — marked `MITM`, whether or not any box has reported one yet — then the
-packages the fleet already reports, then anything you type.
-
-The MITMs lead deliberately. On a fleet that has just been flashed, the app you
-are here to install is precisely the one no box has, so ordering by "how many
-boxes have it" buried it. Each option says how many boxes report it, and
-`0 boxes` is a normal first install rather than missing data.
+first (marked `MITM`), whether or not any box has reported one yet, then the
+other available packages, or manually type.
 
 </Step>
 
 <Step>
 
-### The build
+### The build to upload?
 
 A single `.apk`, or an `.apkm` / `.xapk` bundle of splits. A lone APK is
 wrapped into a one-entry bundle on the server, which is what the agent installs
 from; nothing to do on your side.
 
-The version label is whatever you type — `1.4.2`, but also
-`2026-08-26 hotfix`. Left empty, the manifest's `versionName` is used.
-Re-uploading under the same label **replaces** that artifact rather than
-failing, which is what fixing a bad build expects.
+Manifest's `versionName` is used for the app version.
 
 </Step>
 
 <Step>
 
-### Which boxes
+### Which devices to deploy to?
 
 Search, filter by group, or select the lot. Offline boxes can be picked: the
 job waits queued and dispatches the moment the agent reconnects.
-
-The table carries the same MITM columns the fleet table does, so "which of these
-boxes is already on which scanner build" is answerable without leaving the page.
-
-Underneath, the summary splits the picked set: `12 boxes · 3 first installs, 9
-updates`. A box with nothing installed has always taken a normal queued job —
-installing and updating are the same job — but the page never said which it was
-about to do.
 
 </Step>
 
@@ -68,40 +51,16 @@ about to do.
 
 ### Hooks and options
 
-Pre- and post-install hooks travel with **this rollout**. Left empty, each box
-falls back to its group's hooks — which stop and start the _watched_ app, not
-necessarily the one being installed. That matters when the upload is the
-scanner itself.
+Pre-hooks and post-install hooks travel with **this rollout**. Left empty, each box
+falls back to its group's hooks (very useful if run different Man-in-the-Middle).
 
-`Clean install` uninstalls first and wipes app data on every box.
+Option `Clean install` uninstalls first and wipes app data on every box.
 
-Skipping boxes already on a version is **not** offered here, and is always off.
-There is nothing to be up to date with on a first install, and a re-upload under
-the same label is usually a different build — skipping either would quietly do
-nothing. (Fleet rollouts still have the option; see [Rollouts](/docs/fleet/rollouts).)
-
-When the package being installed is a group's own MITM, that group's config is
-written to each of its boxes as part of the job — after the install verifies and
+If enabled, when the package being installed is a group's own MITM, that group's config is
+written to each of its boxes as part of the job, after the install verifies and
 before the post-install hook starts the scanner again. See
 [MITM configs](/docs/fleet/configs).
 
 </Step>
 
 </Steps>
-
-## What it leaves behind
-
-An uploaded build becomes an `AppVersion` in `READY`, approved on arrival —
-a human just chose the file — under an app target flagged **manual**. Nothing
-polls a manual target and nothing auto-updates it.
-
-Deleting a build here stops it being offered; the artifact itself is reclaimed
-by **Free old bundles** on the Versions page.
-
-<Callout type="warn">
-  Installing over a different signing key cannot upgrade in place. The agent falls back to
-  uninstall-and-install, which wipes the app's data, and says so on the job.
-</Callout>
-
-Operators and admins only, and every manual rollout is written to the audit log
-with who started it.

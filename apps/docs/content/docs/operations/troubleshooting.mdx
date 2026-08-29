@@ -59,8 +59,7 @@ weight — but so does the single-binary cross-compile.
 
 ## What version is actually running
 
-The **Status** page carries the version of every piece, which is the first
-thing to check when something behaves like an older build:
+The **Status** page carries the version of every piece.
 
 | Card        | Reports                                                          |
 | ----------- | ---------------------------------------------------------------- |
@@ -70,16 +69,12 @@ thing to check when something behaves like an older build:
 | Public edge | Whatever answers on the boxes' URL, from its `Server` header     |
 | Rotom       | The scanner versions across the fleet, counted                   |
 
-Each number comes from the matching line of the repo's `VERSION` file, baked
-into the image at build time. The dashboard and the hub deploy separately, so
-they can end up on different ones — that is exactly the state these make
-visible. A container built before this existed reports `dev`.
+> Each number comes from the matching line of the repo's `VERSION` file.
 
 ## Reading what the box actually printed
 
 The **⋯** menu on a device page has **Logcat (.zip)** for a snapshot you can
-keep and **Live logs** for logcat as it happens — both without touching the
-box. What each contains, and what to look for, is in
+keep and **Live logs** for logcat as it happens. What each contains, and what to look for, is in
 [reading a box's logs](/docs/fleet/logs).
 
 ## An agent that will not update
@@ -88,24 +83,26 @@ The hub only sends `agent_update` to a box whose reported version differs from
 its target, that is not mid-job, and whose ABI it has a build for. Check
 the **Status** page for the target version and `AGENT_AUTO_UPDATE`, the
 device page for the version that box reports, and the box's own log for
-`self-update:` lines. Full flow in
-[updating the agent](/docs/fleet/agent#the-agent-updates-itself).
+`self-update:` lines. 
+
+Check the full flow in [updating the agent](/docs/fleet/agent#the-agent-updates-itself).
 
 ## Small `/data`
 
 Boxes need roughly **450 MB** free: a 172 MB bundle unpacks to ~250 MB and both
 sit on disk at once. The agent refuses to start an install below that rather
-than filling the partition.
-
-The fleet table shows free space per device and warns under 500 MB, so you can
-see the problem before a rollout instead of during one.
+than filling the partition. Devices table shows free space per device and warns under 500 MB, when things are already tight.
 
 ## Egress
 
-A full rollout to 200 boxes is ~35 GB off your server. **Settings → Tuning → Max concurrent jobs** paces it; check your traffic allowance
-before the first fleet-wide update.
+A full rollout to 200 boxes is ~35 GB off your server. **Settings → Tuning → Max concurrent jobs** paces it
+
+<Callout type="error" title="Check your traffic allowance">
+  If your ISP or cloud provider has a cap, check it before you start a rollout.
+</Callout>
 
 ## A box enrolled but never appears online?
+I know the feeling, such a headache. Check the following:
 
 | Check                  | How                                                                                    |
 | ---------------------- | -------------------------------------------------------------------------------------- |
@@ -118,6 +115,6 @@ before the first fleet-wide update.
 ## Downloads 401 at the edge
 
 `/files/*` is gated by `forward_auth` against the hub's `/internal/authz`. A 401
-means the device token the box presented is not one the hub recognises — most
+means the device token the box presented is not one the hub recognises, most
 often a box restored from a backup image whose device row was deleted. Delete
 its `config.json` device token and let it enroll again.

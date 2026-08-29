@@ -1,12 +1,11 @@
 ---
 title: Logs and commands
-description: A box's logcat as a zip, live, or a root shell — from the device page.
+description: A box's logcat as a zip, live, or a root shell, from the device page.
 icon: ScrollText
 ---
 
 Three items in a device page's **⋯** menu, all needing the box online:
-**Logcat (.zip)**, **Live logs** and **Execute**. Operators and admins only —
-following an arbitrary file and running a command both read as root.
+**Logcat (.zip)**, **Live logs** and **Execute**.
 
 ## Logcat (.zip)
 
@@ -19,16 +18,9 @@ A snapshot, collected on demand and downloaded through the browser.
 | `agent.log.1` | The rotated one, when the box has been up long enough                                    |
 | `device.txt`  | Serial, model, Android, ABI, LAN address, uptime, disk, memory, load, installed packages |
 
-`config.json` is deliberately not in there: it holds the device token.
-
-The box zips and uploads it with its own device token — the same one it
-downloads bundles with — and the last 3 bundles per box are kept, nothing older
-than 7 days. Nothing arriving within two minutes usually means an agent older
-than the feature.
-
 <Callout type="warn" title="could not upload the bundle: HTTP 404">
   The box built the zip and had nowhere to put it: the edge is not routing `POST /api/logs/*` to the
-  hub, so it is running an image built before that route existed. Rebuild the edge — see [deploying
+  hub, so it is running an image built before that route existed. Rebuild the edge, see [deploying
   without dropping the fleet](/docs/deployment/coolify#deploying-without-dropping-the-fleet).
 </Callout>
 
@@ -40,17 +32,12 @@ box turns out to have; **Another file…** takes any absolute path. Both start
 from the last 200 lines rather than replaying everything, and lines are
 coloured by level.
 
-Files are **not** followed with `tail -F`: that is toybox here, its follow
-support varies by ROM, and when it declines it still prints the tail first —
-which looks exactly like a working stream that then goes quiet. The agent polls
-instead, and picks the file up again when it is rotated or truncated.
-
 What it costs:
 
 - One follow per **source** on the box: everyone watching logcat shares one.
 - Closing the panel stops it, so does the box disconnecting, and so does a
-  five-minute deadline the agent renews while anyone is watching — a browser
-  that vanished cannot leave a follow running on someone's TV box.
+  five-minute deadline the agent renews while anyone is watching, a browser
+  that vanished cannot leave a follow running on someone's box.
 - The panel keeps 2000 lines and stores nothing. For something to keep, use the
   zip.
 - Lines batch roughly once a second; a box logging faster than the socket
@@ -58,7 +45,7 @@ What it costs:
 
 ## Execute
 
-A shell command run as root on that box — the same `sh -c` the install hooks
+A shell command run as root on that box, the same `sh -c` the install hooks
 use, invoked by hand. The dialog keeps the ones people were opening adb for:
 
 ```sh
@@ -69,20 +56,20 @@ am startservice com.pokemod.aegis/com.pokemod.aegis.services.MappingService
 
 Anything else can be typed; `Ctrl`/`Cmd`+`Enter` runs it. Output is stdout and
 stderr together, capped at 64 KB with the **tail** kept, because the end is the
-part that says what happened. 60 seconds and the box gives up — a command that
-needs longer belongs in a script on the box. Nothing is stored; every run goes
-to the audit log with the command and who ran it.
+part that says what happened. 
+
+60 seconds and the box gives up (a command that
+needs longer belongs in a script on the box).
 
 <Callout type="warn">
-  This is a root shell on hardware in someone's living room, and nothing validates the command
-  beyond its length. `rm -rf` does exactly what you would expect.
+  This is a root shell on hardware,`rm -rf` does exactly what you would expect.
 </Callout>
 
-## What to look for
+## What to look for in logs?
 
 | Symptom                           | Where                                                                          |
 | --------------------------------- | ------------------------------------------------------------------------------ |
-| An install that failed            | `agent.log` — the `pm install-create/write/commit` session and its exact error |
-| A self-update that did not happen | `agent.log`, lines starting `self-update:`                                     |
-| The scanner crashing              | `logcat.txt` — `FATAL EXCEPTION` and the process name                          |
-| A box that will not connect       | `agent.log` — TLS and dial errors, plus the reconnect backoff                  |
+| An install that failed            | `agent.log` (the `pm install-create/write/commit` session and its exact error) |
+| A self-update that did not happen | `agent.log`, lines starting `self-update:` . . .                               |
+| The scanner crashing/no response  | `logcat.txt` or agent log                                                      |
+| A box that will not connect       | `agent.log`, TLS and dial errors, plus the reconnect backoff                   |

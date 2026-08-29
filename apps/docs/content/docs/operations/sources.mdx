@@ -4,9 +4,8 @@ description: Where builds are discovered, how to add another one, and what each 
 icon: Download
 ---
 
-A **source** is a URL publishing an index of installable builds. Magnemite has
-no special-cased integrations: every source is a row you can add or remove in
-**Settings → Version sources**, and they all speak the same format.
+A **source** is a URL publishing an index of installable builds. Every source is configurable so you can add or remove in
+**Settings → Version sources**. They all should speak the same format.
 
 | Source                         | Index                                                       | Notes                                                        |
 | ------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------ |
@@ -18,9 +17,9 @@ Both ship `com.nianticlabs.pokemongo` as an arm64-v8a `.apkm`, a zip holding
 `pm install-create` / `install-write` / `install-commit` session rather than a
 plain `pm install`.
 
-## The index format
+## The index format (json)
 
-A flat JSON array. Four fields are required; the rest are read when a source
+Four fields are required; the rest are read when a source
 publishes them and ignored when it does not.
 
 ```json
@@ -55,14 +54,14 @@ URL only if the index lists bare filenames. It is polled on the next cycle, and
 the **Status** page gets a card for it showing how many builds it lists and
 when it was last read.
 
-Removing a source stops the polling. Builds it already found stay, cached
-artifacts and rollout history included — they simply no longer name a source.
+Removing or disabling a source stops the polling. Builds it already found stay, cached
+artifacts and rollout history included, since they simply no longer name a source.
 
 ## Two sources, one build
 
 When several sources list the same build it is stored **once**. The source with
 the lowest **priority** number decides which URL is downloaded; the others only
-fill in metadata it did not publish, such as an md5 or a build code.
+fill in metadata it did not publish / found.
 
 That is why adding a source never duplicates the Versions page, and why a new
 source is added last by default: an existing build keeps being downloaded from
@@ -71,7 +70,7 @@ where it already was.
 ## What the hub does with them
 
 1. Polls each enabled source on its own **Check every** interval (15 minutes
-   by default, set on the source) and records what it finds as **versions**.
+   by default, configurable for each source) and records what it finds as **versions**.
 2. Downloads a version **once**, when it is cached (either by you pressing
    _Cache_ or by auto-update).
 3. Computes a **sha256** while writing it to `ARTIFACT_DIR`.
@@ -93,14 +92,12 @@ database rows.
 
 ## Configuration
 
-Sources live in the database, not in `.env`, and are entirely managed from
-**Settings → Version sources** — add, edit, or remove as many as you like
-there, no env var involved. That includes how often each one is read: **Check
-every** sits on the source, next to its URL and priority, because the polite
-interval belongs to the feed rather than to the fleet.
+Sources are entirely managed from **Settings → Version sources**: add, edit, or remove as many as you like
+there. That includes how often each one is read: **Check
+every** sits on the source, next to its URL and priority.
 
 The optional `pnpm db:seed` / `make seed` adds two starter sources (the
-UnownHash mirror and Silva) on a fresh database, as a convenience — skip it
+UnownHash mirror and Silva) on a fresh database, as a convenience, skip it
 and add your own from Settings instead if you'd rather start empty.
 
 Leave **Base URL** empty for an index that publishes an absolute `url` per

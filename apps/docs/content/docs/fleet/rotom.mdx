@@ -1,10 +1,10 @@
 ---
-title: Rotom
+title: Rotom integration
 description: The scanner's own view of each box, as a health signal Magnemite cannot produce on its own.
 icon: RadioTower
 ---
 
-A box can be online, heartbeating, with the scanner process alive — and handing
+A box can be online, heartbeating, with the scanner process alive, and handing
 Rotom nothing. The agent has no way to see that; Rotom is the only thing that
 does. With the integration on, the hub asks it what it thinks of the whole
 fleet, once a minute.
@@ -16,49 +16,43 @@ ROTOM_ENABLED=true
 # /api is appended, so either form works.
 ROTOM_URL=http://rotom:7072
 # Matches `secret` under http_listener in the Rotom config.
-ROTOM_SECRET=…
+ROTOM_SECRET=your_secret_here
 ```
 
 A Rotom published through a proxy is often gated by BasicAuth before Rotom sees
-the request. That is a **second** credential, not a different spelling of the
-first — the proxy checks `Authorization`, Rotom checks `X-Rotom-Secret`:
+the request. That is a **second** credential, the proxy checks `Authorization`, Rotom checks `X-Rotom-Secret`:
 
 ```sh title=".env"
-ROTOM_BASIC_USERNAME=…
-ROTOM_BASIC_PASSWORD=…
+ROTOM_BASIC_USERNAME=your_reverse_proxy_user
+ROTOM_BASIC_PASSWORD=your_reverse_proxy_password
 ```
 
-Whatever is set is sent, so all three arrangements work with no mode to choose.
-Only the username decides whether BasicAuth is used at all, so an empty
-password is a valid pairing. Getting it wrong shows up as **Enabled, but not
-answering** with an `HTTP 401` on the Status page — a proxy turning the request
-away and Rotom rejecting the secret look identical from here, so the Rotom card
-lists which credentials it is actually sending.
+Check the Health/Status page for the integration's own health.
 
 <Callout type="info">
   If Rotom runs in another compose project, the hub still has to reach it: share an external
   network, or point `ROTOM_URL` at its published host and port.
 </Callout>
 
-## What you get
+## Integration benefits
 
 <Cards>
   <Card
     title="A Scanner column"
-    description="On the fleet table, once at least one box is matched: whether Rotom has a live connection to it, and how many workers."
+    description="On the fleet table, once at least one box is matched: whether Rotom has a live connection to it, and how many workers attached."
   />
   <Card
     title="A monitoring signal"
-    description="`Rotom lost the box` becomes a rule you can act on — and the only box-health signal that works on every box today, since the hub reads it rather than the agent."
+    description="`Rotom lost the box` becomes a rule you can act on, and the only box-health signal that works on every box today, since the hub reads it rather than the agent."
   />
   <Card
-    title="Restart scanner"
+    title="Restart scanner action"
     description="On the device page, and as a remediation action a rule can take. Rotom kicks the scanner without a reboot."
   />
 </Cards>
 
 Devices are matched by `origin`, falling back to the serial, then to an
-unambiguous public IP. A box that never matches keeps working normally — it
+unambiguous public IP. A box that never matches keeps working normally, it
 simply has no Scanner column and no Rotom rule.
 
 ## Freshness
@@ -71,18 +65,10 @@ or a rule alerts on the sync's own lag; the form refuses the combination rather
 than letting a fleet discover it through the alerts.
 
 Rotom has no single "healthy" field, so the rule uses the composite its API
-implies — `enabled && is_connected && can_be_used` — plus how long ago it last
+implies, `enabled && is_connected && can_be_used` + how long ago it last
 saw the box. One state is deliberately not a fault: a box somebody **disabled
 in Rotom on purpose**. Alerting on that would mean alerting on a decision
 already made.
-
-<Callout type="info" title="Rotom is not part of an install">
-  It used to be — the box was disabled before a rollout and re-enabled after, and "did the update
-  work" was answered by it reappearing with live workers. That made every rollout depend on a second
-  service being reachable and agreeing with us, and left boxes parked out of the scanning pool when
-  a hub restarted mid-install. Installs verify themselves now; Rotom watches. The only thing that
-  disables a box in Rotom is a person.
-</Callout>
 
 Built against the
 [RotomNG API](https://github.com/UnownHash/RotomNG/blob/main/docs/RotomNG-API.md):

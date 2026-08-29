@@ -4,7 +4,7 @@ description: One shared secret that lets a factory-fresh box register itself and
 icon: KeyRound
 ---
 
-A **device token** is per-box and secret — what a box authenticates every
+A **device token** is per-box. A secret identity that a box authenticates every
 socket and every download with. A factory-fresh box has none, and you are not
 pasting two hundred by hand.
 
@@ -25,7 +25,7 @@ box receives ◄─ its own deviceToken   ─► and deletes the enrollment
 
 ## Getting one
 
-**Settings → Enrollment → New token**, shown once — only its sha256 is stored,
+**Settings → Enrollment → New token**, shown once, only its sha256 is stored,
 so a lost token is not recovered, it is replaced. `make seed` also mints one on
 a fresh database.
 
@@ -36,7 +36,7 @@ a fresh database.
 | **Revoke**       | Stops further enrollments. Boxes already enrolled are unaffected.      |
 
 The agent rewrites `config.json` without the token as the last step of a
-successful enrollment, so a stolen box gives up only itself.
+successful enrollment.
 
 ## Device tokens
 
@@ -51,13 +51,13 @@ successful enrollment, so a stolen box gives up only itself.
 ## Moving a box to another hub
 
 A device token is a row in _that_ hub's database. Point an enrolled box at a
-different hub and the handshake is rejected — and the box does not recover on
+different hub and the handshake is rejected, and the box does not recover on
 its own, because `Enroll` runs only at startup, and only when the token is
 empty. It retries the same dead token forever, a minute apart.
 
-<Callout type="warn" title="device token rejected — re-enroll this box">
+<Callout type="warn" title="device token rejected > re-enroll this box">
   The box reached a hub that has never heard of its token. Either it was re-pointed at a new one, or
-  its device row was deleted. Nothing on the box fixes this by itself — the config has to be
+  its device row was deleted. Nothing on the box fixes this by itself, the config has to be
   replaced by hand.
 </Callout>
 
@@ -67,9 +67,9 @@ Read what it points at now:
 adb shell su -c 'cat /data/adb/magnemite/config.json'
 ```
 
-An enrolled box shows a `deviceToken` and no `enrollmentToken` — the agent
-deletes the second the moment it has the first. Replace both, along with the
-URL:
+An enrolled box shows a `deviceToken` and no `enrollmentToken`. 
+
+The agent deletes the second the moment it has the first. Replace both, along with the URL:
 
 ```sh
 adb push config.json /data/local/tmp/config.json
@@ -78,19 +78,16 @@ adb shell su -c 'chmod 600 /data/adb/magnemite/config.json'
 ```
 
 The file is the same shape as a factory-fresh one: `serverUrl`, a fresh
-`enrollmentToken` from the new hub, no `deviceToken`. Then restart the agent —
-`service.sh` brings it back within ten seconds and it enrolls against the new
-hub:
+`enrollmentToken` from the new hub, no `deviceToken`. Then restart the agent 
+(`service.sh` brings it back within ten seconds and it enrolls against the new
+hub) or reboot the device, it works too.
 
 ```sh
 adb shell su -c 'killall magnemite-agent'
 ```
 
-`killall`, not `pkill -f magnemite-agent`: `-f` matches the whole command line,
-which includes the shell running the `pkill` itself.
-
 <Callout type="warn" title="The restart is not optional">
-  The config is read once, at startup. Rewriting the file under a running agent changes nothing — it
+  The config is read once, at startup. Rewriting the file under a running agent changes nothing, it
   keeps the URL and the token it loaded. That is the confusing half: the file on disk is already
   correct and the box still will not connect.
 </Callout>
@@ -102,13 +99,7 @@ adb shell su -c 'rm -f /data/adb/magnemite/config.json'
 ```
 
 The module's `customize.sh` installs the config bundled in the zip **only when
-none exists** — which is why re-flashing over an enrolled box prints _"Keeping
-the existing config"_ and changes nothing. Delete first, then re-flash.
+none exists**, which is why re-flashing over an enrolled box prints _"Keeping
+the existing config"_ and changes nothing. 
 
-### A whole batch
-
-Do it from the old hub, while the boxes are still connected to it.
-`POST /internal/devices/:id/exec` is the same root shell, so no box has to be
-touched. Write every config first and check the output, then reboot them in a
-second pass — killing the agent in the same command means it dies before it can
-answer, and a timeout is indistinguishable from a failure.
+Delete first, then re-flash. If you forgot how, [check here](/docs/fleet/agent#flash-it).

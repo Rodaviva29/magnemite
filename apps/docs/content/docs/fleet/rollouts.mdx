@@ -1,14 +1,13 @@
 ---
 title: Rollouts
-description: Canary, soak, concurrency, retries — started by hand or by the hub itself.
+description: Canary, soak, concurrency, retries (started by hand or by the hub itself).
 icon: Rocket
 ---
 
 A rollout is a version, a target set and a policy. The hub turns it into one
-job per device and dispatches them as capacity allows.
+job per device and dispatches them as capacity allows. Start one from the fleet table (select boxes, or **Update all**).
 
-Start one from the fleet table — select boxes, or **Update all** — or let the
-hub start it for you (see [automatic rollouts](#automatic-rollouts)).
+> Or take some vacations... and let the hub start them for you. See [automatic rollouts](#automatic-rollouts).
 
 ## The policy
 
@@ -16,7 +15,7 @@ hub start it for you (see [automatic rollouts](#automatic-rollouts)).
 | ----------------------- | ------------------------------------------------------------------------------------------------ |
 | **Canary devices**      | The first N update alone; the rest wait for them to succeed.                                     |
 | **Soak (min)**          | Extra wait after the canary succeeds, before the rest go.                                        |
-| **Retry backoff (s)**   | Hold before the next attempt — 60 by default, doubling, capped at 30 minutes.                    |
+| **Retry backoff (s)**   | Hold before the next attempt (60 by default, doubling, capped at 30 minutes).                    |
 | **Attempts per device** | How many tries before a job is left failed.                                                      |
 | **Clean install**       | Uninstall first instead of upgrading in place. **Wipes app data on every box.**                  |
 | **Skip up-to-date**     | Leave boxes already on the version alone. Always off for a [manual install](/docs/fleet/manual). |
@@ -26,9 +25,9 @@ useful unit past one site: they carry their own pre/post-install hooks and can
 cap concurrency below the fleet-wide limit.
 
 <Callout type="info">
-  Canary is worth setting even at three devices — most bad builds fail the same way on every box,
+  Canary is worth setting even at three devices, most bad builds fail the same way on every box,
   and the first three tell you as much as the first fifty. A failed canary parks the rollout at
-  `PAUSED` rather than pushing a bad build to the fleet; resuming is deliberate.
+  `PAUSED` rather than pushing a bad build to the fleet.
 </Callout>
 
 The backoff exists for one failure in particular: a box that has just restarted
@@ -45,7 +44,7 @@ downloading or installing, which is what consumes your egress and their
 
 <Callout type="warn">
   A fleet-wide rollout to 200 boxes is roughly **35 GB** off your server. Concurrency paces it; it
-  does not reduce it. Check your traffic allowance before the first one.
+  does not reduce it. Check your traffic allowance before the first one. Check the [troubleshooting topic](/docs/operations/troubleshooting#egress) for more information.
 </Callout>
 
 ## When things fail
@@ -72,23 +71,22 @@ sha256 mismatch, the free-space refusal.
 
 Per app, on **Settings → Apps**. With it on, the hub polls each source on its
 own interval, caches the newest **approved** version, and creates a rollout
-with that app's canary and soak — inside the time window, if one is set.
+with that app's canary and soak (inside the time window, if set).
 
 It **never** downgrades, never runs two rollouts for one app at once, does
 nothing when every box is already current, and waits out the cooldown.
 
 | Field                                  | What it does                                                                                              |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Approve new versions automatically** | Off, a human ticks _approve_ on the Versions page first. A reasonable default while learning to trust it. |
-| **Window start / end**                 | Jobs created outside it stay queued. The difference between 35 GB at 04:00 and 35 GB at peak.             |
-| **Cooldown (min)**                     | How long after the last automatic rollout finished before another may start. 0 ships immediately.         |
+| **Approve new versions automatically** | Off, a human ticks _approve_ on the Versions page first. |
+| **Window start / end**                 | Jobs created outside it stay queued. Update only in your non peak hours.             |
+| **Cooldown (min)**                     | How long after the last automatic rollout finished before another may start. You can set this setting to 0 to ship immediately (not recommended).         |
 
 Polling interval is per source (**Settings → Version sources → Check every**,
 15 minutes by default), because an index is somebody else's server. A changed
 interval takes effect within seconds.
 
 <Callout type="warn">
-  Auto-approve plus no canary means an upstream mistake reaches 200 boxes unattended. Keep a canary
-  of a few devices and a soak long enough that a dead scanner would show up — in
-  [Rotom](/docs/fleet/rotom), or as a [monitoring](/docs/fleet/monitoring) alert.
+  Auto-approve plus no canary means an upstream mistake reaches N boxes unattended. Keep a canary
+  of a few devices and a soak long enough that a dead scanner would show up, as a [monitoring](/docs/fleet/monitoring) alert.
 </Callout>

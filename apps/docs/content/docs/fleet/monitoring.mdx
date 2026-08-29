@@ -4,26 +4,24 @@ description: Rules that watch a box, act when it stops working, and say so in Di
 icon: Binoculars
 ---
 
+<Callout type="warn" title="This feature is WIP">
+  This feature is not finished and ships disabled by default. It wasn't properly tested. Feedback/testers appreciated.
+</Callout>
+
 A box can be online, heartbeating every twenty seconds, and scanning nothing:
 the scanner died, Pokémon GO fell out of focus, an ANR dialog is waiting for
 somebody to press ENTER, the loop stalled. None of that shows in the fleet
 table, because by every measure it has the box is fine.
 
 **Settings → Monitoring** turns those into rules. A rule is a signal, how many
-bad readings in a row it takes to count, and a ladder of what to do — soft
+bad readings in a row it takes to count, and a ladder of what to do, soft
 first, hard second.
 
-The **Monitoring** page in the sidebar is the other half: what the rules saw
+The **Monitoring** page in the sidebar is it's history: what the rules saw
 and did across the fleet, which is where "why did that box reboot at 3am" is
 answered.
 
-<Callout type="warn" title="Everything ships disabled">
-  A new fleet gets seven rules already written, every one switched off, along with the master
-  switch. This feature reboots hardware in someone's living room; nothing here starts happening
-  because a deploy went out.
-</Callout>
-
-## What it watches
+## What it watches?
 
 | Signal                      | Answered by                  | What it means                                         |
 | --------------------------- | ---------------------------- | ----------------------------------------------------- |
@@ -35,12 +33,12 @@ answered.
 | **Box is unreachable**      | the hub                      | The socket has been gone past the offline timeout     |
 | **Rotom lost the box**      | the hub                      | Rotom is not seeing it, or would not hand it work     |
 
-The first five are knowable only on the box, so they need a recent agent — the
+The first five are knowable only on the box, so they need a recent agent, the
 tab counts how many boxes are behind, and rules skip a box that cannot answer.
 The last two the hub sees for itself and work on every box today; the Rotom one
 needs [Rotom turned on](/docs/fleet/rotom).
 
-## The ladder
+## The ladder?
 
 A rule does the gentle thing first and the expensive thing only when the gentle
 one did not work:

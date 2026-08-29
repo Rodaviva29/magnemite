@@ -12,7 +12,8 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 
 ### Check free space
 
-Refuses to start unless `/data` has roughly **3× the bundle size** free: a
+Refuses to start unless `/data` has roughly **3× the bundle size** free.
+
 172 MB `.apkm` unpacks to ~250 MB and both sit on disk at once.
 
 </Step>
@@ -22,7 +23,7 @@ Refuses to start unless `/data` has roughly **3× the bundle size** free: a
 ### Wait for system_server
 
 `service check package` and `service check activity` until both answer. Almost
-always instant — but it matters on a retry: an install heavy enough to take
+always instant, but it matters on a retry: an install heavy enough to take
 system_server down leaves the box rebuilding its Android for a minute, and
 without the wait `pm` answers `Can't find service: package` and a healthy box
 burns an attempt in under a second.
@@ -31,14 +32,11 @@ burns an attempt in under a second.
 
 <Step>
 
-### Run the pre-install hook
+### Run the pre-install hook (usually)
 
 Usually stopping the scanner. Per device group, or overridden per rollout.
 
-Before the download, not after: the scanner saturates the uplink on these
-boxes, a 170 MB pull sharing it costs the scanner its Rotom socket, and it
-reconnects with no backoff at all — a storm still going when the install asks
-system_server for the heaviest thing it ever does.
+You can disable the pre-install hook in manual deploys.
 
 </Step>
 
@@ -73,8 +71,8 @@ pm install-commit …
 ```
 
 A plain `pm install` cannot take a split bundle, which is why this is a
-session. If Android rejects the in-place upgrade — different signing key, a
-downgrade — the agent uninstalls and installs clean. That **wipes the app's
+session. If Android rejects the in-place upgrade, different signing key, a
+downgrade, the agent uninstalls and installs clean. That **wipes the app's
 data**, and the job is flagged `data wiped`.
 
 </Step>
@@ -90,11 +88,11 @@ is not taken as proof.
 
 <Step>
 
-### Write the MITM config
+### Write the MITM config (ocasionally/configured)
 
 Only when the app being installed is the one the device's group names as its
 MITM, and only when that group has a config set. The file is rendered for this
-box — `{{device.name}}` and friends become its own values — and written
+box (`{{device.name}}`) and friends become its own values, and written
 atomically before the hook runs, so the hook that starts the scanner never
 starts it against the previous site's config. See [Configs](/docs/fleet/configs).
 
@@ -108,7 +106,7 @@ left on the previous config is better than a box left without the app.
 ### Run the post-install hook
 
 Usually starting the scanner again. It runs on **every** way out, not only the
-successful one — a 404, a commit that takes system_server with it, a job that
+successful one, a 404, a commit that takes system_server with it, a job that
 hits its deadline. The pre-install hook stopped the box; the moments it is most
 likely to be left stopped are the ones nobody is watching.
 
@@ -123,9 +121,3 @@ percentage and the box's own log.
   **Clean install** on a rollout uninstalls first on every device. It is the right answer when the
   signing key changed and you know it; it is the wrong answer as a habit.
 </Callout>
-
-The agent runs as root but changes **no device settings**. It installs, reads
-package versions and free space, writes the one config file its group declares,
-and runs the hooks you configured — nothing else. The paths it will write are
-bounded: never under `/system`, `/vendor`, `/product`, `/apex`, `/proc`,
-`/sys`, `/dev` or `/boot`, and never its own directory in `/data/adb/magnemite`.

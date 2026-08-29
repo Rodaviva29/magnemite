@@ -1,19 +1,16 @@
 ---
 title: MITM configs
 description: The config file each MITM needs, written onto every box in a group.
-icon: FileJson
+icon: Braces
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 Installing a MITM is half the job. Aegis, Atlas and GoCheats all read a JSON file
-next to themselves and do nothing useful until it is there and correct — an
-account, a Rotom URL, a secret, and the name this particular box reports under.
+next to themselves and do nothing useful until it has the correct parameters.
 
-That file lives on the **device group**, in **Settings → Device groups → MITM
-data**, because that is the shape the answer has: two sites talking to two Rotom
-instances are two groups, and a config that could only be set once could not
-describe them both.
+Youu can fill that file on the **device group**, in **Settings → Device groups → MITM
+data**.
 
 ## What a group declares
 
@@ -21,19 +18,16 @@ describe them both.
 | -------------------- | --------------------------------------------------------------------------------------------------- |
 | **MITM package**     | The scanner these boxes run. Also what the [MITM column](/docs/fleet/health#the-mitm-column) shows. |
 | **Column header**    | Shorter name for that column. Defaults to the last dotted segment.                                  |
-| **Config file path** | Where the file goes on the box: `/data/local/tmp/aegis_config.json`.                                |
+| **Config file path** | Where the file goes on the box, eg. `/data/local/tmp/aegis_config.json`.                                |
 | **Config JSON**      | The file's contents, with placeholders.                                                             |
 
-The **Fill from** buttons put in the real shapes for Aegis, Atlas and GoCheats —
-paths and key sets. These are not guessable: `rotomUrl` on one is `rdmUrl` on the
-next, GoCheats uses snake_case and a plain `config.json`, and a wrong key is a
-scanner that starts and does nothing.
+The **Fill from** buttons put in the real shapes for Aegis, Atlas and GC,
+paths and key sets.
 
 ## Placeholders
 
-Anything a box has to say about itself is a placeholder, substituted per box
-before the file is written — the same job aconf does with
-`sed 's,dummy,$origin,g'`.
+Anything a box has to say about itself is a placeholder, substituted per device
+before the file is written.
 
 ```json
 {
@@ -60,45 +54,27 @@ Two things are refused rather than papered over:
 
 <Callout title="rotomOrigin is empty until Rotom matches the box">
   So a first deploy on a fresh fleet often refuses it on most boxes. That is the
-  refusal working. Either use `{{device.name}}` — which every box has — or deploy
+  refusal working. Either use `{{device.name}}`, which every box has, or deploy
   again once the Rotom sync has run.
 </Callout>
-
-The list is deliberately an allow-list and not "any column on the device row":
-that row holds each box's `tokenHash`, and a template able to name it would be a
-way to write the fleet's credentials into a file the scanner reads.
 
 ## When it is written
 
 One path: **with the install.** A rollout of a group's own MITM carries that
-group's config. The agent writes it after the install verifies and **before** the
-post-install hook — which is the hook that starts the scanner, so it never starts
-against the previous site's config. A rollout of any other package carries
-nothing; the package match is the whole gate, and there is no switch for it
-anywhere.
+group's config (if toggled on). The agent writes it after the install verifies and **before** the
+post-install hook.
 
 Saving a group writes to the database and nothing else. An edited config reaches
-the fleet on the next deploy of that group's MITM, and not before.
-
-<Callout type="warn" title="There is no separate push">
-  There was one, with a restart command to make the running scanner re-read the file. Both are gone:
-  inside an install the post-install hook already restarts the scanner, so the command only earned
-  its keep on the push, and the two only made sense together. Changing a config now costs a deploy
-  of the MITM — which for a large fleet is an APK download per box.
-</Callout>
+the fleet on the next deploy of that group's MITM (if toggled on), and not before.
 
 ## How it lands
 
-Not a shell command with a heredoc, which is how this would otherwise be done.
 The agent takes the `config` object off the install job and:
 
-1. Refuses the path if it is relative, un-normalised, under `/system`,
-   `/vendor`, `/product`, `/apex`, `/proc`, `/sys`, `/dev` or `/boot` — or if it
-   is the agent's own `config.json`, which holds this box's device token.
-2. Writes to a temp file and **renames** it into place, so a scanner reading the
+1. Writes to a temp file and **renames** it into place, so a scanner reading the
    file while it is replaced sees the old bytes or the new ones, never a
    half-written middle.
-3. Reads the file back and reports its sha256. That answers "what is on the box",
+2. Reads the file back and reports its sha256. That answers "what is on the box",
    where hashing what the hub sent would only answer "what did the hub mean".
 
 A config that cannot be written **fails the job**, rather than leaving a scanner
@@ -107,20 +83,11 @@ costs an attempt and not a second download.
 
 <Callout type="warn" title="The config holds credentials">
   `authBearer`, `deviceAuthToken`, an email address. It is never written to the hub's log, never
-  into an audit entry, and never sent to a VIEWER's browser — they are told a config exists, not
-  what is in it.
+  into an audit entry.
 </Callout>
-
-## Old agents
-
-A box on an agent from before this existed drops the field in silence, so the hub
-checks what each agent reported it can do in its `hello` before attaching a
-config. An install onto such a box installs normally and logs a warning on the
-job, which resolves itself once the box takes its next agent update.
 
 ## Lineage
 
 The paths and the per-box name substitution are both
 [aconf](https://github.com/TechG3n/aconf)'s, which has been doing this on the
-same hardware for years. What changes here is where the answer lives: rows in a
-database that one person edits, rather than a file per box.
+same hardware for years. Credits to @TechG3n for the original idea.

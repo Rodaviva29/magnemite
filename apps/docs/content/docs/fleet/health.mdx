@@ -1,54 +1,39 @@
 ---
-title: Load and versions
-description: CPU, memory, storage, temperature and per-app usage — now and over time — plus which packages a box reports at all.
+title: Load and metrics
+description: CPU, memory, storage, temperature, per-app usage and more!
 icon: Activity
 ---
 
 The device page's **Load** card is what a box is doing right now, with the last
-hour behind each number as a sparkline. The chart icon opens **Load history**:
+hour behind each number as a sparkline. The tiny button opens **Load history**:
 the same readings over a window you choose.
 
 ## What the box reports
 
-Every heartbeat — one every 20 seconds — the agent reads a few small `/proc`
-files and sends them with the package versions:
+Every heartbeat (one every 20 seconds, configurable), the agent reads a few small `/proc`
+files.
+
+It also reads the package versions.
 
 | Reading         | Where it comes from                              |
 | --------------- | ------------------------------------------------ |
 | CPU load        | `/proc/loadavg`, against the box's core count    |
 | Memory          | `MemTotal` and `MemAvailable` in `/proc/meminfo` |
-| Storage         | `/data` — the partition an install writes to     |
+| Storage         | `/data` (the partition an install writes to)     |
 | Temperature     | `/sys/class/thermal/thermal_zone*`               |
 | CPU/RAM per app | `/proc/<pid>/stat` and `statm`, per tracked app  |
-
-**Temperature** is the awkward one: plenty of TV boxes expose no thermal zone,
-and those that do disagree about units. The agent picks the divisor by
-magnitude and drops anything outside −30…150 °C, so a box that cannot say shows
-nothing rather than something wrong. Unlabelled zones: the hottest wins.
+| Package versions | `dumpsys package <package>`                       |
 
 **Per-app usage** covers only the tracked packages, summed across every process
-an app owns. CPU is a share of a _single_ core — the number `top` shows — so
-200% is two cores pinned.
+an app owns. CPU is a share of a _single_ core, the number `top` shows.
 
 <Callout type="info">
-  A reading the box never sent is stored as null and drawn as a gap, never a zero. That is the
-  difference between "the scanner was idle at 3am" and "the scanner was dead at 3am", which is the
-  question the history exists to answer.
+  A reading the box never sent is stored as null and drawn as a gap, never a zero.
 </Callout>
-
-## Load history
-
-One filter row scopes every chart below it: **time range** (presets longer than
-the retention are disabled), **apps** (colours are fixed per package, eight at a
-time), and a **table** of the same numbers as text.
-
-Each chart carries `avg`, `p95` and `max` for its window, computed from the raw
-rows rather than from the points drawn — the lines themselves are bucketed to
-about one per pixel-column before they leave the server.
 
 ## Retention
 
-Two knobs in **Settings → Tuning**:
+Two configurable knobs in **Settings → Tuning**:
 
 | Setting                          | Default | What it does                                                         |
 | -------------------------------- | ------- | -------------------------------------------------------------------- |
@@ -63,37 +48,3 @@ the heartbeats writing to it.
   Expected on a box that just enrolled, on an agent old enough not to send these fields, and with
   retention set to 0.
 </Callout>
-
-## The MITM column
-
-The fleet table shows the installed version of each app Magnemite updates, plus
-one column per MITM. That column comes from the device groups: each group names
-the MITM its boxes run, in **Settings → Device groups → MITM data**.
-
-```
-com.pokemod.aegis    →  header "aegis"
-```
-
-It sorts, searches and groups like every other column. Magnemite installs a MITM
-and writes its config, but **nothing polls a feed for it** — no versions page, no
-auto-update. Its version is reported rather than tracked.
-
-Two groups may name the same package: two sites on Aegis, pointed at different
-Rotom instances by their own configs. That is **one** column, not two, or a fleet
-of five sites would grow five identical ones.
-
-The hub keeps one list of packages worth reporting — the app targets plus every
-group's MITM — and hands it to each agent in its `welcome`. The list is the union
-across all groups, not each box's own: a box moved between groups would otherwise
-stop reporting the MITM it actually has, and its old cell would sit there stale
-forever. It is also how a box in the wrong group is spotted at all.
-
-Changing a group's MITM package pushes the list to every connected box, so the
-column fills in on the next heartbeat; an offline box picks it up when it
-returns. An empty cell means the box has not reported that package: either it is
-not installed, or it has not been heard from since. The group's field shows how
-many boxes answered, which tells the two apart.
-
-Clearing the package stops the reporting. Recorded versions stay, and the device
-page keeps listing every package a box reported — the column is a view, not the
-record.
