@@ -96,8 +96,9 @@ export async function updateHubSettings(
   // not come, the values are still saved but the hub is running on the old
   // ones, and that has to be said rather than left to be discovered.
   let told = true;
+  let pushed = 0;
   try {
-    await hub.refreshSettings();
+    pushed = (await hub.refreshSettings()).pushed ?? 0;
   } catch {
     told = false;
   }
@@ -107,15 +108,21 @@ export async function updateHubSettings(
       userId: user.id,
       userEmail: user.email,
       action: "settings.hub",
-      meta: { ...patch, hubNotified: told },
+      meta: { ...patch, hubNotified: told, welcomePushed: pushed },
     },
   });
 
   revalidatePath("/settings");
+  // The heartbeat is the one knob here that does not land everywhere at once,
+  // so the message says how far it got: the boxes that were connected have it
+  // already, the rest adopt it as they reconnect. Zero means the save left the
+  // heartbeat alone, and there is nothing to report.
+  const beat =
+    pushed > 0 ? ` ${pushed} box${pushed === 1 ? "" : "es"} took the new heartbeat.` : "";
   return {
     ok: true,
     message: told
-      ? "Saved."
+      ? `Saved.${beat}`
       : "Saved, but the hub could not be told, it is still running on the old values. Restart it, or save again once it is back.",
   };
 }
