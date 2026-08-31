@@ -79,6 +79,10 @@ const rotomWorkerSchema = z.object({
         .object({
           id: z.string().nullish(),
           uuid: z.string().nullish(),
+          // Which build is driving this worker — "Dragonite/1.20.10-testing"
+          // and the like. The worker reports its own scanner version; this is
+          // the thing on the other end of it.
+          user_agent: z.string().nullish(),
           account_username: z.string().nullish(),
           account_source: z.string().nullish(),
           weight: z.number().nullish(),

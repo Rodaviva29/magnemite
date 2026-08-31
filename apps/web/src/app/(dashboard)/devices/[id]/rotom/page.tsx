@@ -184,7 +184,11 @@ export default async function DeviceRotomPage({
             />
             <Tile
               label="Last seen by Rotom"
-              value={<RelativeTime value={device.rotomLastSeenAt} />}
+              // Counting up on its own: the number only moves when the page
+              // re-renders otherwise, so at a 10s sync it sat still and then
+              // jumped, which reads as a stall rather than as nobody having
+              // asked yet.
+              value={<RelativeTime value={device.rotomLastSeenAt} live />}
               detail={device.rotomConnected ? "connection is open" : "no connection"}
             />
           </div>

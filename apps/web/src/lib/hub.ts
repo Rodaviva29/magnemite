@@ -139,7 +139,12 @@ export type RotomWorkerView = {
     request_ms_avg_over_5_min?: number | null;
   } | null;
   session?: {
-    controller?: { account_username?: string | null; account_source?: string | null } | null;
+    controller?: {
+      id?: string | null;
+      user_agent?: string | null;
+      account_username?: string | null;
+      account_source?: string | null;
+    } | null;
   } | null;
 };
 
