@@ -1,11 +1,11 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { SlidersHorizontal } from "lucide-react";
-import { updateHubSettings } from "@/actions/settings";
-import type { ActionState } from "@/actions/rollouts";
+import { updateHubSettings, type HubSettingsState } from "@/actions/settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SaveButton } from "@/components/ui/save-button";
+import { useToast } from "@/components/ui/toast";
 import { NumberField, SettingGroup } from "@/components/settings/setting-fields";
 
 export type HubSettingsRow = {
@@ -32,7 +32,18 @@ export function HubSettingsForm({
   settings: HubSettingsRow;
   disabled: boolean;
 }) {
-  const [state, formAction] = useActionState<ActionState, FormData>(updateHubSettings, {});
+  const [state, formAction] = useActionState<HubSettingsState, FormData>(updateHubSettings, {});
+  const toast = useToast();
+
+  // The heartbeat is the only knob here whose save has anywhere else to reach,
+  // so it is the only one with an outcome the card cannot show by itself. The
+  // count comes back as a number: a save that left the heartbeat alone sends
+  // none, and toasts nothing.
+  useEffect(() => {
+    const pushed = state.pushed;
+    if (!state.ok || !pushed) return;
+    toast(`Saved. ${pushed} box${pushed === 1 ? "" : "es"} took the new heartbeat.`);
+  }, [state, toast]);
 
   return (
     <Card>

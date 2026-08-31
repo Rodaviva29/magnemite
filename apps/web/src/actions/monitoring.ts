@@ -7,6 +7,7 @@ import {
   type MonitorSettingsValues,
   type MonitorSignal,
   type Prisma,
+  getMonitorSettings as readMonitorSettings,
   prisma,
   updateMonitorSettings as updateMonitorSettingsInDb,
 } from "@magnemite/db";
@@ -81,7 +82,20 @@ export async function updateMonitorSettings(
 ): Promise<ActionState> {
   const user = await requireOperator();
 
-  const int = (name: string, min: number) => {
+  // Both monitoring cards save through this one action, and each posts only
+  // the fields it shows. So a field that is absent means "this card does not
+  // own it" — not zero, not empty — and keeps whatever is stored.
+  //
+  // The cards used to mirror each other's values in hidden inputs instead,
+  // which failed twice: one was missing the Rotom sync interval, so saving a
+  // webhook was rejected over a number that form does not have; the other
+  // posted no Discord fields at all, so saving a timing silently wiped the
+  // webhook. Reading absence here is what makes both impossible.
+  const stored = await readMonitorSettings();
+  const submitted = (name: string) => formData.get(name) !== null;
+
+  const int = (name: string, min: number, fallback: number) => {
+    if (!submitted(name)) return fallback;
     const parsed = Number(formData.get(name));
     if (!Number.isFinite(parsed) || parsed < min) return null;
     return Math.floor(parsed);
@@ -91,17 +105,17 @@ export async function updateMonitorSettings(
   // service — and the one it answers is the same `/api/device` its own
   // dashboard polls every five seconds. Five is the floor for that reason: it
   // is what Rotom already expects of a client, not a number picked here.
-  const rotomSyncSeconds = int("rotomSyncSeconds", 5);
+  const rotomSyncSeconds = int("rotomSyncSeconds", 5, stored.rotomSyncSeconds);
   // Floored against the Rotom sync interval below, not by a constant: 120 was
   // two of the 60s the sync used to be fixed at, and it stopped meaning that
   // the moment the interval became a setting.
-  const rotomStaleSeconds = int("rotomStaleSeconds", 1);
-  const rebootGraceSeconds = int("rebootGraceSeconds", 60);
-  const startupGraceSeconds = int("startupGraceSeconds", 0);
-  const maxActionsPerDeviceHour = int("maxActionsPerDeviceHour", 1);
-  const maxRebootsPerDeviceDay = int("maxRebootsPerDeviceDay", 1);
-  const alertDedupeMinutes = int("alertDedupeMinutes", 0);
-  const eventRetentionDays = int("eventRetentionDays", 0);
+  const rotomStaleSeconds = int("rotomStaleSeconds", 1, stored.rotomStaleSeconds);
+  const rebootGraceSeconds = int("rebootGraceSeconds", 60, stored.rebootGraceSeconds);
+  const startupGraceSeconds = int("startupGraceSeconds", 0, stored.startupGraceSeconds);
+  const maxActionsPerDeviceHour = int("maxActionsPerDeviceHour", 1, stored.maxActionsPerDeviceHour);
+  const maxRebootsPerDeviceDay = int("maxRebootsPerDeviceDay", 1, stored.maxRebootsPerDeviceDay);
+  const alertDedupeMinutes = int("alertDedupeMinutes", 0, stored.alertDedupeMinutes);
+  const eventRetentionDays = int("eventRetentionDays", 0, stored.eventRetentionDays);
 
   if (
     rotomSyncSeconds === null ||
@@ -119,21 +133,35 @@ export async function updateMonitorSettings(
     };
   }
 
-  const webhook = String(formData.get("discordWebhookUrl") ?? "").trim();
-  if (webhook && !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)) {
+  // The shape is checked only when it was typed. A stored value that predates
+  // this rule must not block a save from the other card, which never shows the
+  // webhook at all.
+  const webhook = submitted("discordWebhookUrl")
+    ? String(formData.get("discordWebhookUrl")).trim()
+    : stored.discordWebhookUrl;
+  if (
+    submitted("discordWebhookUrl") &&
+    webhook &&
+    !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)
+  ) {
     return {
       error:
         "That does not look like a Discord webhook. Copy it from the channel's Integrations settings — it starts with https://discord.com/api/webhooks/.",
     };
   }
 
-  const level = String(formData.get("discordMinLevel") ?? "WARN");
-  if (!LEVELS.has(level)) return { error: "Pick a minimum severity." };
+  const level = submitted("discordMinLevel")
+    ? String(formData.get("discordMinLevel"))
+    : stored.discordMinLevel;
+  if (submitted("discordMinLevel") && !LEVELS.has(level)) {
+    return { error: "Pick a minimum severity." };
+  }
 
   // Two sync intervals, because a box can never be fresher than the last time
   // anyone asked Rotom about it. Anything tighter alerts on the sync's own lag.
-  // Both numbers come out of this one form now, so the check is against what
-  // was just typed rather than against whatever is stored elsewhere.
+  // Checked against the pair that is about to be written — typed where the card
+  // shows it, stored where it does not — so the two can never disagree, whichever
+  // card the save came from.
   if (rotomStaleSeconds < rotomSyncSeconds * 2) {
     return {
       error: `Asking Rotom every ${rotomSyncSeconds}s means the stale delay has to be at least ${rotomSyncSeconds * 2}s — anything tighter alerts on the sync's own lag rather than on a box.`,
@@ -141,7 +169,10 @@ export async function updateMonitorSettings(
   }
 
   const patch: Partial<MonitorSettingsValues> = {
-    enabled: formData.get("enabled") === "on",
+    // Absent is "keep it", not "off": a card that does not show the master
+    // switch posts nothing for it, and the switch itself saves through
+    // setMonitorEnabled rather than through this form.
+    enabled: submitted("enabled") ? formData.get("enabled") === "on" : stored.enabled,
     rotomSyncSeconds,
     rotomStaleSeconds,
     rebootGraceSeconds,
@@ -152,7 +183,9 @@ export async function updateMonitorSettings(
     eventRetentionDays,
     discordWebhookUrl: webhook,
     discordMinLevel: level,
-    discordMentionRoleId: String(formData.get("discordMentionRoleId") ?? "").trim(),
+    discordMentionRoleId: submitted("discordMentionRoleId")
+      ? String(formData.get("discordMentionRoleId")).trim()
+      : stored.discordMentionRoleId,
   };
   await updateMonitorSettingsInDb(patch);
 

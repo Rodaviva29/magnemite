@@ -39,11 +39,20 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * What a hub-settings save reports back.
+ *
+ * `pushed` is how many boxes were handed the new heartbeat then and there,
+ * and it is a number rather than a sentence because the wording is the form's
+ * to choose. Absent whenever the save left the heartbeat alone.
+ */
+export type HubSettingsState = ActionState & { pushed?: number };
+
 /** Fleet-wide operational knobs — max concurrent jobs, stall timeout, and so on. */
 export async function updateHubSettings(
-  _prev: ActionState,
+  _prev: HubSettingsState,
   formData: FormData,
-): Promise<ActionState> {
+): Promise<HubSettingsState> {
   const user = await requireOperator();
 
   const int = (name: string, min: number) => {
@@ -113,16 +122,14 @@ export async function updateHubSettings(
   });
 
   revalidatePath("/settings");
-  // The heartbeat is the one knob here that does not land everywhere at once,
-  // so the message says how far it got: the boxes that were connected have it
-  // already, the rest adopt it as they reconnect. Zero means the save left the
-  // heartbeat alone, and there is nothing to report.
-  const beat =
-    pushed > 0 ? ` ${pushed} box${pushed === 1 ? "" : "es"} took the new heartbeat.` : "";
   return {
     ok: true,
+    // The heartbeat is the one knob here that does not land everywhere at
+    // once. Zero boxes means the save left it alone — or that none were
+    // connected to take it — and either way there is nothing to say.
+    pushed: pushed > 0 ? pushed : undefined,
     message: told
-      ? `Saved.${beat}`
+      ? "Saved."
       : "Saved, but the hub could not be told, it is still running on the old values. Restart it, or save again once it is back.",
   };
 }

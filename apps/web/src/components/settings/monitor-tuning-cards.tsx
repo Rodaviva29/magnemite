@@ -58,11 +58,9 @@ export function MonitorTuningCard({
 
       <CardContent>
         <form action={formAction} className="flex flex-col gap-6">
-          {/* The action takes the whole group, and the master switch now lives
-              at the top of the tab. Without this, saving a number down here
-              would post no `enabled` at all and read as switching monitoring
-              off. */}
-          <input type="hidden" name="enabled" value={settings.enabled ? "on" : ""} />
+          {/* Only the fields below are posted. The action reads an absent field
+              as "this card does not own it" and keeps what is stored, so there
+              is nothing here mirroring the master switch or the Discord card. */}
 
           {/* No heartbeat or offline readout here any more: both are real
               fields on the Hub settings card directly above, and a disabled
@@ -206,26 +204,11 @@ export function MonitorDiscordCard({
       </CardHeader>
 
       <CardContent>
-        {/* The settings action takes the whole group, so this form carries the
-            other card's values as hidden fields rather than clearing them. */}
+        {/* Three fields, and only those three are posted: the action keeps the
+            timings and ceilings the other card owns. This form used to mirror
+            them in hidden inputs, and one of them was missing — which is what
+            made saving a webhook fail over a number that is not on this card. */}
         <form action={formAction} className="flex flex-col gap-4">
-          <input type="hidden" name="enabled" value={settings.enabled ? "on" : ""} />
-          <input type="hidden" name="rotomStaleSeconds" value={settings.rotomStaleSeconds} />
-          <input type="hidden" name="rebootGraceSeconds" value={settings.rebootGraceSeconds} />
-          <input type="hidden" name="startupGraceSeconds" value={settings.startupGraceSeconds} />
-          <input
-            type="hidden"
-            name="maxActionsPerDeviceHour"
-            value={settings.maxActionsPerDeviceHour}
-          />
-          <input
-            type="hidden"
-            name="maxRebootsPerDeviceDay"
-            value={settings.maxRebootsPerDeviceDay}
-          />
-          <input type="hidden" name="alertDedupeMinutes" value={settings.alertDedupeMinutes} />
-          <input type="hidden" name="eventRetentionDays" value={settings.eventRetentionDays} />
-
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="discordWebhookUrl">Webhook URL</Label>
             <Input
