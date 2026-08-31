@@ -11,8 +11,6 @@ import { NumberField, SettingGroup } from "@/components/settings/setting-fields"
 export type HubSettingsRow = {
   maxConcurrentJobs: number;
   jobStallTimeoutSeconds: number;
-  metricsSampleSeconds: number;
-  metricsRetentionDays: number;
   heartbeatSeconds: number;
   agentUpdateConcurrency: number;
   deviceOfflineTimeoutSeconds: number;
@@ -102,25 +100,10 @@ export function HubSettingsForm({
             />
           </SettingGroup>
 
-          <SettingGroup title="Health history">
-            <NumberField
-              name="metricsSampleSeconds"
-              label="Sample every"
-              value={settings.metricsSampleSeconds}
-              min={5}
-              disabled={disabled}
-              hint="How often a box's CPU, memory, storage, temperature and per-app usage are kept for the charts. Never shorter than the heartbeat, there is nothing extra to store between beats."
-            />
-            <NumberField
-              name="metricsRetentionDays"
-              label="Keep for"
-              value={settings.metricsRetentionDays}
-              min={0}
-              unit="days"
-              disabled={disabled}
-              hint="How long those samples live before the hub prunes them. 0 turns recording off and drops what is already stored. What the monitoring rules write is kept separately, in the card below."
-            />
-          </SettingGroup>
+          {/* No history group here any more: it is its own card below, because
+              there are two of them now and they are floored by two different
+              numbers — this heartbeat, and the Rotom sync on the Monitoring
+              card. */}
 
           {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
           {/* The button reports a plain save on its own. This is for the one

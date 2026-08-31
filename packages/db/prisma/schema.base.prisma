@@ -166,6 +166,25 @@ model Device {
   rotomEnabled     Boolean   @default(true)
   /// Rotom's own verdict on whether it would hand this box work.
   rotomCanBeUsed   Boolean   @default(false)
+  /// How many of `rotomWorkerCount` Rotom currently has allocated. Zero on a
+  /// connected box is the case this integration exists for: online, registered,
+  /// and being handed nothing.
+  rotomWorkersInUse Int?
+  /// Rotom's own verdict on whether the box is doing work right now.
+  rotomInUse        Boolean @default(false)
+  /// The scanner version Rotom sees. Health already counts these across the
+  /// fleet; this is the same number per box.
+  rotomVersion      String?
+  /// Requests per second across this box's workers, over Rotom's five minute
+  /// window. Null when no worker reports stats — Rotom only measures them in
+  /// `requests` mode, or `proxy` mode with `inspect`, and a Rotom that does not
+  /// measure is unknown rather than idle.
+  rotomRequestRate  Float?
+  /// Mean request duration in milliseconds over the same window, same null rule.
+  rotomRequestMs    Float?
+  /// How many workers answered with stats, which is what makes the two above
+  /// readable: null there could be "no workers" or "this Rotom does not say".
+  rotomStatWorkers  Int?
 
   // --- Monitoring ----------------------------------------------------------
   /// The package owning the focused activity, as of the last heartbeat that
@@ -187,6 +206,7 @@ model Device {
   logBundles     DeviceLogBundle[]
   metricSamples  DeviceMetricSample[]
   packageSamples DevicePackageMetricSample[]
+  rotomSamples   RotomSample[]
   monitorStates  MonitorState[]
   monitorEvents  MonitorEvent[]
 
@@ -326,6 +346,43 @@ model DevicePackageMetricSample {
   @@index([deviceId, at])
   /// One box, one app, one window — the series behind a selected package.
   @@index([deviceId, packageName, at])
+  @@index([at])
+}
+
+/// What Rotom said about one box at one point in time.
+///
+/// Its own table rather than columns on `DeviceMetricSample`, because the two
+/// have different writers and different cadences: metric samples are cut from a
+/// heartbeat, and this is cut from the Rotom sync. That difference is the whole
+/// value of it — a box whose agent has died sends no heartbeat, and those are
+/// exactly the minutes where what Rotom still sees is worth having.
+///
+/// A row per sync per matched box, written whether or not anything changed: a
+/// flat line is a reading, and the gaps have to mean "nobody asked".
+model RotomSample {
+  /// An autoincrement for the same reason `DeviceMetricSample` uses one.
+  id       Int    @id @default(autoincrement())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  at DateTime @default(now())
+
+  connected Boolean
+  enabled   Boolean
+  canBeUsed Boolean
+  inUse     Boolean
+
+  workerCount  Int?
+  workersInUse Int?
+  /// Null where Rotom does not measure request rates. Never zero for that.
+  requestRate  Float?
+  /// Mean request duration over the same window, and null under the same rule
+  /// — plus one of its own: no requests leaves nothing to average.
+  requestMs    Float?
+
+  /// The chart's own query: one box, one time window.
+  @@index([deviceId, at])
+  /// The prune's query, which is fleet-wide and has no device to narrow by.
   @@index([at])
 }
 
@@ -816,11 +873,17 @@ enum MonitorSignal {
   HEALTH_CHECK_FAILED // a configured probe came back bad
   LOOP_STALLED // the scanner is alive but has stopped doing anything
   ROTOM_DISCONNECTED // Rotom stopped seeing the box, or has no workers on it
+  ROTOM_NOT_SCANNING // Rotom has the box and no worker is allocated on it
+  ROTOM_IDLE // a worker is allocated and making no requests at all
 }
 
-/// What a rule does about it. Everything except REBOOT and ROTOM_RESTART is a
-/// shell command with an editable default — the catalog exists so an alert can
+/// What a rule does about it. Everything except REBOOT and the ROTOM_* three is
+/// a shell command with an editable default — the catalog exists so an alert can
 /// say "cleared the cache and restarted" instead of quoting a command line.
+///
+/// REBOOT rides the agent's socket and the ROTOM_* three ride Rotom's own, which
+/// is the whole reason both kinds of reboot exist: they are the only remediation
+/// left when the other side is the one that died.
 enum MonitorAction {
   NOTIFY_ONLY
   RESTART_APP
@@ -831,6 +894,8 @@ enum MonitorAction {
   SHELL
   REBOOT
   ROTOM_RESTART
+  ROTOM_DISCONNECT
+  ROTOM_REBOOT
 }
 
 enum MonitorLevel {

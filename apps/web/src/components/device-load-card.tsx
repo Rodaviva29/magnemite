@@ -2,8 +2,7 @@ import Link from "next/link";
 import { ChartSpline } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Sparkline } from "@/components/charts/sparkline";
+import { Meter, type MeterTone } from "@/components/charts/meter";
 import { formatBytes } from "@/lib/format";
 
 export type DeviceLoad = {
@@ -40,6 +39,13 @@ export function DeviceLoadCard({ load, trend }: { load: DeviceLoad; trend: LoadT
   const diskUsed =
     load.totalBytes === null || load.freeBytes === null ? null : load.totalBytes - load.freeBytes;
 
+  const cpuPercent =
+    load.loadAvg1 === null || !load.cpuCount ? null : (load.loadAvg1 / load.cpuCount) * 100;
+  const memPercent =
+    memUsed === null || !load.memTotalBytes ? null : (memUsed / load.memTotalBytes) * 100;
+  const diskPercent =
+    diskUsed === null || !load.totalBytes ? null : (diskUsed / load.totalBytes) * 100;
+
   return (
     <Card>
       {/* The header carries the one control, so the card body stays entirely
@@ -73,9 +79,8 @@ export function DeviceLoadCard({ load, trend }: { load: DeviceLoad; trend: LoadT
               ? "not reported"
               : `${load.loadAvg1.toFixed(2)}${load.cpuCount ? ` of ${load.cpuCount} cores` : ""}`
           }
-          percent={
-            load.loadAvg1 === null || !load.cpuCount ? null : (load.loadAvg1 / load.cpuCount) * 100
-          }
+          percent={cpuPercent}
+          tone={loadTone(cpuPercent)}
           trend={trend.cpu}
         />
         <Meter
@@ -85,9 +90,8 @@ export function DeviceLoadCard({ load, trend }: { load: DeviceLoad; trend: LoadT
               ? "not reported"
               : `${formatBytes(memUsed)} of ${formatBytes(load.memTotalBytes)}`
           }
-          percent={
-            memUsed === null || !load.memTotalBytes ? null : (memUsed / load.memTotalBytes) * 100
-          }
+          percent={memPercent}
+          tone={loadTone(memPercent)}
           trend={trend.memory}
         />
         <Meter
@@ -97,9 +101,8 @@ export function DeviceLoadCard({ load, trend }: { load: DeviceLoad; trend: LoadT
               ? formatBytes(load.freeBytes)
               : `${formatBytes(diskUsed)} of ${formatBytes(load.totalBytes)}`
           }
-          percent={
-            diskUsed === null || !load.totalBytes ? null : (diskUsed / load.totalBytes) * 100
-          }
+          percent={diskPercent}
+          tone={loadTone(diskPercent)}
           trend={trend.storage}
         />
 
@@ -126,42 +129,8 @@ function loadText(load: number | null, cores: number | null): string {
   return `${Math.round((load / cores) * 100)}%`;
 }
 
-/**
- * A labelled bar with the reading beside it. `percent` is null when the box
- * has not reported it — an agent old enough to predate these metrics — and
- * that reads as "not reported" rather than as a bar sitting at zero.
- */
-function Meter({
-  label,
-  detail,
-  percent,
-  trend,
-}: {
-  label: string;
-  detail: string;
-  percent: number | null;
-  trend: (number | null)[];
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="text-right font-medium tabular-nums">
-          {percent === null ? "—" : `${Math.round(percent)}%`}
-        </span>
-      </div>
-      {percent === null ? (
-        <Progress value={0} tone="muted" />
-      ) : (
-        <Progress
-          value={percent}
-          tone={percent >= 90 ? "danger" : percent >= 70 ? "primary" : "success"}
-        />
-      )}
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs text-muted-foreground">{detail}</span>
-        <Sparkline values={trend} />
-      </div>
-    </div>
-  );
+/** Fuller is worse for all three of these, which is not true everywhere. */
+function loadTone(percent: number | null): MeterTone | undefined {
+  if (percent === null) return undefined;
+  return percent >= 90 ? "danger" : percent >= 70 ? "primary" : "success";
 }

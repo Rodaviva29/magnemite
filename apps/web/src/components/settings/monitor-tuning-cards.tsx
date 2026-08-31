@@ -75,10 +75,10 @@ export function MonitorTuningCard({
               name="rotomSyncSeconds"
               label="Ask Rotom every"
               value={settings.rotomSyncSeconds}
-              min={10}
+              min={5}
               disabled={disabled}
               onValueChange={setRotomSync}
-              hint="One request for the whole fleet, and only with the integration switched on in .env."
+              hint="One request for the whole fleet, and only with the integration on. Rotom's own dashboard polls every 5s, which is why that is the floor."
             />
             <NumberField
               name="rotomStaleSeconds"
@@ -128,7 +128,7 @@ export function MonitorTuningCard({
               min={1}
               unit="at most"
               disabled={disabled}
-              hint="The same, for the expensive half of the ladder."
+              hint="The same, for the expensive half of the ladder. A reboot sent through Rotom counts here too — a different socket, the same boot cycle."
             />
           </SettingGroup>
 

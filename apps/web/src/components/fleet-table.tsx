@@ -58,6 +58,14 @@ import { formatBytes } from "@/lib/format";
 import { RelativeTime } from "@/components/relative-time";
 import { useTablePagination } from "@/lib/table-pagination";
 import { useTableSort } from "@/lib/table-sort";
+import {
+  SCANNER_LABEL,
+  SCANNER_RANK,
+  SCANNER_TITLE,
+  SCANNER_VARIANT,
+  scannerState,
+  workerLabel,
+} from "@/lib/rotom";
 import { cn } from "@/lib/utils";
 
 export type DeviceRow = {
@@ -75,8 +83,20 @@ export type DeviceRow = {
   mitmVersions: Record<string, string | null>;
   freeBytes: number | null;
   lastSeenAt: string | null;
-  /** Only present when the Rotom integration is on and this box was matched. */
-  rotom: { connected: boolean; workers: number | null } | null;
+  /**
+   * Only present when the Rotom integration is on and this box was matched.
+   *
+   * `workersInUse` and `requestRate` are null when Rotom did not say, which is
+   * not the same as zero: it only measures request rates in some modes, and a
+   * badge that showed 0/s on a Rotom that does not count would be a lie.
+   */
+  rotom: {
+    connected: boolean;
+    workers: number | null;
+    workersInUse: number | null;
+    enabled: boolean;
+    requestRate: number | null;
+  } | null;
   job: {
     id: string;
     rolloutId: string;
@@ -99,6 +119,27 @@ export type VersionOption = {
 };
 
 type Filter = "all" | "online" | "offline" | "outdated" | "pending";
+
+function scannerCell(rotom: DeviceRow["rotom"]) {
+  const state = scannerState(rotom);
+  if (!rotom || state === "unmatched") {
+    return (
+      <span className="text-xs text-muted-foreground" title={SCANNER_TITLE.unmatched}>
+        —
+      </span>
+    );
+  }
+
+  return (
+    <Badge variant={SCANNER_VARIANT[state]} title={SCANNER_TITLE[state]}>
+      {SCANNER_LABEL[state]}
+      {/* The counts only mean something once Rotom has the box. */}
+      {state === "notConnected" || state === "disabled" ? "" : workerLabel(rotom)}
+      {/* Omitted rather than zeroed when Rotom does not measure rates. */}
+      {state === "scanning" && rotom.requestRate !== null ? ` · ${rotom.requestRate}/s` : ""}
+    </Badge>
+  );
+}
 
 // Plus one `pkg:<name>` per MITM column, which is why this is not a closed
 // union.
@@ -133,7 +174,7 @@ export function FleetTable({
       device: (r) => r.name,
       group: (r) => r.groupName,
       version: (r) => r.installedVersion,
-      scanner: (r) => (r.rotom ? (r.rotom.connected ? 2 : 1) : 0),
+      scanner: (r) => SCANNER_RANK[scannerState(r.rotom)],
       // Offline boxes sort together, and a box mid-update outranks an idle one.
       status: (r) => (r.job ? 3 : r.online ? 2 : 1),
       free: (r) => r.freeBytes,
@@ -481,21 +522,7 @@ function DeviceRowView({
         );
       })}
 
-      {showRotom ? (
-        <TableCell>
-          {row.rotom === null ? (
-            <span className="text-xs text-muted-foreground" title="No matching device in Rotom">
-              —
-            </span>
-          ) : row.rotom.connected ? (
-            <Badge variant="success">
-              scanning{row.rotom.workers ? ` · ${row.rotom.workers}w` : ""}
-            </Badge>
-          ) : (
-            <Badge variant="outline">not scanning</Badge>
-          )}
-        </TableCell>
-      ) : null}
+      {showRotom ? <TableCell>{scannerCell(row.rotom)}</TableCell> : null}
 
       <TableCell className="min-w-44">
         {!row.approved ? (

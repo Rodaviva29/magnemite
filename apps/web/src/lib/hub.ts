@@ -113,6 +113,36 @@ export type HubHealth = {
   checks: IntegrationCheck[];
 };
 
+/** What the hub will pass through to Rotom. `delete` is deliberately not here. */
+export type RotomDeviceAction = "restart" | "reboot" | "disconnect" | "enable" | "disable";
+
+/**
+ * One Rotom worker, as the hub read it a moment ago.
+ *
+ * Everything is optional because Rotom fills it in by mode: request rates exist
+ * only where it measures them, and the controller block only while a worker is
+ * allocated. Absent is "Rotom did not say", never zero.
+ */
+export type RotomWorkerView = {
+  id: string;
+  origin?: string | null;
+  version_name?: string | null;
+  platform?: string | null;
+  weight?: number | null;
+  is_connected?: boolean | null;
+  is_in_use?: boolean | null;
+  can_be_used?: boolean | null;
+  last_seen_at_ms?: number | null;
+  time_windowed_stats?: {
+    requests_rate_over_1_min?: number | null;
+    requests_rate_over_5_min?: number | null;
+    request_ms_avg_over_5_min?: number | null;
+  } | null;
+  session?: {
+    controller?: { account_username?: string | null; account_source?: string | null } | null;
+  } | null;
+};
+
 export const hub = {
   status: () =>
     call<{ online: number; onlineDeviceIds: string[]; maxConcurrentJobs: number }>(
@@ -139,9 +169,14 @@ export const hub = {
       command,
       timeoutSeconds,
     }),
-  /** Rotom-side control: restart the scanner, or take a box in/out of the pool. */
-  rotomDeviceAction: (id: string, action: "restart" | "reboot" | "enable" | "disable") =>
+  /** Rotom-side control: restart or reboot the box, drop its connection, or
+   *  take it in/out of the pool. All of them travel Rotom's socket, so they are
+   *  the ones that still work when the agent is the half that died. */
+  rotomDeviceAction: (id: string, action: RotomDeviceAction) =>
     call(`/internal/devices/${id}/rotom/${action}`),
+  /** One box's workers, read live from Rotom. Nothing about them is stored. */
+  rotomWorkers: (id: string) =>
+    call<{ workers: RotomWorkerView[] }>(`/internal/devices/${id}/rotom/workers`),
   rotomSync: () => call<{ seen: number; matched: number }>("/internal/rotom/sync"),
   /** Push a changed tracked-package list to every connected box. */
   refreshTrackedPackages: () => call<{ sent: number }>("/internal/tracked-packages/refresh"),

@@ -3,6 +3,7 @@ import { CalSansGeo } from "@calcom/cal-sans-ui/geo";
 import { CalSansText } from "@calcom/cal-sans-ui/text";
 import { CalSansUI } from "@calcom/cal-sans-ui/ui";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -29,7 +30,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="min-h-screen antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {/* Inside the theme provider so a toast is painted in the theme that
+              is actually on, and at the root so the login page can raise one
+              too. */}
+          <ToastProvider>{children}</ToastProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

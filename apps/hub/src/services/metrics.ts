@@ -17,6 +17,12 @@ type DeviceMetrics = z.infer<typeof deviceMetricsSchema>;
  * Two knobs, both in Settings rather than env, because how much history is
  * worth its disk is a per-fleet call: `metricsSampleSeconds` (how often a beat
  * is kept) and `metricsRetentionDays` (how long it lives, 0 to record nothing).
+ *
+ * The sampling here is the heartbeat's alone. The Rotom sync keeps its own
+ * readings, on the same two knobs, in `rotom.ts` — it has a different source
+ * and a different cadence, and the one thing it does not have is a separate
+ * prune: the sweep at the bottom of this file clears both tables, so a fleet
+ * that sets a retention gets it applied to everything it asked for.
  */
 
 /**
@@ -153,15 +159,18 @@ export async function pruneMetrics(force = false): Promise<number> {
   const settings = await getHubSettings();
   // Retention off means the history goes too, not just that new rows stop —
   // otherwise turning it off leaves the disk exactly as full as it was.
-  const cutoff =
-    settings.metricsRetentionDays <= 0
-      ? new Date(now)
-      : new Date(now - settings.metricsRetentionDays * 24 * 60 * 60 * 1000);
+  const cutoffFor = (days: number) =>
+    days <= 0 ? new Date(now) : new Date(now - days * 24 * 60 * 60 * 1000);
+  // Two cutoffs, one pass: the device history and the scanner history are set
+  // separately, so a fleet keeping a month of one and a day of the other gets
+  // exactly that rather than the shorter of the two applied to both.
+  const cutoff = cutoffFor(settings.metricsRetentionDays);
+  const rotomCutoff = cutoffFor(settings.rotomRetentionDays);
 
   // deleteMany takes no limit, so a batch is "select the ids, then delete
-  // those". Both tables are indexed on `at` alone precisely for this. The two
-  // tables have different row shapes, and Prisma's delegate types do not
-  // unify, so the caller passes in the two calls rather than the delegate.
+  // those". Every table here is indexed on `at` alone precisely for this. They
+  // have different row shapes, and Prisma's delegate types do not unify, so the
+  // caller passes in the two calls rather than the delegate.
   const pruneTable = async (
     oldestIds: (take: number) => Promise<{ id: number }[]>,
     removeIds: (ids: number[]) => Promise<{ count: number }>,
@@ -196,6 +205,17 @@ export async function pruneMetrics(force = false): Promise<number> {
           take,
         }),
       (ids) => prisma.devicePackageMetricSample.deleteMany({ where: { id: { in: ids } } }),
+    );
+    // Written by the Rotom sync rather than by a heartbeat, and kept on its own
+    // clock.
+    deleted += await pruneTable(
+      (take) =>
+        prisma.rotomSample.findMany({
+          where: { at: { lt: rotomCutoff } },
+          select: { id: true },
+          take,
+        }),
+      (ids) => prisma.rotomSample.deleteMany({ where: { id: { in: ids } } }),
     );
   } catch (err) {
     log.error({ err }, "metric prune failed");

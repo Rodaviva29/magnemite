@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@magnemite/db";
 import { requireOperator } from "@/lib/session";
-import { hub } from "@/lib/hub";
+import { type RotomDeviceAction, type RotomWorkerView, hub } from "@/lib/hub";
 import {
   planFromNames,
   planRename,
@@ -268,7 +268,7 @@ export async function collectDeviceLogs(
  */
 export async function rotomDeviceAction(
   deviceId: string,
-  action: "restart" | "reboot" | "enable" | "disable",
+  action: RotomDeviceAction,
 ): Promise<ActionState> {
   const user = await requireOperator();
   try {
@@ -287,6 +287,94 @@ export async function rotomDeviceAction(
   });
   revalidatePath(`/devices/${deviceId}`);
   return { ok: true, message: `Rotom: ${action} sent.` };
+}
+
+/**
+ * Take a box out of Rotom's pool, or put it back.
+ *
+ * Its own action rather than `rotomDeviceAction("enable")` because it is the
+ * one Rotom control with a state to be wrong about. Two things follow from
+ * that:
+ *
+ *  - **A box already in the asked-for state is told, not poked.** Sending
+ *    `enable` to an enabled box is a no-op that reads as a success, and the
+ *    menu that offered it was working from a stored copy that may be a sync
+ *    old.
+ *  - **The answer is re-read from Rotom, not assumed.** Every other Rotom field
+ *    on the page waits for the next sync; here that would mean the menu still
+ *    saying "Disable" right after a disable, which is exactly the confusion the
+ *    toggle exists to avoid. So this syncs and reports what Rotom now says —
+ *    including when Rotom did not take it.
+ */
+export async function rotomSetEnabled(deviceId: string, next: boolean): Promise<ActionState> {
+  const user = await requireOperator();
+  const word = next ? "enabled" : "disabled";
+
+  const before = await prisma.device.findUnique({
+    where: { id: deviceId },
+    select: { rotomDeviceId: true, rotomEnabled: true },
+  });
+  if (!before?.rotomDeviceId) return { error: "This device is not matched to a Rotom device." };
+  if (before.rotomEnabled === next) {
+    return { ok: true, message: `Rotom already has this box ${word}.` };
+  }
+
+  try {
+    await hub.rotomDeviceAction(deviceId, next ? "enable" : "disable");
+  } catch (err) {
+    return { error: toMessage(err) };
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: `rotom.${next ? "enable" : "disable"}`,
+      targetType: "Device",
+      targetId: deviceId,
+    },
+  });
+
+  // Best effort: a sync that fails leaves the page on the last known state,
+  // which is the same place it would have been without asking.
+  try {
+    await hub.rotomSync();
+  } catch {
+    // Nothing to say about it here — the message below reports what is stored.
+  }
+
+  const after = await prisma.device.findUnique({
+    where: { id: deviceId },
+    select: { rotomEnabled: true },
+  });
+  revalidatePath(`/devices/${deviceId}`);
+
+  if (after?.rotomEnabled !== next) {
+    return {
+      ok: true,
+      message: `Rotom took the request but still has this box ${after?.rotomEnabled ? "enabled" : "disabled"}.`,
+    };
+  }
+  return { ok: true, message: `Rotom now has this box ${word}.` };
+}
+
+/**
+ * One box's workers, straight from Rotom.
+ *
+ * Read on demand rather than stored, so it is the only Rotom view in the app
+ * that can fail on its own. It returns the failure instead of throwing: the
+ * device page's stored Rotom fields are still worth showing when Rotom is the
+ * thing that is down.
+ */
+export async function rotomWorkers(
+  deviceId: string,
+): Promise<{ workers: RotomWorkerView[] } | { error: string }> {
+  await requireOperator();
+  try {
+    return await hub.rotomWorkers(deviceId);
+  } catch (err) {
+    return { error: toMessage(err) };
+  }
 }
 
 export async function syncRotom(): Promise<ActionState> {

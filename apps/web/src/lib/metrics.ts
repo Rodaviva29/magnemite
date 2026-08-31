@@ -57,7 +57,11 @@ function statsFrom(values: number[], gaps: number, last: number | null): SeriesS
 }
 
 /** The chart-shaped view of one metric: bucket means, plus stats off the raw rows. */
-function buildSeries(
+/**
+ * Exported for the Rotom history, which buckets a different table into the same
+ * chart shape. Nothing in here knows what it is averaging.
+ */
+export function buildSeries(
   id: string,
   label: string,
   slot: number,
@@ -90,7 +94,7 @@ function buildSeries(
 }
 
 /** Bucket index for a timestamp, clamped into the window. */
-function bucketOf(at: Date, from: number, bucketMs: number, bucketCount: number): number {
+export function bucketOf(at: Date, from: number, bucketMs: number, bucketCount: number): number {
   const index = Math.floor((at.getTime() - from) / bucketMs);
   return Math.max(0, Math.min(bucketCount - 1, index));
 }

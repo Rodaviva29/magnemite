@@ -66,6 +66,12 @@ export function formatValue(value: number | null, unit: Chart["unit"]): string {
   if (value === null || !Number.isFinite(value)) return "—";
   if (unit === "bytes") return formatBytes(value);
   if (unit === "celsius") return `${value.toFixed(1)} °C`;
+  // A bucket is a mean, so a count of whole things arrives fractional. One
+  // decimal below ten keeps "1.5 workers on average" from rounding to a number
+  // that was never true.
+  if (unit === "count") return value < 10 ? value.toFixed(1) : String(Math.round(value));
+  if (unit === "rate") return `${value < 10 ? value.toFixed(2) : Math.round(value)}/s`;
+  if (unit === "ms") return `${Math.round(value)} ms`;
   return `${value < 10 ? value.toFixed(1) : Math.round(value)}%`;
 }
 

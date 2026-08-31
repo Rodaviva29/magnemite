@@ -357,7 +357,7 @@ async function checkFeed(
 }
 
 /** "1.4.2 ×37, 1.4.1 ×3" — most common first, so the outliers stand out. */
-function workerVersions(devices: { version?: string }[]): string {
+function workerVersions(devices: { version?: string | null }[]): string {
   const counts = new Map<string, number>();
   for (const device of devices) {
     const version = device.version?.trim() || "unknown";
@@ -420,7 +420,7 @@ async function checkRotom(): Promise<IntegrationCheck> {
         { label: "Worker versions", value: workerVersions(devices) },
       ],
       detail: unmatched
-        ? "No Rotom device matches one of ours — check each box's origin against its name or serial."
+        ? "No Rotom device matches one of magnemite's. Check each box's id in Rotom against its name."
         : null,
       link: env.ROTOM_URL ?? null,
     };

@@ -7,7 +7,6 @@ import {
   Pencil,
   Power,
   Radio,
-  RotateCw,
   ScrollText,
   ShieldCheck,
   ShieldOff,
@@ -19,7 +18,6 @@ import {
   deleteDevice,
   renameDevice,
   rebootDevice,
-  rotomDeviceAction,
   setDeviceApproval,
   setDeviceGroup,
 } from "@/actions/devices";
@@ -44,6 +42,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/components/ui/toast";
 
 export function DeviceControls({
   deviceId,
@@ -52,7 +51,6 @@ export function DeviceControls({
   online,
   groupId,
   groups,
-  hasRotom,
 }: {
   deviceId: string;
   name: string;
@@ -60,12 +58,10 @@ export function DeviceControls({
   online: boolean;
   groupId: string | null;
   groups: { id: string; name: string }[];
-  /** True when Rotom has this box matched, so its actions can be offered. */
-  hasRotom: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, startTransition] = useTransition();
-  const [message, setMessage] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState(name);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -77,23 +73,23 @@ export function DeviceControls({
    * item says what it is doing rather than looking broken for ten seconds.
    */
   function downloadLogs() {
-    setMessage("Collecting logs from the box…");
+    toast("Collecting logs from the box…");
     startTransition(async () => {
       const result = await collectDeviceLogs(deviceId);
       if (result.error || !result.bundleId) {
-        setMessage(result.error ?? "The box sent nothing back.");
+        toast(result.error ?? "The box sent nothing back.", "error");
         return;
       }
-      setMessage("Logs ready — downloading.");
+      toast("Logs ready — downloading.");
       window.location.href = `/api/devices/${deviceId}/logs/${result.bundleId}`;
     });
   }
 
   function run(fn: () => Promise<{ error?: string; message?: string }>, after?: () => void) {
-    setMessage(null);
     startTransition(async () => {
       const result = await fn();
-      setMessage(result?.error ?? result?.message ?? null);
+      if (result?.error) toast(result.error, "error");
+      else if (result?.message) toast(result.message);
       if (!result?.error) after?.();
     });
   }
@@ -135,12 +131,11 @@ export function DeviceControls({
               Rename
             </DropdownMenuItem>
 
-            {hasRotom ? (
-              <DropdownMenuItem onSelect={() => run(() => rotomDeviceAction(deviceId, "restart"))}>
-                <RotateCw />
-                Restart scanner
-              </DropdownMenuItem>
-            ) : null}
+            {/* Nothing Rotom-shaped here. Those actions travel Rotom's socket
+                rather than the agent's, which is the whole reason to reach for
+                one — and beside a Reboot that needs the agent alive, the two
+                kinds of reboot read as duplicates. They live on the scanner
+                page, behind the button in the Agent card. */}
 
             <DropdownMenuItem disabled={!online} onSelect={() => setExecuting(true)}>
               <Terminal />
@@ -178,8 +173,6 @@ export function DeviceControls({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
 
       <DeviceExec deviceId={deviceId} name={name} open={executing} onOpenChange={setExecuting} />
 

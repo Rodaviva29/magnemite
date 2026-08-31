@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { SearchInput } from "@/components/ui/search-input";
 import { Select } from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
 import {
   Table,
   TableBody,
@@ -83,7 +84,7 @@ export function VersionsTable({
   canOperate: boolean;
 }) {
   const [pending, startTransition] = useTransition();
-  const [message, setMessage] = useState<string | null>(null);
+  const toast = useToast();
   // Which button is in flight, so only that one spins — `pending` is shared by
   // every action on this page, including the per-row Cache and Approve.
   const [running, setRunning] = useState<"poll" | "prune" | null>(null);
@@ -142,11 +143,11 @@ export function VersionsTable({
   const cached = rows.filter((r) => r.status === "READY").length;
 
   function run(fn: () => Promise<{ error?: string; message?: string }>, which?: "poll" | "prune") {
-    setMessage(null);
     setRunning(which ?? null);
     startTransition(async () => {
       const result = await fn();
-      setMessage(result?.error ?? result?.message ?? null);
+      if (result?.error) toast(result.error, "error");
+      else if (result?.message) toast(result.message);
       setRunning(null);
     });
   }
@@ -188,10 +189,6 @@ export function VersionsTable({
           </div>
         ) : null}
       </header>
-
-      {message ? (
-        <p className="rounded-lg border border-border bg-subtle px-3 py-2 text-sm">{message}</p>
-      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput

@@ -12,10 +12,10 @@ SQL.
 
 Two provisioned dashboards ship in `deploy/grafana/`:
 
-| Dashboard              | What it shows                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Fleet**  | Online/offline counts, load per core, memory, temperature, boxes reporting, monitor events. By group. |
-| **Per Device** | One box: load, memory, storage, temperature, per-app CPU/RSS/process count, its monitor log.                     |
+| Dashboard      | What it shows                                                                                         |
+| -------------- | ----------------------------------------------------------------------------------------------------- |
+| **Fleet**      | Online/offline counts, load per core, memory, temperature, boxes reporting, monitor events. By group. |
+| **Per Device** | One box: load, memory, storage, temperature, per-app CPU/RSS/process count, its monitor log.          |
 
 ## Provision it
 
@@ -57,12 +57,13 @@ JSON, and saving it back into `deploy/grafana/dashboards/`.
 
 ## What the tables hold
 
-| Table                       | One row is                                                        |
-| --------------------------- | ----------------------------------------------------------------- |
-| `DeviceMetricSample`        | One box at one moment: load, cores, memory, storage, temperatures |
-| `DevicePackageMetricSample` | One tracked app on one box at one moment: CPU, RSS, process count |
-| `MonitorEvent`              | Something the monitor saw or did                                  |
-| `Device`                    | The box as of its last heartbeat: live, not history              |
+| Table                       | One row is                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| `DeviceMetricSample`        | One box at one moment: load, cores, memory, storage, temperatures                  |
+| `DevicePackageMetricSample` | One tracked app on one box at one moment: CPU, RSS, process count                  |
+| `RotomSample`               | What Rotom said about one box at one moment: workers, request rate, its four flags |
+| `MonitorEvent`              | Something the monitor saw or did                                                   |
+| `Device`                    | The box as of its last heartbeat: live, not history                                |
 
 Three things about that data that decide how a panel should be written:
 
@@ -82,14 +83,14 @@ Three things about that data that decide how a panel should be written:
 Grafana does not extend the history — it only draws what is stored, and that is
 bounded by **Settings → Tuning**:
 
-| Setting                                    | What it does                                              |
-| ------------------------------------------ | --------------------------------------------------------- |
-| Tuning → Health history → **Sample every** | How often a heartbeat is kept as a sample                 |
-| Tuning → Health history → **Keep for**     | How long a sample survives the prune. `0` records nothing |
-| Monitoring → **Keep history for**          | The same clock for `MonitorEvent`                         |
+| Setting                                                            | What it does                        |
+| ------------------------------------------------------------------ | ----------------------------------- |
+| Metric history → Device metrics → **Sample every** / **Keep for**  | The two `DeviceMetricSample` tables |
+| Metric history → Scanner (Rotom) → **Sample every** / **Keep for** | `RotomSample`, on its own clock     |
+| Monitoring → **Keep history for**                                  | The same idea for `MonitorEvent`    |
 
 If you want a quarter of load history in Grafana, raise **Keep for**
-first. 
+first.
 
 Raising it does not recover what has already been pruned.
 

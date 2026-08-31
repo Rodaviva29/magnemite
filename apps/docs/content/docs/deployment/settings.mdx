@@ -25,21 +25,26 @@ seconds, the dashboard tells the hub to drop its cached copy (**with the excepti
 heartbeat**, which rides the `welcome` and reaches each box on its next
 connection).
 
-| Setting                      | Default  | Min  | What it does                                                                                            |
-| ---------------------------- | -------- | ---- | ------------------------------------------------------------------------------------------------------- |
-| **Heartbeat**                | `20s`    | `5`  | How often a box reports in. Lives on the boxes; an agent too old to read it keeps beating at 20s.       |
-| **Offline after**            | `70s`    | `30` | Silence before a box is marked offline. Three missed beats plus a margin.                               |
-| **Concurrent installs**      | `10`     | `1`  | Fleet-wide cap on boxes downloading or installing at once. A group can lower it for its own boxes.      |
-| **Concurrent agent updates** | `5`      | `1`  | How many boxes may swap their agent binary at once — the fleet reconnecting after a hub deploy.         |
-| **Job stalls after**         | `900s`   | `1`  | Silence from a box mid-job before that job is re-queued to it.                                          |
-| **Sample every**             | `60s`    | `5`  | How often a health sample is kept for the charts. Boxes beat faster; the rest are dropped.              |
-| **Keep for**                 | `7 days` | `0`  | How long those samples live. `0` turns health recording off and drops what is stored on the next prune. |
+| Setting                      | Default | Min  | What it does                                                                                       |
+| ---------------------------- | ------- | ---- | -------------------------------------------------------------------------------------------------- |
+| **Heartbeat**                | `20s`   | `5`  | How often a box reports in. Lives on the boxes; an agent too old to read it keeps beating at 20s.  |
+| **Offline after**            | `70s`   | `30` | Silence before a box is marked offline. Three missed beats plus a margin.                          |
+| **Concurrent installs**      | `10`    | `1`  | Fleet-wide cap on boxes downloading or installing at once. A group can lower it for its own boxes. |
+| **Concurrent agent updates** | `5`     | `1`  | How many boxes may swap their agent binary at once — the fleet reconnecting after a hub deploy.    |
+| **Job stalls after**         | `900s`  | `1`  | Silence from a box mid-job before that job is re-queued to it.                                     |
 
-<Callout type="warn" title="Three of these are coupled">
-  The form refuses the combination rather than letting a fleet flap between online and offline:
-  **offline after ≥ 3 × heartbeat**, and **sample every ≥ heartbeat**. At the default 20s heartbeat
-  that is 60s and 20s. Raising the heartbeat without raising both is the mistake this check exists
-  for.
+### Metric history
+
+| Setting                            | Default  | Min        | What it does                                                                      |
+| ---------------------------------- | -------- | ---------- | --------------------------------------------------------------------------------- |
+| Device metrics → **Sample every**  | `60s`    | heartbeat  | CPU, memory, storage, temperature and per-app usage, off the heartbeat.           |
+| Device metrics → **Keep for**      | `7 days` | `0`        | `0` turns device recording off and drops what is stored on the next prune.        |
+| Scanner (Rotom) → **Sample every** | `60s`    | Rotom sync | Workers, request rate and the four Rotom flags, off the Rotom sync.               |
+| Scanner (Rotom) → **Keep for**     | `7 days` | `0`        | `0` turns scanner recording off. The Scanner column and the rules are unaffected. |
+
+<Callout type="warn" title="The heartbeat is what the others are measured in">
+  **Offline after ≥ 3 × heartbeat** is refused on the card above, at the default 20s beat that is
+  60s, and anything tighter flaps a box offline on one dropped beat.
 </Callout>
 
 ## Settings → Monitoring
@@ -48,20 +53,20 @@ Stored under a `monitor.` prefix and read by the evaluation pass. Most are
 ceilings rather than features — [monitoring](/docs/fleet/monitoring) has the
 why for each.
 
-| Setting                      | Default   | Min        | What it does                                                                                      |
-| ---------------------------- | --------- | ---------- | ------------------------------------------------------------------------------------------------- |
-| **Enabled**                  | `off`     | —          | The master switch. Off, so upgrading a fleet never starts remediating by itself.                  |
-| **Ask Rotom every**          | `60s`     | `10`       | Resolution of everything Rotom-shaped. Ignored when the Rotom integration is off.                 |
-| **Rotom stale after**        | `600s`    | `2 × sync` | Silence from Rotom before a box counts as disconnected. Measured against the sync interval above. |
-| **After a reboot**           | `600s`    | `60`       | No action on a box for this long after we rebooted it, so a slow boot is not rebooted again.      |
-| **After a hub restart**      | `180s`    | `0`        | Nothing acts for this long after the hub starts, while the whole fleet reconnects.                |
-| **Actions per box per hour** | `4`       | `1`        | Circuit breaker. Past it, the box is alerted about and left alone.                                |
-| **Reboots per box per day**  | `6`       | `1`        | The same, for the expensive half of the ladder.                                                   |
-| **Repeat an alert after**    | `30 min`  | `0`        | The same signal on the same box is not re-announced inside this.                                  |
-| **Keep history for**         | `30 days` | `0`        | Monitor history retention. `0` keeps it forever.                                                  |
-| **Discord webhook**          | empty     | —          | Empty turns notifications off while leaving remediation running.                                  |
-| **Announce from**            | `WARN`    | —          | `INFO`, `WARN` or `CRITICAL`. Below it, a signal is acted on but not announced.                   |
-| **Mention role**             | empty     | —          | Pinged on `CRITICAL` only. Empty pings nobody.                                                    |
+| Setting                      | Default   | Min        | What it does                                                                                                                                                                                                                              |
+| ---------------------------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Enabled**                  | `off`     | —          | The master switch. Off, so upgrading a fleet never starts remediating by itself.                                                                                                                                                          |
+| **Ask Rotom every**          | `10s`     | `5`        | Resolution of everything Rotom-shaped, at one request per interval for the whole fleet. It floors **Metric history → Scanner (Rotom) → Sample every**, which is what decides how much is kept. Ignored when the Rotom integration is off. |
+| **Rotom stale after**        | `600s`    | `2 × sync` | Silence from Rotom before a box counts as disconnected. Measured against the sync interval above.                                                                                                                                         |
+| **After a reboot**           | `600s`    | `60`       | No action on a box for this long after we rebooted it, so a slow boot is not rebooted again.                                                                                                                                              |
+| **After a hub restart**      | `180s`    | `0`        | Nothing acts for this long after the hub starts, while the whole fleet reconnects.                                                                                                                                                        |
+| **Actions per box per hour** | `4`       | `1`        | Circuit breaker. Past it, the box is alerted about and left alone.                                                                                                                                                                        |
+| **Reboots per box per day**  | `6`       | `1`        | The same, for the expensive half of the ladder.                                                                                                                                                                                           |
+| **Repeat an alert after**    | `30 min`  | `0`        | The same signal on the same box is not re-announced inside this.                                                                                                                                                                          |
+| **Keep history for**         | `30 days` | `0`        | Monitor history retention. `0` keeps it forever.                                                                                                                                                                                          |
+| **Discord webhook**          | empty     | —          | Empty turns notifications off while leaving remediation running.                                                                                                                                                                          |
+| **Announce from**            | `WARN`    | —          | `INFO`, `WARN` or `CRITICAL`. Below it, a signal is acted on but not announced.                                                                                                                                                           |
+| **Mention role**             | empty     | —          | Pinged on `CRITICAL` only. Empty pings nobody.                                                                                                                                                                                            |
 
 The pass itself has no interval to set: it runs once per heartbeat, because it
 reads what the boxes last said and they say it once per beat.

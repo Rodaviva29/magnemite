@@ -16,7 +16,13 @@ import { cancelJob, retryFailedJobs, retryJob } from "../services/jobs.js";
 import { evaluate } from "../services/monitor.js";
 import { sendTestAlert } from "../services/notify.js";
 import { cancelRollout, createRollout, resumeRollout } from "../services/rollouts.js";
-import { type RotomAction, deviceAction, rotomEnabled, syncDevices } from "../services/rotom.js";
+import {
+  type RotomAction,
+  deviceAction,
+  getDeviceWorkers,
+  rotomEnabled,
+  syncDevices,
+} from "../services/rotom.js";
 import { nudge } from "../services/scheduler.js";
 import { probeRemote, storeFromUrl, storeUpload } from "../services/uploads.js";
 import { pollAllSources } from "../services/sources/poller.js";
@@ -412,6 +418,38 @@ export async function internalRoutes(app: FastifyInstance) {
       const ok = await deviceAction(device.rotomDeviceId, action);
       if (!ok) return reply.status(502).send({ error: `rotom refused the ${action}` });
       return { ok: true };
+    },
+  );
+
+  /**
+   * One box's workers, read straight from Rotom for the device page.
+   *
+   * Nothing here is stored. The sync keeps the three numbers a rule needs on
+   * the device row; the per-worker breakdown is a page someone opened, and a
+   * table re-synced every minute for a screen nobody is looking at is a table
+   * that costs a write per worker per minute forever.
+   */
+  // POST like the rest of /internal, which is an RPC surface rather than a REST
+  // one — the web client only knows how to speak to it that way.
+  app.post<{ Params: { id: string } }>(
+    "/internal/devices/:id/rotom/workers",
+    async (request, reply) => {
+      if (!rotomEnabled()) return reply.status(409).send({ error: "rotom integration is off" });
+
+      const device = await prisma.device.findUnique({
+        where: { id: request.params.id },
+        select: { rotomDeviceId: true },
+      });
+      if (!device?.rotomDeviceId) {
+        return reply.status(409).send({ error: "this device is not matched to a rotom device" });
+      }
+
+      try {
+        return { workers: await getDeviceWorkers(device.rotomDeviceId) };
+      } catch (err) {
+        request.log.warn({ err }, "rotom worker read failed");
+        return reply.status(502).send({ error: "rotom did not answer" });
+      }
     },
   );
 

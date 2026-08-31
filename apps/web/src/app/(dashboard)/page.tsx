@@ -76,7 +76,13 @@ export default async function FleetPage() {
       freeBytes: device.freeBytes === null ? null : Number(device.freeBytes),
       lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
       rotom: device.rotomDeviceId
-        ? { connected: device.rotomConnected, workers: device.rotomWorkerCount }
+        ? {
+            connected: device.rotomConnected,
+            workers: device.rotomWorkerCount,
+            workersInUse: device.rotomWorkersInUse,
+            enabled: device.rotomEnabled,
+            requestRate: device.rotomRequestRate,
+          }
         : null,
       job: job
         ? {

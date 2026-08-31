@@ -52,7 +52,7 @@ export type Chart = {
   id: string;
   title: string;
   description: string;
-  unit: "percent" | "celsius" | "bytes";
+  unit: "percent" | "celsius" | "bytes" | "count" | "rate" | "ms";
   /** Fixed top of the y axis, where the metric has one. Null lets it grow. */
   max: number | null;
   series: Series[];

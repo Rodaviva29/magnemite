@@ -5,7 +5,8 @@ icon: Binoculars
 ---
 
 <Callout type="warn" title="This feature is WIP">
-  This feature is not finished and ships disabled by default. It wasn't properly tested. Feedback/testers appreciated.
+  This feature is not finished and ships disabled by default. It wasn't properly tested.
+  Feedback/testers appreciated.
 </Callout>
 
 A box can be online, heartbeating every twenty seconds, and scanning nothing:
@@ -23,20 +24,36 @@ answered.
 
 ## What it watches?
 
-| Signal                      | Answered by                  | What it means                                         |
-| --------------------------- | ---------------------------- | ----------------------------------------------------- |
-| **Service is down**         | a probe, or the process list | The scanner's service is not running                  |
-| **App is not in focus**     | the box                      | Something else owns the screen — usually the launcher |
-| **App is not responding**   | the box                      | The package is sitting on an ANR dialog               |
-| **Health check is failing** | a probe                      | The scanner is logging faults faster than work        |
-| **Loop has stalled**        | a probe                      | The scanner is alive and has stopped doing anything   |
-| **Box is unreachable**      | the hub                      | The socket has been gone past the offline timeout     |
-| **Rotom lost the box**      | the hub                      | Rotom is not seeing it, or would not hand it work     |
+| Signal                                     | Answered by                  | What it means                                         |
+| ------------------------------------------ | ---------------------------- | ----------------------------------------------------- |
+| **Service is down**                        | a probe, or the process list | The scanner's service is not running                  |
+| **App is not in focus**                    | the box                      | Something else owns the screen — usually the launcher |
+| **App is not responding**                  | the box                      | The package is sitting on an ANR dialog               |
+| **Health check is failing**                | a probe                      | The scanner is logging faults faster than work        |
+| **Loop has stalled**                       | a probe                      | The scanner is alive and has stopped doing anything   |
+| **Box is unreachable**                     | the hub                      | The socket has been gone past the offline timeout     |
+| **Rotom lost the box**                     | the hub                      | Rotom is not seeing it, or would not hand it work     |
+| **Rotom has the box but no workers**       | the hub                      | Connected to Rotom with nothing allocated on it       |
+| **Scanner is allocated and doing nothing** | the hub                      | A worker is open and no requests go through it        |
 
 The first five are knowable only on the box, so they need a recent agent, the
 tab counts how many boxes are behind, and rules skip a box that cannot answer.
-The last two the hub sees for itself and work on every box today; the Rotom one
-needs [Rotom turned on](/docs/fleet/rotom).
+The last four the hub sees for itself and work on every box today; all of them
+need [Rotom turned on](/docs/fleet/rotom).
+
+The three Rotom signals are deliberately exclusive, so one fault never lights
+two ladders: a box Rotom has lost is only ever **Rotom lost the box**, a box
+with nothing allocated is only ever **no workers**, and **doing nothing** is
+read only where both of those are fine.
+
+Two caveats worth knowing before switching them on:
+
+- **No workers** is normal on a fleet with more boxes than accounts. The spares
+  are idle on purpose. Scope that rule to a group, or raise its threshold.
+- **Doing nothing** is silent unless Rotom measures request rates, which it
+  only does in `requests` mode, or `proxy` mode with `inspect`. Where it does
+  not measure, the signal reads unknown rather than idle — which is why turning
+  it on cannot start rebooting a fleet that never reports a rate.
 
 ## The ladder?
 
@@ -54,17 +71,30 @@ never reaches the reboot. A rung already spent is not spent again — except the
 **last** one, which repeats at the cooldown, because there is nothing stronger
 left to try.
 
-| Action                       | What it runs                                          |
-| ---------------------------- | ----------------------------------------------------- |
-| Only tell me                 | nothing                                               |
-| Restart the app              | `am force-stop {pkg}` then relaunch                   |
-| Kill the app                 | `am force-stop {pkg}`                                 |
-| Clear the cache and restart  | force-stop, delete `/data/data/{pkg}/cache`, relaunch |
-| Send ENTER                   | `input keyevent 66` — dismisses an ANR dialog         |
-| Start the service            | `am startservice …`                                   |
-| Run a command                | whatever you type                                     |
-| Reboot the box               | the same reboot the device page sends                 |
-| Restart the scanner in Rotom | Rotom's own `restart` action                          |
+| Action                                 | What it runs                                          |
+| -------------------------------------- | ----------------------------------------------------- |
+| Only tell me                           | nothing                                               |
+| Restart the app                        | `am force-stop {pkg}` then relaunch                   |
+| Kill the app                           | `am force-stop {pkg}`                                 |
+| Clear the cache and restart            | force-stop, delete `/data/data/{pkg}/cache`, relaunch |
+| Send ENTER                             | `input keyevent 66` — dismisses an ANR dialog         |
+| Start the service                      | `am startservice …`                                   |
+| Run a command                          | whatever you type                                     |
+| Reboot the box                         | the same reboot the device page sends                 |
+| Restart the scanner in Rotom           | Rotom's own `restart` action                          |
+| Drop the scanner's connection in Rotom | Rotom's `disconnect` — the box reconnects             |
+| Reboot the box through Rotom           | Rotom's own `reboot` action                           |
+
+The last three travel **Rotom's socket, not the agent's**, which is what makes
+them the only remediation left on a box whose agent has died — every other
+action on the list needs the box reachable from Magnemite. The mirror of that is
+also true and worth planning a ladder around: Rotom cannot act on a box it has
+lost, so on a **Rotom lost the box** rule the bottom rung is the agent-side
+`Reboot the box`, and on the other two it is `Reboot the box through Rotom`.
+
+`Reboot the box through Rotom` counts against **reboots per box per day** and
+sits under the post-reboot grace exactly like the agent-side one. A different
+socket, the same boot cycle.
 
 Every shell-backed one takes an **override command**, `{pkg}` standing in for
 the rule's package. The catalog exists so an alert can say "cleared the cache
@@ -139,17 +169,17 @@ The master switch is on **Settings → Monitoring**. Everything else is the **Ho
 it watches** card on **Settings → Tuning**, because every number in it is
 measured against the heartbeat or the offline timeout, which sit directly above.
 
-| Setting                         | Default | What it does · what a bad value costs                                                                                             |
-| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Act on what it sees**         | off     | Off, no probe is sent and nothing is touched. Rules can still be written.                                                         |
-| **Ask Rotom every**             | 60s     | One request for the whole fleet. Everything Rotom-shaped is this fresh at best. Too tight is rude to somebody else's server.      |
-| **Rotom stale after**           | 600s    | How long since Rotom saw a box before that counts as disconnected. Floored at two sync intervals, or it alerts on the sync's lag. |
-| **Grace · after a reboot**      | 600s    | Shorter than the box takes to boot and its own reboot reads as unreachable — so it is rebooted again, forever.                    |
-| **Grace · after a hub restart** | 180s    | A restart drops every socket at once; without this, a deploy looks like a fleet-wide outage.                                      |
-| **Actions per box per hour**    | 4       | Circuit breaker. Past it, one critical alert and the box is left alone. This is what bounds a rule that turns out to be wrong.    |
-| **Reboots per box per day**     | 6       | The same, counted separately, because a reboot costs a scanning session and the other actions do not.                             |
-| **Repeat an alert after**       | 30 min  | The same signal on the same box is not announced again inside this. The action still happens and is still recorded.               |
-| **Keep history for**            | 30 days | How long the Monitoring feed is kept. 0 keeps it forever.                                                                         |
+| Setting                         | Default | What it does · what a bad value costs                                                                                                                           |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Act on what it sees**         | off     | Off, no probe is sent and nothing is touched. Rules can still be written.                                                                                       |
+| **Ask Rotom every**             | 10s     | One request for the whole fleet, whatever its size. Everything Rotom-shaped is this fresh at best. Floored at 5s, which is what Rotom's own dashboard polls at. |
+| **Rotom stale after**           | 600s    | How long since Rotom saw a box before that counts as disconnected. Floored at two sync intervals, or it alerts on the sync's lag.                               |
+| **Grace · after a reboot**      | 600s    | Shorter than the box takes to boot and its own reboot reads as unreachable — so it is rebooted again, forever.                                                  |
+| **Grace · after a hub restart** | 180s    | A restart drops every socket at once; without this, a deploy looks like a fleet-wide outage.                                                                    |
+| **Actions per box per hour**    | 4       | Circuit breaker. Past it, one critical alert and the box is left alone. This is what bounds a rule that turns out to be wrong.                                  |
+| **Reboots per box per day**     | 6       | The same, counted separately, because a reboot costs a scanning session and the other actions do not. Reboots sent through Rotom count here too.                |
+| **Repeat an alert after**       | 30 min  | The same signal on the same box is not announced again inside this. The action still happens and is still recorded.                                             |
+| **Keep history for**            | 30 days | How long the Monitoring feed is kept. 0 keeps it forever.                                                                                                       |
 
 The monitor pass itself is not configurable: it runs once per heartbeat,
 because a pass reads what the boxes last said and they say it once per beat.
