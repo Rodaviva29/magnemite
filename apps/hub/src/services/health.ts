@@ -420,7 +420,7 @@ async function checkRotom(): Promise<IntegrationCheck> {
         { label: "Worker versions", value: workerVersions(devices) },
       ],
       detail: unmatched
-        ? "No Rotom device matches one of ours — check each box's origin against its name or serial."
+        ? "No Rotom device matches one of magnemite's. Check each box's id in Rotom against its name."
         : null,
       link: env.ROTOM_URL ?? null,
     };

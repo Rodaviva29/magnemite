@@ -119,9 +119,17 @@ export async function deviceAction(rotomDeviceId: string, action: RotomAction): 
 // ---------------------------------------------------------------------------
 
 /**
- * Match a Rotom device to one of ours. `origin` is whatever the box was
- * configured to call itself, so try the obvious identities first and only then
- * fall back to the public IP — and only when it is unambiguous.
+ * Match a Rotom device to one of ours.
+ *
+ * `id` is the identity: the handle the box registered under and the one the
+ * action endpoints take. `origin` is *not* a name — the API gives it as the
+ * address Rotom sees the box connect from — so it is matched as an address or
+ * not at all. Comparing it against a device name is how a whole fleet ends up
+ * with no Scanner column while both sides are working perfectly.
+ *
+ * Addresses only decide it when exactly one box is a candidate: several boxes
+ * behind one NAT share a public IP, and a LAN hands the same address out again
+ * after a lease expires.
  */
 function matchDevice(
   rotom: RotomDevice,
@@ -129,25 +137,29 @@ function matchDevice(
     id: string;
     name: string;
     serial: string;
+    localIp: string | null;
     publicIp: string | null;
-    rotomOrigin: string | null;
+    rotomDeviceId: string | null;
   }[],
 ): string | null {
-  const origin = rotom.origin;
-  const byOrigin =
-    ours.find((d) => d.rotomOrigin === origin) ??
-    ours.find((d) => d.name === origin) ??
-    ours.find((d) => d.serial === origin) ??
-    ours.find((d) => d.name.toLowerCase() === origin?.toLowerCase());
-  if (byOrigin) return byOrigin.id;
+  const rotomId = rotom.id;
+  const byId =
+    ours.find((d) => d.rotomDeviceId === rotomId) ??
+    ours.find((d) => d.name === rotomId) ??
+    ours.find((d) => d.serial === rotomId) ??
+    ours.find((d) => d.name.toLowerCase() === rotomId?.toLowerCase());
+  if (byId) return byId.id;
 
-  if (rotom.public_ip) {
-    const byIp = ours.filter((d) => d.publicIp === rotom.public_ip);
-    // Several boxes behind one NAT share a public IP, so this only decides it
-    // when exactly one candidate exists.
-    if (byIp.length === 1) return byIp[0]!.id;
-  }
-  return null;
+  const byAddress = (
+    address: string | undefined,
+    ourAddress: (d: (typeof ours)[number]) => string | null,
+  ) => {
+    if (!address) return null;
+    const candidates = ours.filter((d) => ourAddress(d) === address);
+    return candidates.length === 1 ? candidates[0]!.id : null;
+  };
+
+  return byAddress(rotom.origin, (d) => d.localIp) ?? byAddress(rotom.public_ip, (d) => d.publicIp);
 }
 
 export async function syncDevices(): Promise<{ seen: number; matched: number }> {
@@ -162,7 +174,14 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
   }
 
   const ours = await prisma.device.findMany({
-    select: { id: true, name: true, serial: true, publicIp: true, rotomOrigin: true },
+    select: {
+      id: true,
+      name: true,
+      serial: true,
+      localIp: true,
+      publicIp: true,
+      rotomDeviceId: true,
+    },
   });
 
   const matchedIds = new Set<string>();
@@ -174,6 +193,9 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
     await prisma.device.update({
       where: { id: deviceId },
       data: {
+        // The address Rotom sees, kept for the device page and the config
+        // placeholder. The identity is `id`; this is where the box connects
+        // from, and two boxes can share it.
         rotomOrigin: rotomDevice.origin,
         rotomDeviceId: rotomDevice.id,
         rotomConnected: Boolean(rotomDevice.is_connected),

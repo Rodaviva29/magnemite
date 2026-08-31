@@ -51,9 +51,13 @@ Check the Health/Status page for the integration's own health.
   />
 </Cards>
 
-Devices are matched by `origin`, falling back to the serial, then to an
-unambiguous public IP. A box that never matches keeps working normally, it
-simply has no Scanner column and no Rotom rule.
+Devices are matched by Rotom's `id`: the handle the box registered under,
+against the device name, then the serial. `origin` is not a name: the API gives
+it as the address Rotom sees the box connect from, so it is only ever matched
+against the box's LAN address, and the public IP likewise. Both addresses only
+decide it when exactly one box is a candidate, since a NAT and a DHCP lease each
+hand the same address to more than one box. A box that never matches keeps
+working normally, it simply has no Scanner column and no Rotom rule.
 
 ## Freshness
 
