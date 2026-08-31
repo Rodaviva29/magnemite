@@ -197,40 +197,6 @@ export async function loadRotomMetrics(
       ],
     },
     {
-      id: "rotom-requests",
-      title: "Request rate",
-      description:
-        "Requests per second across the box's workers, as Rotom counts them over its own five-minute window. Empty where Rotom does not measure rates.",
-      unit: "rate",
-      max: null,
-      series: [
-        buildSeries(
-          "request-rate",
-          "Requests",
-          3,
-          bucketCount,
-          pick((row) => row.requestRate),
-        ),
-      ],
-    },
-    {
-      id: "rotom-latency",
-      title: "Request duration",
-      description:
-        "What Rotom's requests through this box averaged. Empty where there were no requests to average, which is not the same as fast.",
-      unit: "ms",
-      max: null,
-      series: [
-        buildSeries(
-          "request-ms",
-          "Average",
-          8,
-          bucketCount,
-          pick((row) => row.requestMs),
-        ),
-      ],
-    },
-    {
       id: "rotom-availability",
       title: "Availability",
       description:
@@ -267,6 +233,44 @@ export async function loadRotomMetrics(
           7,
           bucketCount,
           share((row) => row.inUse),
+        ),
+      ],
+    },
+    // The two request charts sit on the second row on purpose. Both are empty
+    // on a Rotom that does not measure rates, and both are about how well the
+    // box is working rather than whether it is — which is the question the two
+    // above answer, and the one somebody opening this page has first.
+    {
+      id: "rotom-requests",
+      title: "Request rate",
+      description:
+        "Requests per second across the box's workers, as Rotom counts them over its own five-minute window. Empty where Rotom does not measure rates.",
+      unit: "rate",
+      max: null,
+      series: [
+        buildSeries(
+          "request-rate",
+          "Requests",
+          3,
+          bucketCount,
+          pick((row) => row.requestRate),
+        ),
+      ],
+    },
+    {
+      id: "rotom-latency",
+      title: "Request duration",
+      description:
+        "What Rotom's requests through this box averaged. Empty where there were no requests to average, which is not the same as fast.",
+      unit: "ms",
+      max: null,
+      series: [
+        buildSeries(
+          "request-ms",
+          "Average",
+          8,
+          bucketCount,
+          pick((row) => row.requestMs),
         ),
       ],
     },

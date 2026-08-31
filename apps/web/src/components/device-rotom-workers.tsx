@@ -1,7 +1,21 @@
+"use client";
+
+import { useMemo } from "react";
 import { CircleCheck, CircleX } from "lucide-react";
 import type { RotomWorkerView } from "@/lib/hub";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableRow,
+  TableSortHead,
+} from "@/components/ui/table";
+import { TablePaginationBar } from "@/components/ui/table-pagination";
 import { RelativeTime } from "@/components/relative-time";
+import { useTablePagination } from "@/lib/table-pagination";
+import { useTableSort } from "@/lib/table-sort";
 
 /**
  * The workers behind a box's numbers.
@@ -20,7 +34,23 @@ import { RelativeTime } from "@/components/relative-time";
  *
  * The cost is that the table is as of the last sync rather than as of now,
  * which the header says out loud instead of claiming to be live.
+ *
+ * Sorted and paged like the fleet and version tables, and for the reason those
+ * are: a box with eight workers is a list, a box with fifty is a table, and the
+ * second one is unreadable without a way to order it and a floor under how much
+ * of it lands on screen at once.
  */
+type SortKey =
+  | "worker"
+  | "version"
+  | "inUse"
+  | "rate1m"
+  | "rate5m"
+  | "ms"
+  | "controller"
+  | "userAgent"
+  | "account";
+
 export function DeviceRotomWorkers({
   workers,
   readAt,
@@ -34,6 +64,36 @@ export function DeviceRotomWorkers({
   error?: string | null;
   className?: string;
 }) {
+  const accessors = useMemo(
+    () => ({
+      // `compareValues` collates numerically, so `POKELX01-10` lands after
+      // `POKELX01-9` rather than between the ones and the twos — the same order
+      // the hub hands them over in.
+      worker: (w: RotomWorkerView) => w.id,
+      version: (w: RotomWorkerView) => w.version_name ?? null,
+      inUse: (w: RotomWorkerView) => Boolean(w.is_in_use),
+      rate1m: (w: RotomWorkerView) => w.time_windowed_stats?.requests_rate_over_1_min ?? null,
+      rate5m: (w: RotomWorkerView) => w.time_windowed_stats?.requests_rate_over_5_min ?? null,
+      ms: (w: RotomWorkerView) => w.time_windowed_stats?.request_ms_avg_over_5_min ?? null,
+      controller: (w: RotomWorkerView) => w.session?.controller?.id ?? null,
+      userAgent: (w: RotomWorkerView) => w.session?.controller?.user_agent ?? null,
+      account: (w: RotomWorkerView) => w.session?.controller?.account_username ?? null,
+    }),
+    [],
+  );
+
+  const { headProps, sortRows } = useTableSort<SortKey, RotomWorkerView>(accessors, {
+    key: "worker",
+    direction: "asc",
+  });
+  const sorted = useMemo(() => sortRows(workers), [sortRows, workers]);
+  // No `resetKey`: the rows are replaced on every sync, and jumping back to
+  // page one every ten seconds would make the later pages unreadable. The hook
+  // clamps the page on its own when the list shrinks.
+  // Ten, not the hook's 25: this table sits beside another card rather than
+  // filling a page, and a box's worker count is usually near it anyway.
+  const pagination = useTablePagination(sorted, { pageSize: 10 });
+
   return (
     <Card className={className}>
       <CardHeader className="flex-row items-baseline justify-between gap-2 space-y-0">
@@ -51,111 +111,108 @@ export function DeviceRotomWorkers({
       </CardHeader>
 
       <CardContent className="pt-0">
-        <Body workers={workers} readAt={readAt} error={error} />
+        {error ? (
+          <p className="py-6 text-sm leading-relaxed text-muted-foreground">
+            Could not read the workers: {error}
+          </p>
+        ) : readAt === null ? (
+          <p className="py-6 text-sm text-muted-foreground">
+            Nothing read yet — the next Rotom sync fills this in.
+          </p>
+        ) : workers.length === 0 ? (
+          <p className="py-6 text-sm text-muted-foreground">Rotom has no workers on this box.</p>
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-border">
+            <Table containerClassName="max-h-[62vh]">
+              <TableHeader>
+                {/* No Platform column: it is a protobuf enum whose zero value is
+                    UNSET, and a MITM that does not fill the field in its welcome
+                    — Cosmog, for one — reads as UNSET on every worker forever. A
+                    column that says the same nothing on every row is a column
+                    that costs width. The controller's id and user agent take its
+                    place: which thing is driving this worker, and which build. */}
+                <TableRow>
+                  <TableSortHead {...headProps("worker")}>Worker</TableSortHead>
+                  <TableSortHead {...headProps("version")}>Version</TableSortHead>
+                  <TableSortHead {...headProps("inUse")}>In use</TableSortHead>
+                  <TableSortHead {...headProps("rate1m")} align="right">
+                    req/s 1m
+                  </TableSortHead>
+                  <TableSortHead {...headProps("rate5m")} align="right">
+                    req/s 5m
+                  </TableSortHead>
+                  <TableSortHead {...headProps("ms")} align="right">
+                    avg ms
+                  </TableSortHead>
+                  <TableSortHead {...headProps("controller")}>Controller</TableSortHead>
+                  <TableSortHead {...headProps("userAgent")}>User agent</TableSortHead>
+                  <TableSortHead {...headProps("account")}>Account</TableSortHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pagination.rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
+                      Nothing on this page.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pagination.rows.map((worker) => {
+                    const stats = worker.time_windowed_stats;
+                    const controller = worker.session?.controller;
+                    return (
+                      <TableRow key={worker.id}>
+                        <TableCell className="font-mono text-xs">{worker.id}</TableCell>
+                        <TableCell>{worker.version_name ?? "—"}</TableCell>
+                        <TableCell>
+                          {/* The same tick and cross the flags on the card beside
+                              this use, so one glance down the column counts the
+                              allocated workers. The word stays for a screen
+                              reader, which cannot see either mark. */}
+                          {worker.is_in_use ? (
+                            <CircleCheck className="h-4 w-4 text-success" aria-hidden="true" />
+                          ) : (
+                            <CircleX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                          )}
+                          <span className="sr-only">{worker.is_in_use ? "yes" : "no"}</span>
+                        </TableCell>
+                        {/* tabular-nums here and not on the tiles: these are
+                            columns that have to line up. */}
+                        <TableCell className="text-right tabular-nums">
+                          {rate(stats?.requests_rate_over_1_min)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {rate(stats?.requests_rate_over_5_min)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {typeof stats?.request_ms_avg_over_5_min === "number"
+                            ? Math.round(stats.request_ms_avg_over_5_min)
+                            : "—"}
+                        </TableCell>
+                        {/* All three are the controller's, and empty on a worker
+                            Rotom is holding open with nothing allocated to it. */}
+                        <TableCell className="font-mono text-xs">{controller?.id ?? "—"}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {controller?.user_agent ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          {controller?.account_username
+                            ? `${controller.account_username}${
+                                controller.account_source ? ` (${controller.account_source})` : ""
+                              }`
+                            : "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+            <TablePaginationBar pagination={pagination} unit="workers" />
+          </div>
+        )}
       </CardContent>
     </Card>
-  );
-}
-
-function Body({
-  workers,
-  readAt,
-  error,
-}: {
-  workers: RotomWorkerView[];
-  readAt: number | null;
-  error?: string | null;
-}) {
-  if (error) {
-    return (
-      <p className="py-6 text-sm leading-relaxed text-muted-foreground">
-        Could not read the workers: {error}
-      </p>
-    );
-  }
-  if (readAt === null) {
-    return (
-      <p className="py-6 text-sm text-muted-foreground">
-        Nothing read yet — the next Rotom sync fills this in.
-      </p>
-    );
-  }
-  if (workers.length === 0) {
-    return <p className="py-6 text-sm text-muted-foreground">Rotom has no workers on this box.</p>;
-  }
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-xs text-muted-foreground">
-          {/* No Platform column: it is a protobuf enum whose zero value is
-              UNSET, and a MITM that does not fill the field in its welcome —
-              Cosmog, for one — reads as UNSET on every worker forever. A column
-              that says the same nothing on every row is a column that costs
-              width. The controller's id and user agent take its place: which
-              thing is driving this worker, and which build of it. */}
-          <tr className="border-b text-left">
-            <th className="py-2 pr-6 font-normal">Worker</th>
-            <th className="py-2 pr-6 font-normal">Version</th>
-            <th className="py-2 pr-6 font-normal">In use</th>
-            <th className="py-2 pr-6 text-right font-normal">req/s 1m</th>
-            <th className="py-2 pr-6 text-right font-normal">req/s 5m</th>
-            <th className="py-2 pr-6 text-right font-normal">avg ms</th>
-            <th className="py-2 pr-6 font-normal">Controller</th>
-            <th className="py-2 pr-6 font-normal">User agent</th>
-            <th className="py-2 font-normal">Account</th>
-          </tr>
-        </thead>
-        <tbody>
-          {workers.map((worker) => {
-            const stats = worker.time_windowed_stats;
-            const controller = worker.session?.controller;
-            return (
-              <tr key={worker.id} className="border-b border-border/50 last:border-0">
-                <td className="py-3 pr-6 font-mono text-xs">{worker.id}</td>
-                <td className="py-3 pr-6">{worker.version_name ?? "—"}</td>
-                <td className="py-3 pr-6">
-                  {/* The same tick and cross the flags on the card beside this
-                      use, so one glance down the column counts the allocated
-                      workers. The word stays for a screen reader, which cannot
-                      see either mark. */}
-                  {worker.is_in_use ? (
-                    <CircleCheck className="h-4 w-4 text-success" aria-hidden="true" />
-                  ) : (
-                    <CircleX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  )}
-                  <span className="sr-only">{worker.is_in_use ? "yes" : "no"}</span>
-                </td>
-                {/* tabular-nums here and not on the tiles: these are columns
-                    that have to line up. */}
-                <td className="py-3 pr-6 text-right tabular-nums">
-                  {rate(stats?.requests_rate_over_1_min)}
-                </td>
-                <td className="py-3 pr-6 text-right tabular-nums">
-                  {rate(stats?.requests_rate_over_5_min)}
-                </td>
-                <td className="py-3 pr-6 text-right tabular-nums">
-                  {typeof stats?.request_ms_avg_over_5_min === "number"
-                    ? Math.round(stats.request_ms_avg_over_5_min)
-                    : "—"}
-                </td>
-                {/* All three are the controller's, and empty on a worker Rotom
-                    is holding open with nothing allocated to it. */}
-                <td className="py-3 pr-6 font-mono text-xs">{controller?.id ?? "—"}</td>
-                <td className="py-3 pr-6 font-mono text-xs">{controller?.user_agent ?? "—"}</td>
-                <td className="py-3">
-                  {controller?.account_username
-                    ? `${controller.account_username}${
-                        controller.account_source ? ` (${controller.account_source})` : ""
-                      }`
-                    : "—"}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
