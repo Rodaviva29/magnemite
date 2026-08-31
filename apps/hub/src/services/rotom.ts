@@ -203,18 +203,51 @@ export async function listDevices(): Promise<RotomDevice[]> {
   return devices;
 }
 
-/** One device's workers, read live for the device page. Never stored. */
-export async function getDeviceWorkers(rotomDeviceId: string): Promise<RotomWorker[]> {
-  const body = await request<unknown>(
-    `/device/${encodeURIComponent(rotomDeviceId)}?include_workers=true`,
+/**
+ * The last poll's workers, per device, held in memory.
+ *
+ * The fleet poll already asks for `include_workers=true` and gets every worker
+ * of every box; it used to fold them into three numbers and throw the rows
+ * away, and the device page then went and fetched the same rows again, one box
+ * at a time, on every re-render. That second read was the whole cost: it was a
+ * call to somebody else's service driven by a page being open, and the page
+ * re-renders on the fleet's own event feed — during a rollout, up to once a
+ * second, over events that had nothing to do with that box.
+ *
+ * Rotom's own dashboard does not have this problem because it never had the
+ * second read: it polls `/api/status` once and every view selects out of that
+ * one response. This is the same idea one layer down — keep what the poll
+ * already brought, and serve the page from it.
+ *
+ * Deliberately not persisted, for the reason `monitor.ts` gives about its
+ * readings: it is the answer to "what is on this box right now", it is replaced
+ * every sync, and a restart empties it for as long as one sync takes.
+ */
+const workersByDevice = new Map<string, { at: number; workers: RotomWorker[] }>();
+
+/** What the last sync saw on one box, or null if it has not seen it yet. */
+export function cachedWorkers(deviceId: string): { at: number; workers: RotomWorker[] } | null {
+  return workersByDevice.get(deviceId) ?? null;
+}
+
+/**
+ * By worker id, so the table holds still.
+ *
+ * Rotom's response carries no ordering anyone can rely on, and it came back
+ * shuffled between one sync and the next — eight rows that swapped places every
+ * few seconds, which makes the column impossible to read down and makes a table
+ * that changed nothing look like it changed everything.
+ *
+ * Numeric collation rather than a plain string compare: these are ids like
+ * `POKELX01-7`, and lexicographically `-10` sorts between `-1` and `-2`.
+ * Sorted here rather than in the page so every reader of the cache gets the
+ * same order, and sorted on a copy because the array is Rotom's response and
+ * the summary above has already read it.
+ */
+function byWorkerId(workers: RotomWorker[] | null | undefined): RotomWorker[] {
+  return [...(workers ?? [])].sort((a, b) =>
+    a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: "base" }),
   );
-  // The endpoint answers with the device itself, either bare or under a key
-  // depending on the RotomNG build, so look in both places rather than guess.
-  const shape = z
-    .object({ device: rotomDeviceSchema.nullish(), workers: z.array(rotomWorkerSchema).nullish() })
-    .safeParse(body);
-  if (!shape.success) throw new Error("rotom /device/{id}: unreadable response");
-  return shape.data.device?.workers ?? shape.data.workers ?? [];
 }
 
 export async function deviceAction(rotomDeviceId: string, action: RotomAction): Promise<boolean> {
@@ -447,6 +480,10 @@ export async function syncDevices(): Promise<{ seen: number; matched: number }> 
     matchedIds.add(deviceId);
 
     const stats = summariseWorkers(rotomDevice.workers);
+    // Kept whole as well as summarised: the three numbers are what a rule acts
+    // on, the rows are what the scanner page draws, and both came out of this
+    // one response.
+    workersByDevice.set(deviceId, { at: Date.now(), workers: byWorkerId(rotomDevice.workers) });
     const next: RotomState = {
       // The address Rotom sees, kept for the device page and the config
       // placeholder. The identity is `id`; this is where the box connects
@@ -605,6 +642,10 @@ async function sweep(ours: OurDevice[], matchedIds: Set<string>): Promise<Set<st
     }
     misses.delete(device.id);
     flipped.add(device.id);
+    // A box Rotom stopped listing has no workers to show. Dropping the entry
+    // rather than emptying it is the difference the page needs: nothing cached
+    // reads as "no reading", an empty array as "Rotom says none".
+    workersByDevice.delete(device.id);
 
     await prisma.device.update({
       where: { id: device.id },
@@ -677,5 +718,6 @@ export function stopRotomSync(): void {
   if (timer) clearInterval(timer);
   timer = null;
   misses.clear();
+  workersByDevice.clear();
   lastRecordedSlot = -1;
 }

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CircleCheck, CircleX } from "lucide-react";
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
+import { type RotomWorkerView, hub } from "@/lib/hub";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Meter } from "@/components/charts/meter";
@@ -81,6 +82,19 @@ export default async function DeviceRotomPage({
       ])
     : [EMPTY_ROTOM_TREND, EMPTY_ROTOM_METRICS];
 
+  // Loaded here rather than fetched by the table itself: the hub serves these
+  // out of the last sync's memory, so there is nothing to wait for and no
+  // reason to make the browser ask a second time. A hub that is down costs the
+  // table, not the page.
+  const live: { workers: RotomWorkerView[]; readAt: number | null; error?: string } =
+    device.rotomDeviceId
+      ? await hub.rotomWorkers(device.id).catch((err: unknown) => ({
+          workers: [],
+          readAt: null,
+          error: err instanceof Error ? err.message : String(err),
+        }))
+      : { workers: [], readAt: null };
+
   const state = scannerState(
     device.rotomDeviceId
       ? {
@@ -92,11 +106,6 @@ export default async function DeviceRotomPage({
         }
       : null,
   );
-
-  // A new value on every render, so a sync — which re-renders this page — is
-  // also what tells the live worker table to read Rotom again. Without it the
-  // one refresh control would quietly leave half the page stale.
-  const renderedAt = Date.now();
 
   const measured = device.rotomStatWorkers !== null && device.rotomRequestRate !== null;
   const workerPercent =
@@ -234,8 +243,9 @@ export default async function DeviceRotomPage({
             </Card>
 
             <DeviceRotomWorkers
-              deviceId={device.id}
-              syncToken={renderedAt}
+              workers={live.workers}
+              readAt={live.readAt}
+              error={live.error ?? null}
               className="xl:col-span-2"
             />
           </div>

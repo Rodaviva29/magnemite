@@ -18,8 +18,8 @@ import { sendTestAlert } from "../services/notify.js";
 import { cancelRollout, createRollout, resumeRollout } from "../services/rollouts.js";
 import {
   type RotomAction,
+  cachedWorkers,
   deviceAction,
-  getDeviceWorkers,
   rotomEnabled,
   syncDevices,
 } from "../services/rotom.js";
@@ -422,12 +422,16 @@ export async function internalRoutes(app: FastifyInstance) {
   );
 
   /**
-   * One box's workers, read straight from Rotom for the device page.
+   * One box's workers, as the last fleet sync saw them.
    *
-   * Nothing here is stored. The sync keeps the three numbers a rule needs on
-   * the device row; the per-worker breakdown is a page someone opened, and a
-   * table re-synced every minute for a screen nobody is looking at is a table
-   * that costs a write per worker per minute forever.
+   * Served from memory rather than by asking Rotom: the sync already fetches
+   * every worker of every box, so a second call for one box would be paying
+   * twice for the same rows — and it would be paid on every re-render of a page
+   * somebody left open. Nothing is stored either; the sync keeps three numbers
+   * on the device row for the rules, and this is the breakdown behind them.
+   *
+   * `readAt` is null when the sync has not reached this box yet, which the page
+   * shows as "no reading" rather than as a box with no workers.
    */
   // POST like the rest of /internal, which is an RPC surface rather than a REST
   // one — the web client only knows how to speak to it that way.
@@ -444,12 +448,8 @@ export async function internalRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: "this device is not matched to a rotom device" });
       }
 
-      try {
-        return { workers: await getDeviceWorkers(device.rotomDeviceId) };
-      } catch (err) {
-        request.log.warn({ err }, "rotom worker read failed");
-        return reply.status(502).send({ error: "rotom did not answer" });
-      }
+      const cached = cachedWorkers(request.params.id);
+      return { workers: cached?.workers ?? [], readAt: cached?.at ?? null };
     },
   );
 

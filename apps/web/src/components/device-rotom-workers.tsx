@@ -1,62 +1,57 @@
-"use client";
-
-import { useEffect, useState, useTransition } from "react";
 import { CircleCheck, CircleX } from "lucide-react";
 import type { RotomWorkerView } from "@/lib/hub";
-import { rotomWorkers } from "@/actions/devices";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RelativeTime } from "@/components/relative-time";
 
 /**
- * The workers behind a box's numbers, read live from Rotom and kept nowhere.
+ * The workers behind a box's numbers.
  *
- * The counts on the card beside this one are stored, so they render whether or
- * not Rotom is up and a rule can act on them. This is the breakdown, and a
- * table re-synced every minute for a page nobody has open would cost a write
- * per worker per minute forever — so it is fetched when somebody looks, and
- * that is also why it is the one Rotom view that can fail on its own.
+ * Rendered from what the page already loaded, with no fetching of its own. The
+ * hub keeps the last fleet sync's worker rows in memory and hands them over;
+ * the sync had them anyway, since it asks for `include_workers=true` to compute
+ * the request rate on the card beside this.
  *
- * It has no refresh of its own. `syncToken` changes on every render of the
- * page, so the page's one Refresh — which re-asks Rotom and re-renders — is
- * what re-reads this too. Two refresh buttons a card apart, one of which
- * updated half the screen, is how a page starts lying about how fresh it is.
+ * It used to read them live, one box at a time, whenever the page re-rendered.
+ * That was a call to Rotom driven by a page being open — and this page
+ * re-renders on the fleet's own event feed, so during a rollout it was up to
+ * one call a second over events about other boxes entirely. Rotom's own
+ * dashboard never had that problem because it never had the second read: it
+ * polls once and every view selects out of the same response.
+ *
+ * The cost is that the table is as of the last sync rather than as of now,
+ * which the header says out loud instead of claiming to be live.
  */
 export function DeviceRotomWorkers({
-  deviceId,
-  syncToken,
+  workers,
+  readAt,
+  error,
   className,
 }: {
-  deviceId: string;
-  syncToken: number;
+  workers: RotomWorkerView[];
+  /** When the sync that saw these ran. Null means it has not reached the box. */
+  readAt: number | null;
+  /** Set when the hub could not be reached at all. */
+  error?: string | null;
   className?: string;
 }) {
-  const [workers, setWorkers] = useState<RotomWorkerView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  useEffect(() => {
-    startTransition(async () => {
-      const result = await rotomWorkers(deviceId);
-      if ("error" in result) {
-        setError(result.error);
-        setWorkers(null);
-        return;
-      }
-      setError(null);
-      setWorkers(result.workers);
-    });
-  }, [deviceId, syncToken]);
-
   return (
     <Card className={className}>
       <CardHeader className="flex-row items-baseline justify-between gap-2 space-y-0">
         <CardTitle className="text-sm">Workers</CardTitle>
         <span className="text-xs text-muted-foreground">
-          {pending ? "reading…" : "live from Rotom"}
+          {readAt === null ? (
+            "no reading yet"
+          ) : (
+            // Ticking, because the whole point of the label is how old this is.
+            <>
+              as of <RelativeTime value={new Date(readAt).toISOString()} live />
+            </>
+          )}
         </span>
       </CardHeader>
 
       <CardContent className="pt-0">
-        <Body workers={workers} error={error} pending={pending} />
+        <Body workers={workers} readAt={readAt} error={error} />
       </CardContent>
     </Card>
   );
@@ -64,12 +59,12 @@ export function DeviceRotomWorkers({
 
 function Body({
   workers,
+  readAt,
   error,
-  pending,
 }: {
-  workers: RotomWorkerView[] | null;
-  error: string | null;
-  pending: boolean;
+  workers: RotomWorkerView[];
+  readAt: number | null;
+  error?: string | null;
 }) {
   if (error) {
     return (
@@ -78,9 +73,11 @@ function Body({
       </p>
     );
   }
-  if (workers === null) {
+  if (readAt === null) {
     return (
-      <p className="py-6 text-sm text-muted-foreground">{pending ? "Reading from Rotom…" : "—"}</p>
+      <p className="py-6 text-sm text-muted-foreground">
+        Nothing read yet — the next Rotom sync fills this in.
+      </p>
     );
   }
   if (workers.length === 0) {
@@ -145,7 +142,7 @@ function Body({
                 {/* All three are the controller's, and empty on a worker Rotom
                     is holding open with nothing allocated to it. */}
                 <td className="py-3 pr-6 font-mono text-xs">{controller?.id ?? "—"}</td>
-                <td className="py-3 pr-6">{controller?.user_agent ?? "—"}</td>
+                <td className="py-3 pr-6 font-mono text-xs">{controller?.user_agent ?? "—"}</td>
                 <td className="py-3">
                   {controller?.account_username
                     ? `${controller.account_username}${

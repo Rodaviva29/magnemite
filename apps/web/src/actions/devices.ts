@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@magnemite/db";
 import { requireOperator } from "@/lib/session";
-import { type RotomDeviceAction, type RotomWorkerView, hub } from "@/lib/hub";
+import { type RotomDeviceAction, hub } from "@/lib/hub";
 import {
   planFromNames,
   planRename,
@@ -356,25 +356,6 @@ export async function rotomSetEnabled(deviceId: string, next: boolean): Promise<
     };
   }
   return { ok: true, message: `Rotom now has this box ${word}.` };
-}
-
-/**
- * One box's workers, straight from Rotom.
- *
- * Read on demand rather than stored, so it is the only Rotom view in the app
- * that can fail on its own. It returns the failure instead of throwing: the
- * device page's stored Rotom fields are still worth showing when Rotom is the
- * thing that is down.
- */
-export async function rotomWorkers(
-  deviceId: string,
-): Promise<{ workers: RotomWorkerView[] } | { error: string }> {
-  await requireOperator();
-  try {
-    return await hub.rotomWorkers(deviceId);
-  } catch (err) {
-    return { error: toMessage(err) };
-  }
 }
 
 export async function syncRotom(): Promise<ActionState> {

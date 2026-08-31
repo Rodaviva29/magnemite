@@ -179,9 +179,15 @@ export const hub = {
    *  the ones that still work when the agent is the half that died. */
   rotomDeviceAction: (id: string, action: RotomDeviceAction) =>
     call(`/internal/devices/${id}/rotom/${action}`),
-  /** One box's workers, read live from Rotom. Nothing about them is stored. */
+  /**
+   * One box's workers, as the hub's last fleet sync saw them. Held in the hub's
+   * memory, not stored and not re-fetched from Rotom — `readAt` is when that
+   * sync ran, or null if it has not reached the box yet.
+   */
   rotomWorkers: (id: string) =>
-    call<{ workers: RotomWorkerView[] }>(`/internal/devices/${id}/rotom/workers`),
+    call<{ workers: RotomWorkerView[]; readAt: number | null }>(
+      `/internal/devices/${id}/rotom/workers`,
+    ),
   rotomSync: () => call<{ seen: number; matched: number }>("/internal/rotom/sync"),
   /** Push a changed tracked-package list to every connected box. */
   refreshTrackedPackages: () => call<{ sent: number }>("/internal/tracked-packages/refresh"),
