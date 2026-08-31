@@ -44,10 +44,11 @@ export type GroupRow = {
 /**
  * The shapes aconf uses, so nobody has to type them from memory.
  *
- * These are the three MITMs this fleet actually runs, and their config keys are
- * not guessable — `rotomUrl` on one is `rdmUrl` on the next, and GoCheats uses
- * snake_case and a plain `config.json`. Getting one wrong is a scanner that
- * starts and does nothing.
+ * These are the MITMs this fleet actually runs, and their config keys are not
+ * guessable — `rotomUrl` on one is `rdmUrl` on the next, GoCheats uses
+ * snake_case and a plain `config.json`, and Cosmog wants two endpoints where
+ * the others want one. Getting a key wrong is a scanner that starts and does
+ * nothing.
  */
 const PRESETS = [
   {
@@ -92,6 +93,36 @@ const PRESETS = [
   "rotom_secret": "YOUR_ROTOM_SECRET",
   "workers_count": 8,
   "remote_attestations": false
+}`,
+  },
+  {
+    id: "cosmog",
+    label: "Cosmog",
+    packageName: "com.sy1vi3.cosmog",
+    configPath: "/data/local/tmp/cosmog.json",
+    // Two endpoints, not one: the worker socket and the control socket are
+    // separate in Cosmog, and the control one is what Rotom's restart, reboot
+    // and disconnect actions travel down. A config with only the first gives a
+    // box that scans and cannot be told anything.
+    //
+    // `device_id` is what Rotom registers the box under, so it is the string
+    // Magnemite matches on — see the matching rules in the Rotom docs. Setting
+    // it to anything but the device name is how a box ends up scanning fine
+    // with an empty Scanner column.
+    config: `{
+  "device_id": "{{device.name}}",
+  "rotom_worker_endpoint": "wss://YOUR_ROTOM_URL:7070",
+  "rotom_device_endpoint": "wss://YOUR_ROTOM_URL:7070/control",
+  "rotom_secret": "YOUR_ROTOM_SECRET",
+  "token": "YOUR_COSMOG_TOKEN",
+  "public_ip": "{{device.publicIp}}",
+  "use_local_safetynet": true,
+  "workers": 8,
+  "injection_delay_ms": 5000,
+  "pogo_heartbeat_timeout_ms": 30000,
+  "concurrent_login_override": 0,
+  "worker_spawn_delay_override": 12500,
+  "disable_attest_delay": false
 }`,
   },
 ] as const;

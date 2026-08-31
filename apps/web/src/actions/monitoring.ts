@@ -24,6 +24,8 @@ const SIGNALS = new Set<string>([
   "HEALTH_CHECK_FAILED",
   "LOOP_STALLED",
   "ROTOM_DISCONNECTED",
+  "ROTOM_NOT_SCANNING",
+  "ROTOM_IDLE",
 ]);
 
 const ACTIONS = new Set<string>([
@@ -36,6 +38,8 @@ const ACTIONS = new Set<string>([
   "SHELL",
   "REBOOT",
   "ROTOM_RESTART",
+  "ROTOM_DISCONNECT",
+  "ROTOM_REBOOT",
 ]);
 
 const LEVELS = new Set<string>(["INFO", "WARN", "CRITICAL"]);
@@ -84,8 +88,10 @@ export async function updateMonitorSettings(
   };
 
   // One HTTP request for the whole fleet at once, against somebody else's
-  // service. 10s is as tight as is polite.
-  const rotomSyncSeconds = int("rotomSyncSeconds", 10);
+  // service — and the one it answers is the same `/api/device` its own
+  // dashboard polls every five seconds. Five is the floor for that reason: it
+  // is what Rotom already expects of a client, not a number picked here.
+  const rotomSyncSeconds = int("rotomSyncSeconds", 5);
   // Floored against the Rotom sync interval below, not by a constant: 120 was
   // two of the 60s the sync used to be fixed at, and it stopped meaning that
   // the moment the interval became a setting.
@@ -109,7 +115,7 @@ export async function updateMonitorSettings(
   ) {
     return {
       error:
-        "Every field needs a whole number. The Rotom sync starts at 10 seconds, the reboot grace at 60, and the two ceilings at 1.",
+        "Every field needs a whole number. The Rotom sync starts at 5 seconds, the reboot grace at 60, and the two ceilings at 1.",
     };
   }
 

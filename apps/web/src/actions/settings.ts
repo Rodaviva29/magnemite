@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { CONFIG_PLACEHOLDERS } from "@/lib/config-placeholders";
 import {
   generateToken,
+  getHubSettings as readHubSettings,
+  getMonitorSettings as readMonitorSettings,
   hashToken,
   type HubSettingsValues,
   prisma,
@@ -52,12 +54,6 @@ export async function updateHubSettings(
 
   const maxConcurrentJobs = int("maxConcurrentJobs", 1);
   const jobStallTimeoutSeconds = int("jobStallTimeoutSeconds", 1);
-  // Floored against the heartbeat below, since that is now configurable: a
-  // shorter interval cannot produce more points, it just stores every beat.
-  const metricsSampleSeconds = int("metricsSampleSeconds", 1);
-  // 0 is meaningful here — it turns health recording off and drops what is
-  // already stored on the next prune.
-  const metricsRetentionDays = int("metricsRetentionDays", 0);
   const heartbeatSeconds = int("heartbeatSeconds", 5);
   const agentUpdateConcurrency = int("agentUpdateConcurrency", 1);
   // Three missed 20-second heartbeats is the floor that stops a box flapping
@@ -67,15 +63,13 @@ export async function updateHubSettings(
   if (
     maxConcurrentJobs === null ||
     jobStallTimeoutSeconds === null ||
-    metricsSampleSeconds === null ||
-    metricsRetentionDays === null ||
     agentUpdateConcurrency === null ||
     deviceOfflineTimeoutSeconds === null ||
     heartbeatSeconds === null
   ) {
     return {
       error:
-        "Every field needs a whole number — 1 or more, except the history retention. The heartbeat starts at 5 and the offline timeout at 30.",
+        "Every field needs a whole number — 1 or more. The heartbeat starts at 5 and the offline timeout at 30.",
     };
   }
 
@@ -88,17 +82,9 @@ export async function updateHubSettings(
       error: `The offline timeout has to allow at least three missed heartbeats — ${heartbeatSeconds * 3}s or more at a ${heartbeatSeconds}s heartbeat. Otherwise one dropped beat marks a box offline.`,
     };
   }
-  if (metricsSampleSeconds < heartbeatSeconds) {
-    return {
-      error: `The health sample interval cannot be shorter than the ${heartbeatSeconds}s heartbeat — there is no extra data to store between beats.`,
-    };
-  }
-
   const patch: Partial<HubSettingsValues> = {
     maxConcurrentJobs,
     jobStallTimeoutSeconds,
-    metricsSampleSeconds,
-    metricsRetentionDays,
     heartbeatSeconds,
     agentUpdateConcurrency,
     deviceOfflineTimeoutSeconds,
@@ -121,6 +107,103 @@ export async function updateHubSettings(
       userId: user.id,
       userEmail: user.email,
       action: "settings.hub",
+      meta: { ...patch, hubNotified: told },
+    },
+  });
+
+  revalidatePath("/settings");
+  return {
+    ok: true,
+    message: told
+      ? "Saved."
+      : "Saved, but the hub could not be told, it is still running on the old values. Restart it, or save again once it is back.",
+  };
+}
+
+/**
+ * How much history to keep, for both kinds of it.
+ *
+ * Its own card and its own save, apart from the operational knobs above,
+ * because the two pairs answer the same two questions about different sources
+ * and their floors come from different places: a heartbeat sample cannot
+ * usefully be finer than the heartbeat, a Rotom sample cannot usefully be finer
+ * than the Rotom sync.
+ *
+ * Both floors are checked against what is **stored**, not against a field on
+ * this form — the numbers they are floored by live on two other cards. That
+ * leaves the reverse direction open: raising the heartbeat past a sample
+ * interval that was already saved is not refused here. It does not have to be.
+ * Asking for a sample finer than its source stores every reading and no more,
+ * which is a wasted row rather than a broken chart, and refusing a heartbeat
+ * change because of a number two cards away would be the more confusing half of
+ * the trade.
+ */
+export async function updateMetricHistory(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await requireOperator();
+
+  const int = (name: string, min: number) => {
+    const parsed = Number(formData.get(name));
+    if (!Number.isFinite(parsed) || parsed < min) return null;
+    return Math.floor(parsed);
+  };
+
+  const metricsSampleSeconds = int("metricsSampleSeconds", 1);
+  const rotomSampleSeconds = int("rotomSampleSeconds", 1);
+  // 0 is meaningful for both — it turns that history off and drops what is
+  // already stored on the next prune.
+  const metricsRetentionDays = int("metricsRetentionDays", 0);
+  const rotomRetentionDays = int("rotomRetentionDays", 0);
+
+  if (
+    metricsSampleSeconds === null ||
+    rotomSampleSeconds === null ||
+    metricsRetentionDays === null ||
+    rotomRetentionDays === null
+  ) {
+    return {
+      error: "Every field needs a whole number — 1 or more for the intervals, 0 or more for days.",
+    };
+  }
+
+  const [hubSettings, monitorSettings] = await Promise.all([
+    readHubSettings(),
+    readMonitorSettings(),
+  ]);
+
+  if (metricsSampleSeconds < hubSettings.heartbeatSeconds) {
+    return {
+      error: `Boxes report every ${hubSettings.heartbeatSeconds}s, so sampling faster than that keeps every beat and nothing more. Raise the heartbeat first if you want finer device history.`,
+    };
+  }
+  if (rotomSampleSeconds < monitorSettings.rotomSyncSeconds) {
+    return {
+      error: `Rotom is asked every ${monitorSettings.rotomSyncSeconds}s, so sampling faster than that keeps every sync and nothing more. Lower "Ask Rotom every" on the Monitoring card first if you want finer scanner history.`,
+    };
+  }
+
+  const patch: Partial<HubSettingsValues> = {
+    metricsSampleSeconds,
+    metricsRetentionDays,
+    rotomSampleSeconds,
+    rotomRetentionDays,
+  };
+  await updateHubSettingsInDb(patch);
+
+  let told = true;
+  try {
+    await hub.refreshSettings();
+  } catch {
+    told = false;
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      userEmail: user.email,
+      action: "settings.metricHistory",
       meta: { ...patch, hubNotified: told },
     },
   });

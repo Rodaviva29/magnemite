@@ -1,0 +1,112 @@
+"use client";
+
+import { useActionState } from "react";
+import { ChartLine } from "lucide-react";
+import { updateMetricHistory } from "@/actions/settings";
+import type { ActionState } from "@/actions/rollouts";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SaveButton } from "@/components/ui/save-button";
+import { NumberField, SettingGroup } from "@/components/settings/setting-fields";
+
+export type MetricHistoryRow = {
+  metricsSampleSeconds: number;
+  metricsRetentionDays: number;
+  rotomSampleSeconds: number;
+  rotomRetentionDays: number;
+  /** The floors, from the two cards that own them. Shown, never posted. */
+  heartbeatSeconds: number;
+  rotomSyncSeconds: number;
+};
+
+/**
+ * How much history to keep, in two pairs.
+ *
+ * One card because both answer the same two questions — how often to keep one,
+ * and how long it lives — and two groups because the answers are independent.
+ * They were one pair once, shared, and that made the scanner history inherit a
+ * rule about heartbeats: it could never be finer than a beat, though Rotom is
+ * asked more than twice as often as one.
+ *
+ * Each group names the number it is floored by rather than restating it as a
+ * rule, because that number lives on a different card and "60s, the heartbeat"
+ * is the whole explanation.
+ */
+export function MetricHistoryCard({
+  settings,
+  disabled,
+}: {
+  settings: MetricHistoryRow;
+  disabled: boolean;
+}) {
+  const [state, formAction] = useActionState<ActionState, FormData>(updateMetricHistory, {});
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ChartLine className="h-4 w-4 text-muted-foreground" />
+          Metric history
+        </CardTitle>
+        <CardDescription>
+          What the charts are drawn from. Both sources are asked far more often than they are
+          recorded — the rest is dropped, because no chart is read at that resolution.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        <form action={formAction} className="flex flex-col gap-6">
+          <SettingGroup title="Device metrics">
+            <NumberField
+              name="metricsSampleSeconds"
+              label="Sample every"
+              value={settings.metricsSampleSeconds}
+              min={settings.heartbeatSeconds}
+              disabled={disabled}
+              hint={`A box's CPU, memory, storage, temperature and per-app usage. Boxes report every ${settings.heartbeatSeconds}s, so that is the floor — below it there is nothing extra to store between beats.`}
+            />
+            <NumberField
+              name="metricsRetentionDays"
+              label="Keep for"
+              value={settings.metricsRetentionDays}
+              min={0}
+              unit="days"
+              disabled={disabled}
+              hint="0 turns device recording off and drops what is already stored on the next prune."
+            />
+          </SettingGroup>
+
+          <SettingGroup title="Scanner (Rotom)">
+            <NumberField
+              name="rotomSampleSeconds"
+              label="Sample every"
+              value={settings.rotomSampleSeconds}
+              min={settings.rotomSyncSeconds}
+              disabled={disabled}
+              hint={`Workers, request rate and the four Rotom flags, behind a box's scanner page. Rotom is asked every ${settings.rotomSyncSeconds}s, so that is the floor. Asking Rotom faster does not keep more history — this is the number that decides that.`}
+            />
+            <NumberField
+              name="rotomRetentionDays"
+              label="Keep for"
+              value={settings.rotomRetentionDays}
+              min={0}
+              unit="days"
+              disabled={disabled}
+              hint="0 turns scanner recording off. The Scanner column and the monitoring rules are unaffected — they read the live state, not the history."
+            />
+          </SettingGroup>
+
+          {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+          {state.ok && state.message && state.message !== "Saved." ? (
+            <p className="text-sm text-muted-foreground">{state.message}</p>
+          ) : null}
+
+          {!disabled ? (
+            <div className="flex justify-end">
+              <SaveButton state={state} />
+            </div>
+          ) : null}
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

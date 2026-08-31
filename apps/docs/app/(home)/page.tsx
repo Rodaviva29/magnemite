@@ -27,7 +27,7 @@ const features = [
   {
     icon: CloudDownload,
     title: "Cached once",
-    body: "The hub downloads each .apkm a single time, hashes it, and Caddy streams it off the volume — Node never sits in the data path.",
+    body: "The hub downloads each .apkm a single time, hashes it, and Caddy streams it off the volume. Node never sits in the data path.",
   },
   {
     icon: GitBranch,
@@ -94,7 +94,7 @@ export default function HomePage() {
           <div className="flex flex-col items-start gap-6">
             <span className="inline-flex items-center gap-2 rounded-full border border-fd-border bg-fd-card/60 px-3 py-1 text-xs text-fd-muted-foreground">
               <Image src={logo} alt="" width={16} height={16} unoptimized priority />
-              For fleets running Unown# and rooted ATVs
+              For fleets running Unown# and android devices
             </span>
 
             <h1 className="font-display text-4xl leading-[1.05] font-semibold tracking-tight text-balance md:text-6xl">

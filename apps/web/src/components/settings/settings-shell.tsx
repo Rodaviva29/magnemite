@@ -56,9 +56,14 @@ const CATEGORIES: Category[] = [
     terms: [
       "max concurrent jobs",
       "job stall timeout",
-      "health sample interval",
+      "metric history",
+      "sample interval",
       "history retention",
       "metrics",
+      // The same two fields govern the scanner charts, so the words for those
+      // have to land here rather than on the Rotom page they are drawn on.
+      "rotom history",
+      "scanner history",
       "heartbeat",
       "offline timeout",
       // The monitoring knobs live on this tab now, so the words somebody
@@ -91,6 +96,10 @@ const CATEGORIES: Category[] = [
       "loop stalled",
       "unreachable",
       "rotom disconnected",
+      "rotom not scanning",
+      "rotom idle",
+      "no workers",
+      "reboot through rotom",
       "threshold",
       "cooldown",
       "quiet hours",

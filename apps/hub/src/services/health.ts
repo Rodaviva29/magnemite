@@ -357,7 +357,7 @@ async function checkFeed(
 }
 
 /** "1.4.2 ×37, 1.4.1 ×3" — most common first, so the outliers stand out. */
-function workerVersions(devices: { version?: string }[]): string {
+function workerVersions(devices: { version?: string | null }[]): string {
   const counts = new Map<string, number>();
   for (const device of devices) {
     const version = device.version?.trim() || "unknown";

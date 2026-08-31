@@ -318,3 +318,24 @@
     font-size: 16px;
   }
 }
+
+/*
+ * Undo the gap Radix adds to <body> while an overlay is open.
+ *
+ * `scrollbar-gutter: stable` up in `base` already reserves the scrollbar's
+ * width whether or not there is one, including while the scroll lock is on —
+ * so there is nothing to compensate for. But `react-remove-scroll-bar`, which
+ * every Radix overlay pulls in, does not know that: it measures the scrollbar
+ * and injects `body[data-scroll-locked] { margin-right: 8px !important }`. The
+ * two stack, and the whole page slides 8px left the moment a dropdown opens
+ * and back when it closes.
+ *
+ * `html body` rather than `body` because that injected rule carries
+ * `!important` and lands in a runtime <style> after this file, so only higher
+ * specificity wins. Unlayered for the same reason the block above is: a rule
+ * inside `@layer base` loses to an unlayered one whatever its specificity.
+ */
+html body[data-scroll-locked] {
+  margin-right: 0 !important;
+  padding-right: 0 !important;
+}

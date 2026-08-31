@@ -132,6 +132,16 @@ const NEEDS_SOCKET = new Set<MonitorAction>([
   "REBOOT",
 ]);
 
+/**
+ * Actions that cost a boot cycle, whichever socket carried them.
+ *
+ * `maxRebootsPerDeviceDay` and the reboot grace both key off this rather than
+ * off `REBOOT` alone. Rotom reboots the same box through its own connection, so
+ * a ceiling that only knew the agent-side spelling would be a ceiling a rule
+ * could walk straight past by naming the other one.
+ */
+const HARD_ACTIONS = new Set<MonitorAction>(["REBOOT", "ROTOM_REBOOT"]);
+
 function substitute(command: string, packageName: string | null): string {
   return command.replaceAll("{pkg}", packageName ?? "");
 }
@@ -272,6 +282,36 @@ function readSignal(
         return Date.now() - device.rotomLastSeenAt.getTime() >= rotomStaleMs;
       }
       return false;
+    }
+
+    case "ROTOM_NOT_SCANNING": {
+      if (!rotomEnabled() || !device.rotomDeviceId) return null;
+      if (!device.rotomEnabled) return null;
+      // A box Rotom has lost is ROTOM_DISCONNECTED's fault, not this one. Two
+      // ladders over one fault is exactly what `rulesFor` exists to prevent,
+      // and it would be the same box rebooted twice.
+      if (!device.rotomConnected) return null;
+      // Rotom did not say how many workers it has. Old build, or a shape this
+      // hub could not read — either way, not evidence of anything.
+      if (device.rotomWorkerCount === null) return null;
+      // No MITM attached at all: the scanner is up and never registered.
+      if (device.rotomWorkerCount === 0) return true;
+      if (device.rotomWorkersInUse === null) return null;
+      return device.rotomWorkersInUse === 0;
+    }
+
+    case "ROTOM_IDLE": {
+      if (!rotomEnabled() || !device.rotomDeviceId) return null;
+      if (!device.rotomEnabled || !device.rotomConnected) return null;
+      // Nothing allocated is ROTOM_NOT_SCANNING's fault, not this one.
+      if (!device.rotomWorkersInUse) return null;
+      // No worker reported a rate. Rotom only measures them in `requests` mode,
+      // or `proxy` with `inspect`; on any other mode this signal is silent by
+      // design rather than reading every box as idle.
+      if (!device.rotomStatWorkers || device.rotomRequestRate === null) return null;
+      // Zero requests across five minutes on a worker Rotom is holding open.
+      // Not a threshold anyone has to tune: a box doing any work is above it.
+      return device.rotomRequestRate <= 0;
     }
 
     case "SERVICE_DOWN": {
@@ -416,7 +456,7 @@ async function busyDeviceIds(rebootGraceSeconds: number): Promise<Set<string>> {
     }),
     prisma.monitorEvent.findMany({
       where: {
-        action: "REBOOT",
+        action: { in: [...HARD_ACTIONS] },
         actionOk: true,
         at: { gte: new Date(Date.now() - rebootGraceSeconds * 1000) },
       },
@@ -439,7 +479,7 @@ async function spentBudgets(): Promise<Budgets> {
     }),
     prisma.monitorEvent.groupBy({
       by: ["deviceId"],
-      where: { action: "REBOOT", at: { gte: new Date(now - 86_400_000) } },
+      where: { action: { in: [...HARD_ACTIONS] }, at: { gte: new Date(now - 86_400_000) } },
       _count: { _all: true },
     }),
   ]);
@@ -616,7 +656,7 @@ function tripped(
   if (actions >= settings.maxActionsPerDeviceHour) {
     return `${actions} actions in the last hour, at a ceiling of ${settings.maxActionsPerDeviceHour}`;
   }
-  if (action === "REBOOT") {
+  if (HARD_ACTIONS.has(action)) {
     const reboots = budgets.reboots.get(device.id) ?? 0;
     if (reboots >= settings.maxRebootsPerDeviceDay) {
       return `${reboots} reboots today, at a ceiling of ${settings.maxRebootsPerDeviceDay}`;
@@ -627,7 +667,9 @@ function tripped(
 
 function spend(deviceId: string, action: MonitorAction, budgets: Budgets): void {
   budgets.actions.set(deviceId, (budgets.actions.get(deviceId) ?? 0) + 1);
-  if (action === "REBOOT") budgets.reboots.set(deviceId, (budgets.reboots.get(deviceId) ?? 0) + 1);
+  if (HARD_ACTIONS.has(action)) {
+    budgets.reboots.set(deviceId, (budgets.reboots.get(deviceId) ?? 0) + 1);
+  }
 }
 
 async function runAction(
@@ -643,10 +685,18 @@ async function runAction(
     return { ok: sent, detail: sent ? null : "the box did not take the reboot" };
   }
 
-  if (action === "ROTOM_RESTART") {
+  // The three that travel Rotom's own socket rather than the agent's, which is
+  // what makes them the only remediation left on a box whose agent has died.
+  // They fail on a box Rotom has lost, for the mirrored reason.
+  if (action === "ROTOM_RESTART" || action === "ROTOM_DISCONNECT" || action === "ROTOM_REBOOT") {
     if (!device.rotomDeviceId) return { ok: false, detail: "not matched in rotom" };
-    const ok = await deviceAction(device.rotomDeviceId, "restart");
-    return { ok, detail: ok ? null : "rotom refused the restart" };
+    const verb = {
+      ROTOM_RESTART: "restart",
+      ROTOM_DISCONNECT: "disconnect",
+      ROTOM_REBOOT: "reboot",
+    }[action] as "restart" | "disconnect" | "reboot";
+    const ok = await deviceAction(device.rotomDeviceId, verb);
+    return { ok, detail: ok ? null : `rotom refused the ${verb}` };
   }
 
   const script = substitute(command ?? ACTION_COMMANDS[action] ?? "", rule.packageName);
@@ -919,6 +969,46 @@ const SEEDS: Seed[] = [
     steps: [
       { atFailure: 1, action: "NOTIFY_ONLY" },
       { atFailure: 3, action: "ROTOM_RESTART" },
+      // Rotom cannot reboot a box it has lost — there is no connection left to
+      // send it down — so the bottom rung is the agent's own socket, which is
+      // still there whenever the box is only invisible to Rotom.
+      { atFailure: 6, action: "REBOOT" },
+    ],
+  },
+  {
+    name: "Rotom has the box but no workers",
+    signal: "ROTOM_NOT_SCANNING",
+    packageName: null,
+    config: {},
+    // A fleet with more boxes than accounts has idle spares on purpose, so this
+    // one waits longer than the rest before it believes anything.
+    threshold: 3,
+    cooldownSeconds: 1800,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [
+      { atFailure: 1, action: "NOTIFY_ONLY" },
+      { atFailure: 3, action: "ROTOM_RESTART" },
+      { atFailure: 6, action: "ROTOM_REBOOT" },
+    ],
+  },
+  {
+    name: "Scanner is allocated and doing nothing",
+    signal: "ROTOM_IDLE",
+    packageName: null,
+    config: {},
+    // Rotom's own window is five minutes wide and the sync is a minute, so one
+    // reading is not five minutes of evidence. Five of them is.
+    threshold: 5,
+    cooldownSeconds: 1800,
+    notify: true,
+    notifyLevel: "WARN",
+    steps: [
+      { atFailure: 1, action: "NOTIFY_ONLY" },
+      // Disconnect before restart: a stuck worker allocation is exactly what it
+      // clears, and it costs a reconnect rather than an app launch.
+      { atFailure: 5, action: "ROTOM_DISCONNECT" },
+      { atFailure: 8, action: "ROTOM_RESTART" },
     ],
   },
 ];

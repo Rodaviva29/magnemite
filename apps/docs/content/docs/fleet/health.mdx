@@ -15,14 +15,14 @@ files.
 
 It also reads the package versions.
 
-| Reading         | Where it comes from                              |
-| --------------- | ------------------------------------------------ |
-| CPU load        | `/proc/loadavg`, against the box's core count    |
-| Memory          | `MemTotal` and `MemAvailable` in `/proc/meminfo` |
-| Storage         | `/data` (the partition an install writes to)     |
-| Temperature     | `/sys/class/thermal/thermal_zone*`               |
-| CPU/RAM per app | `/proc/<pid>/stat` and `statm`, per tracked app  |
-| Package versions | `dumpsys package <package>`                       |
+| Reading          | Where it comes from                              |
+| ---------------- | ------------------------------------------------ |
+| CPU load         | `/proc/loadavg`, against the box's core count    |
+| Memory           | `MemTotal` and `MemAvailable` in `/proc/meminfo` |
+| Storage          | `/data` (the partition an install writes to)     |
+| Temperature      | `/sys/class/thermal/thermal_zone*`               |
+| CPU/RAM per app  | `/proc/<pid>/stat` and `statm`, per tracked app  |
+| Package versions | `dumpsys package <package>`                      |
 
 **Per-app usage** covers only the tracked packages, summed across every process
 an app owns. CPU is a share of a _single_ core, the number `top` shows.
@@ -35,10 +35,10 @@ an app owns. CPU is a share of a _single_ core, the number `top` shows.
 
 Two configurable knobs in **Settings → Tuning**:
 
-| Setting                          | Default | What it does                                                         |
-| -------------------------------- | ------- | -------------------------------------------------------------------- |
-| Health sample interval (seconds) | 60      | How often a heartbeat is kept. Below 20 stores every beat.           |
-| Health history retention (days)  | 7       | How long samples live. 0 turns recording off and drops what is kept. |
+| Setting                                     | Default | What it does                                                          |
+| ------------------------------------------- | ------- | --------------------------------------------------------------------- |
+| Device metrics → **Sample every** (seconds) | 60      | How often a beat is kept. Floored at the heartbeat.                   |
+| Device metrics → **Keep for** (days)        | 7       | How long readings live. 0 turns recording off and drops what is kept. |
 
 At the defaults a box costs about 1 400 rows a day, plus one per tracked app.
 The hub prunes hourly in batches, so the delete never locks the table against

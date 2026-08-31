@@ -1,10 +1,10 @@
 <div align="center">
   <img src="apps/web/public/magnemite-256.png" alt="Magnemite" width="160" />
   <h1>Magnemite</h1>
-  <p><strong>Over-the-air updater for a fleet of rooted Android TV boxes.</strong></p>
+  <p><strong>Over-the-air updater for a fleet of rooted android devices or redroid.</strong></p>
   <p>
     It watches for new Pokémon GO <code>.apkm</code> releases, caches them once on your
-    server, and installs them on one box or a whole fleet from a dashboard. Supports per-device
+    server, and installs them on one device or a whole fleet from a dashboard. Supports per-device
     progress, automatic retries, canary rollouts and a hands-off mode.
   </p>
   <p>

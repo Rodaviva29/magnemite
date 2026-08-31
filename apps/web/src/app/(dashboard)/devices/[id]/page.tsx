@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RadioTower } from "lucide-react";
 import { prisma } from "@magnemite/db";
 import { requireUser } from "@/lib/session";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OnlineDot } from "@/components/status";
 import { DeviceControls } from "@/components/device-controls";
@@ -138,7 +139,6 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
             online={online}
             groupId={device.groupId}
             groups={groups.map((g) => ({ id: g.id, name: g.name }))}
-            hasRotom={Boolean(device.rotomDeviceId)}
           />
         ) : null}
       </header>
@@ -194,8 +194,23 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
         </Card>
 
         <Card>
-          <CardHeader>
+          {/* Same shape as the Load card: the one control lives in the header,
+              so the body stays entirely readings. */}
+          <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-sm">Agent</CardTitle>
+            {device.rotomDeviceId ? (
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="-my-1 -mr-2 h-7 w-7"
+                title="Scanner detail"
+              >
+                <Link href={`/devices/${device.id}/rotom`} aria-label="Scanner detail">
+                  <RadioTower />
+                </Link>
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent className="flex flex-col gap-1 text-sm">
             <Field label="Version" value={device.agentVersion ?? "—"} />
@@ -209,17 +224,18 @@ export default async function DevicePage({ params }: { params: Promise<{ id: str
               <Field label="Public IP" value={device.publicIp ?? "—"} />
             )}
             <Field label="Enrolled" value={formatRelative(device.createdAt)} />
+            {/* One line only; everything else Rotom knows is behind the button
+                in the header, which has room for the workers behind it. */}
             <Field
               label="Scanner (rotom)"
               value={
                 device.rotomDeviceId
-                  ? `${device.rotomConnected ? "scanning" : "not scanning"}${
-                      device.rotomWorkerCount ? ` · ${device.rotomWorkerCount} workers` : ""
-                    }`
+                  ? device.rotomConnected
+                    ? "scanning"
+                    : "not scanning"
                   : "not matched"
               }
             />
-            {device.rotomOrigin ? <Field label="Rotom origin" value={device.rotomOrigin} /> : null}
           </CardContent>
         </Card>
 

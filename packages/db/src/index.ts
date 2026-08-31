@@ -124,18 +124,46 @@ export type HubSettingsValues = {
   /** Seconds without a job_progress message before a job is considered stalled. */
   jobStallTimeoutSeconds: number;
   /**
-   * Seconds between stored health samples. Boxes beat every 20 seconds and no
-   * chart is read at that resolution, so the hub keeps one beat per interval
-   * and drops the rest. Floored at the heartbeat interval — asking for less
-   * than 20 just stores every beat.
+   * Seconds between stored readings. Boxes beat every 20 seconds and no chart
+   * is read at that resolution, so the hub keeps one beat per interval and
+   * drops the rest. Floored at the heartbeat interval — asking for less than 20
+   * just stores every beat.
+   *
+   * Two kinds of history ride this, from two different sources: the box's own
+   * readings off the heartbeat, and what Rotom says about it off the Rotom
+   * sync, which runs far more often. One grid for both, so a chart on either
+   * page means the same thing by a point.
+   *
+   * The heartbeat floor is the awkward part of sharing it — it is a rule about
+   * heartbeats, and the Rotom readings inherited it by living here. Rotom is
+   * asked every 10s by default, so its history could in principle be finer than
+   * a beat. If that is ever wanted, this is the setting that has to split.
    */
   metricsSampleSeconds: number;
   /**
-   * Days of health history to keep. 0 turns recording off entirely and drops
-   * what is already stored on the next prune, for a fleet that would rather
-   * not spend the disk.
+   * Days of that history to keep. 0 turns recording off entirely and drops what
+   * is already stored on the next prune, for a fleet that would rather not
+   * spend the disk.
    */
   metricsRetentionDays: number;
+  /**
+   * The same two knobs again, for what Rotom says about a box rather than what
+   * the box says about itself.
+   *
+   * Their own pair rather than sharing the metrics ones, because the two have
+   * different floors and neither floor is about the other: a heartbeat sample
+   * cannot usefully be finer than the heartbeat, and a Rotom sample cannot
+   * usefully be finer than the Rotom sync — which is 10s by default, half a
+   * beat. Sharing them meant the scanner history inherited a rule about
+   * heartbeats and could never be finer than one.
+   *
+   * Neither is enforced as a hard floor at write time: asking for a sample
+   * finer than the source simply stores every reading, which is harmless. The
+   * form says so rather than the sampler refusing.
+   */
+  rotomSampleSeconds: number;
+  /** Days of scanner history to keep. 0 records nothing, as above. */
+  rotomRetentionDays: number;
   /**
    * Seconds between heartbeats, which the hub tells every box in its welcome.
    *
@@ -165,6 +193,8 @@ const HUB_SETTINGS_DEFAULTS: HubSettingsValues = {
   jobStallTimeoutSeconds: 900,
   metricsSampleSeconds: 60,
   metricsRetentionDays: 7,
+  rotomSampleSeconds: 60,
+  rotomRetentionDays: 7,
   heartbeatSeconds: 20,
   agentUpdateConcurrency: 5,
   deviceOfflineTimeoutSeconds: 70,
@@ -272,6 +302,12 @@ export type MonitorSettingsValues = {
    * Ignored entirely when the Rotom integration is off. When it is on, this is
    * the resolution of everything Rotom-shaped: the Scanner column, and the
    * `ROTOM_DISCONNECTED` signal below.
+   *
+   * Ten, matching what Rotom's own dashboard and Rotomonitor settled on — both
+   * poll it every five. One request answers for the whole fleet, so the cost is
+   * one HTTP round trip per interval however many boxes there are. What does
+   * scale with the fleet is the row written per matched box, and that is on its
+   * own grid: history is kept on `metricsSampleSeconds`, not on this.
    */
   rotomSyncSeconds: number;
   /**
@@ -312,7 +348,7 @@ export type MonitorSettingsValues = {
 
 const MONITOR_SETTINGS_DEFAULTS: MonitorSettingsValues = {
   enabled: false,
-  rotomSyncSeconds: 60,
+  rotomSyncSeconds: 10,
   rotomStaleSeconds: 600,
   rebootGraceSeconds: 600,
   startupGraceSeconds: 180,

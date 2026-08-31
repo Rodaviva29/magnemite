@@ -7,7 +7,7 @@ icon: RadioTower
 A box can be online, heartbeating, with the scanner process alive, and handing
 Rotom nothing. The agent has no way to see that; Rotom is the only thing that
 does. With the integration on, the hub asks it what it thinks of the whole
-fleet, once a minute.
+fleet, every ten seconds.
 
 ## Configuration
 
@@ -39,17 +39,54 @@ Check the Health/Status page for the integration's own health.
 <Cards>
   <Card
     title="A Scanner column"
-    description="On the fleet table, once at least one box is matched: whether Rotom has a live connection to it, and how many workers attached."
+    description="On the fleet table, once at least one box is matched: scanning, idle, stalled, disabled or not scanning, with the workers in use and the request rate behind it."
   />
   <Card
-    title="A monitoring signal"
-    description="`Rotom lost the box` becomes a rule you can act on, and the only box-health signal that works on every box today, since the hub reads it rather than the agent."
+    title="Three monitoring signals"
+    description="Rotom lost the box, has the box but no workers, and scanner allocated and doing nothing — the only box-health signals that work on every box today, since the hub reads them rather than the agent."
   />
   <Card
-    title="Restart scanner action"
-    description="On the device page, and as a remediation action a rule can take. Rotom kicks the scanner without a reboot."
+    title="Actions that survive a dead agent"
+    description="Restart, disconnect and reboot travel Rotom's socket, so they still work on a box Magnemite cannot reach. Enable and disable take a box out of the pool by hand."
   />
 </Cards>
+
+## What the Scanner column says
+
+| Badge          | What it means                                              |
+| -------------- | ---------------------------------------------------------- |
+| `scanning`     | Connected, a worker allocated, requests going through it   |
+| `stalled`      | A worker is allocated and no requests are going through it |
+| `idle`         | Connected, and Rotom has nothing allocated on the box      |
+| `disabled`     | Someone took the box out of Rotom's pool on purpose        |
+| `not scanning` | Rotom has no connection to the box                         |
+| `—`            | No matching device in Rotom                                |
+
+The counts read `2/4w`, in use over attached. The rate is only shown where
+Rotom measures one; see **Request rates** below.
+
+## The scanner page
+
+The Agent card on a device page carries one line, `scanning`, `not scanning`,
+`not matched`, and a additional page with more extensive details.
+
+## Acting on a box
+
+Five actions, on the rotom device page and, for three of them, as remediation rungs
+a rule can take.
+
+| Action           | What it does                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Restart scanner  | Restarts the scanner app                                                                 |
+| Drop connection  | Rotom drops its socket to the box **and all its workers**; the box reconnects on its own |
+| Reboot           | Reboots the box                                                                          |
+| Disable / Enable | Takes the box out of, or back into, Rotom's selection pool                               |
+
+All five actions travel **Rotom's own connection**, never the agent's, and that is the
+point of them: a box whose Magnemite agent has died can still be restarted or
+rebooted this way if Rotom is still able to communicate with it.
+
+## Matching
 
 Devices are matched by Rotom's `id`: the handle the box registered under,
 against the device name, then the serial. `origin` is not a name: the API gives
@@ -61,12 +98,19 @@ working normally, it simply has no Scanner column and no Rotom rule.
 
 ## Freshness
 
-**Settings → Tuning → Ask Rotom every** (60s) is one request for the whole
+**Settings → Tuning → Ask Rotom every** (10s) is one request for the whole
 fleet, and the resolution of everything Rotom-shaped: the column and the
 `ROTOM_DISCONNECTED` signal are only ever as fresh as the last sync. **Rotom
 stale after** sits directly below it and must be at least two sync intervals,
 or a rule alerts on the sync's own lag; the form refuses the combination rather
 than letting a fleet discover it through the alerts.
+
+**How much of it is kept is a different number.** History rides **Metric
+history → Scanner (Rotom) → Sample every** (60s), not this: the sync is fast so
+the column and the rules are current, and keeping six rows a minute per box to
+draw a chart that buckets them back down again would be six times the table for
+the same picture. That field is floored at this one — sampling faster than
+Rotom is asked keeps every sync and no more.
 
 Rotom has no single "healthy" field, so the rule uses the composite its API
 implies, `enabled && is_connected && can_be_used` + how long ago it last
@@ -74,6 +118,14 @@ saw the box. One state is deliberately not a fault: a box somebody **disabled
 in Rotom on purpose**. Alerting on that would mean alerting on a decision
 already made.
 
+A box has to be missing from Rotom's list **twice in a row** before it is called
+disconnected, and a Rotom that answers with no devices at all is treated as
+silence rather than as an empty fleet. One poll is one opinion: a Rotom
+mid-restart or a proxy that dropped a request would otherwise mark every box
+offline at once, and a rule two rungs up would start acting on it before the
+next sync could disagree.
+
 Built against the
 [RotomNG API](https://github.com/UnownHash/RotomNG/blob/main/docs/RotomNG-API.md):
-`GET /api/device` and `PUT /api/device/{id}/action/{action}`.
+`GET /api/device?include_workers=true` and
+`PUT /api/device/{id}/action/{action}`.
