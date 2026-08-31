@@ -682,7 +682,7 @@ export function ManualInstall({
             A single <code className="font-mono">.apk</code>, or an{" "}
             <code className="font-mono">.apkm</code> / <code className="font-mono">.xapk</code>{" "}
             bundle of splits. A lone APK is wrapped into a one-entry bundle on the server, which is
-            what the agent installs from. Nothing to do on your side.
+            what the agent installs from.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

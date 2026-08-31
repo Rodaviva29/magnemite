@@ -21,9 +21,10 @@ number surprises you:
 ## Settings → Tuning
 
 Fleet-wide, read by the hub on every scheduler tick. A save takes effect within
-seconds, the dashboard tells the hub to drop its cached copy (**with the exception of the
-heartbeat**, which rides the `welcome` and reaches each box on its next
-connection).
+seconds: the dashboard tells the hub to drop its cached copy. The **heartbeat**
+is the one that does not live on the server — it rides the `welcome`, so a save
+that changes it pushes a fresh `welcome` to every connected box, and a box that
+was offline adopts it when it comes back.
 
 | Setting                      | Default | Min  | What it does                                                                                       |
 | ---------------------------- | ------- | ---- | -------------------------------------------------------------------------------------------------- |

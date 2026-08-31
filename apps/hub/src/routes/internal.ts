@@ -3,7 +3,11 @@ import fsp from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma, serialize } from "@magnemite/db";
-import { getHubSettings, invalidateHubSettingsCache } from "../services/hubSettings.js";
+import {
+  getHubSettings,
+  invalidateHubSettingsCache,
+  peekHeartbeatSeconds,
+} from "../services/hubSettings.js";
 import { env } from "../env.js";
 import { log } from "../log.js";
 import { connectionCount, onlineDeviceIds, sendTo } from "../registry.js";
@@ -181,8 +185,22 @@ export async function internalRoutes(app: FastifyInstance) {
    * which it says out loud instead of leaving the hub quietly on old values.
    */
   app.post("/internal/settings", async () => {
+    // Read before the drop: this is the only chance to see the old heartbeat,
+    // and nothing else can say whether the save changed it.
+    const before = peekHeartbeatSeconds();
     invalidateHubSettingsCache();
-    return { ok: true };
+
+    // Every other knob here is the server's own and applies on the next read.
+    // The heartbeat is not: it lives in a ticker on each box, set from the
+    // `welcome`. Without this push the fleet keeps beating at the old rate
+    // until each box happens to reconnect, while the offline sweep moves to
+    // the new timeout at once — lower both together and a healthy fleet is
+    // marked offline for as long as that gap lasts. A cold cache means nothing
+    // has read the settings, which means no box has connected, so there is
+    // nobody to push to.
+    const after = (await getHubSettings()).heartbeatSeconds;
+    const pushed = before !== null && before !== after ? await broadcastWelcome() : 0;
+    return { ok: true, pushed };
   });
 
   // --- rollouts ------------------------------------------------------------

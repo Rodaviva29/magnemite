@@ -259,16 +259,14 @@ export default async function DeviceRotomPage({
             <Link href="/settings#tuning" className="underline hover:text-foreground">
               Settings → Tuning
             </Link>
-            , and the bands beside the flags are the last hour of it. The workers are read live from
-            Rotom and are stored nowhere.
+            , and the bands beside the flags are the last hour of it.
           </p>
 
           <section className="flex flex-col gap-4 border-t pt-6">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">History</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                The same window and the same controls as the box&apos;s load history — one reading
-                per Rotom sync, rather than per heartbeat.
+                The same window and the same controls as the box&apos;s load history.
               </p>
             </div>
             <RotomMetrics view={metrics} />

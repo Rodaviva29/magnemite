@@ -200,7 +200,7 @@ export async function loadRotomMetrics(
       id: "rotom-availability",
       title: "Availability",
       description:
-        "Share of each interval Rotom answered yes to each of its four flags. Lines sitting on top of each other is them agreeing; a dip in one is the interesting case.",
+        "Share of each interval Rotom answered yes to each of its four flags.",
       unit: "percent",
       // The four are shares of an interval, so they cannot exceed 100 and a
       // free axis would only ever make a flat 100% look like noise.
@@ -244,7 +244,7 @@ export async function loadRotomMetrics(
       id: "rotom-requests",
       title: "Request rate",
       description:
-        "Requests per second across the box's workers, as Rotom counts them over its own five-minute window. Empty where Rotom does not measure rates.",
+        "Requests per second across the box's workers, as Rotom counts them over its own five-minute window.",
       unit: "rate",
       max: null,
       series: [
@@ -261,7 +261,7 @@ export async function loadRotomMetrics(
       id: "rotom-latency",
       title: "Request duration",
       description:
-        "What Rotom's requests through this box averaged. Empty where there were no requests to average, which is not the same as fast.",
+        "What Rotom's requests through this box averaged. Empty where there were no requests to average.",
       unit: "ms",
       max: null,
       series: [

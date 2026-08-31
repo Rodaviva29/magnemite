@@ -42,24 +42,20 @@ export function HubSettingsForm({
           Hub settings
         </CardTitle>
         <CardDescription>
-          Fleet-wide operational knobs. Changes take effect within a few seconds, no restart needed,
-          except the heartbeat, which each box adopts on its next connection.
+          Fleet-wide operational knobs. Changes take effect within a few seconds, no restart needed.
         </CardDescription>
       </CardHeader>
 
       <CardContent>
         <form action={formAction} className="flex flex-col gap-6">
-          <SettingGroup
-            title="The beat"
-            hint="Everything else timed in seconds is measured against the heartbeat, so it is set first. The form refuses a combination where one dropped beat marks a box offline."
-          >
+          <SettingGroup title="The beat" hint="">
             <NumberField
               name="heartbeatSeconds"
               label="Heartbeat"
               value={settings.heartbeatSeconds}
               min={5}
               disabled={disabled}
-              hint="How often each box reports in. Unlike everything else here it lives on the boxes: one adopts it on its next connection, and an agent too old to read it keeps beating at 20s."
+              hint="How often each box reports in."
             />
             <NumberField
               name="deviceOfflineTimeoutSeconds"

@@ -149,9 +149,9 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
     deviceId,
     name: device.name,
     approved: device.approved,
-    // Set from Settings → Tuning. A box adopts it here, on connect, so a change
-    // reaches the fleet as boxes reconnect rather than in seconds like the
-    // settings that never leave the server.
+    // Set from Settings → Tuning. A box adopts it here, on connect, and again
+    // from the `welcome` the hub pushes when the value is saved — this is the
+    // path for a box that was offline at the time.
     heartbeatSeconds: (await getHubSettings()).heartbeatSeconds,
     trackedPackages: await trackedPackages(),
     // What to watch, which depends on the box's group. Null for a fleet with

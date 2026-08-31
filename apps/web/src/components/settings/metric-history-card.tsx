@@ -48,8 +48,7 @@ export function MetricHistoryCard({
           Metric history
         </CardTitle>
         <CardDescription>
-          What the charts are drawn from. Both sources are asked far more often than they are
-          recorded — the rest is dropped, because no chart is read at that resolution.
+          What the charts are drawn from, sample timing and retention.
         </CardDescription>
       </CardHeader>
 
@@ -62,7 +61,7 @@ export function MetricHistoryCard({
               value={settings.metricsSampleSeconds}
               min={settings.heartbeatSeconds}
               disabled={disabled}
-              hint={`A box's CPU, memory, storage, temperature and per-app usage. Boxes report every ${settings.heartbeatSeconds}s, so that is the floor — below it there is nothing extra to store between beats.`}
+              hint={`A box's CPU, memory, storage, temperature and per-app usage. Devices report every ${settings.heartbeatSeconds}s, so that is the floor.`}
             />
             <NumberField
               name="metricsRetentionDays"
@@ -71,18 +70,18 @@ export function MetricHistoryCard({
               min={0}
               unit="days"
               disabled={disabled}
-              hint="0 turns device recording off and drops what is already stored on the next prune."
+              hint="0 turns device recording off and drops what is already stored."
             />
           </SettingGroup>
 
-          <SettingGroup title="Scanner (Rotom)">
+          <SettingGroup title="Rotom metrics">
             <NumberField
               name="rotomSampleSeconds"
               label="Sample every"
               value={settings.rotomSampleSeconds}
               min={settings.rotomSyncSeconds}
               disabled={disabled}
-              hint={`Workers, request rate and the four Rotom flags, behind a box's scanner page. Rotom is asked every ${settings.rotomSyncSeconds}s, so that is the floor. Asking Rotom faster does not keep more history — this is the number that decides that.`}
+              hint={`Workers, request rate and the four Rotom flags, behind a box's scanner page. Rotom is asked every ${settings.rotomSyncSeconds}s, so that is the floor.`}
             />
             <NumberField
               name="rotomRetentionDays"
@@ -91,7 +90,7 @@ export function MetricHistoryCard({
               min={0}
               unit="days"
               disabled={disabled}
-              hint="0 turns scanner recording off. The Scanner column and the monitoring rules are unaffected — they read the live state, not the history."
+              hint="0 turns scanner recording off. The Scanner column and the monitoring rules are unaffected, they read the live state, not the history."
             />
           </SettingGroup>
 

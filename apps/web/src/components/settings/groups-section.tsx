@@ -136,9 +136,9 @@ export function GroupsSection({ groups, disabled }: { groups: GroupRow[]; disabl
           Device groups
         </CardTitle>
         <CardDescription>
-          A group is a site: the hooks that run around an install, how many of its boxes may
-          download at once, and the MITM they run — which is also where that MITM&apos;s config file
-          lives, because two sites on two Rotom instances need two of them.
+          A group is a site: the hooks that run around an install, how many of its devices may
+          download at once, and the MITM they run, which is also where that MITM&apos;s config file
+          lives.
         </CardDescription>
       </CardHeader>
 

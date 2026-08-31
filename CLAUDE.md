@@ -113,8 +113,11 @@ one right answer, so there is nothing to configure.
 The heartbeat is **not** the only setting that lives on the boxes any more. The
 monitor spec — what to probe — rides the same `welcome`, so it too reaches a box
 on its **next connection**. The hub pushes a fresh `welcome` to everything
-connected when a rule is saved, which is what makes it feel immediate; a box
-that is offline picks it up when it comes back.
+connected when a rule is saved — and when a save changes the heartbeat, which
+is the one Tuning knob that needs it, because the offline sweep moves to the
+new timeout at once and a fleet still on the old beat would be marked offline.
+That push is what makes both feel immediate; a box that is offline picks the
+change up when it comes back.
 
 Settings are two groups in the one `Setting` table: the hub knobs are
 unprefixed, monitoring is under `monitor.`. `getHubSettings` used to keep a row

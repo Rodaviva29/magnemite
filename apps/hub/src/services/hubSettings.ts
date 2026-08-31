@@ -60,3 +60,15 @@ export function invalidateHubSettingsCache(): void {
   monitorCache = null;
   log.info("hub settings cache dropped");
 }
+
+/**
+ * The heartbeat interval the hub is holding right now, with no database read —
+ * `null` when nothing has read the settings yet.
+ *
+ * One caller: `/internal/settings`, which has to know whether a save changed
+ * the heartbeat *before* it drops the copy. That is the only setting here the
+ * boxes hold rather than the server, so it is the only one that needs pushing.
+ */
+export function peekHeartbeatSeconds(): number | null {
+  return cache?.heartbeatSeconds ?? null;
+}

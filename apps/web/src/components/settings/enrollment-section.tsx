@@ -113,9 +113,8 @@ make module SERVER=${publicUrl} TOKEN=${token}
           </pre>
           <p className="text-xs text-muted-foreground">
             Either one writes that same config.json into the zip, so a flashed box enrols on its own
-            with no further typing. Server and token go together — both refuse one without the
-            other. Then flash the batch over adb with{" "}
-            <code className="font-mono">scripts/enroll.sh</code>.
+            with no further typing. Server and token go together: both refuse one without the
+            other. Then flash the batch.
           </p>
         </div>
 
