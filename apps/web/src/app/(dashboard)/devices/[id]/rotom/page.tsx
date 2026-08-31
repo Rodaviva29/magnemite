@@ -202,7 +202,11 @@ export default async function DeviceRotomPage({
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {/* A quarter and three quarters, not a third and two thirds: the card
+              on the left is a fixed list of short fields and stops needing
+              width, while the table has nine columns and two of them hold ids
+              that wrap. */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
             <Card className="xl:col-span-1">
               <CardHeader>
                 <CardTitle className="text-sm">Rotom overview</CardTitle>
@@ -246,7 +250,7 @@ export default async function DeviceRotomPage({
               workers={live.workers}
               readAt={live.readAt}
               error={live.error ?? null}
-              className="xl:col-span-2"
+              className="xl:col-span-3"
             />
           </div>
 

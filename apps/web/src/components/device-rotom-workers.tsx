@@ -134,7 +134,9 @@ export function DeviceRotomWorkers({
                 <TableRow>
                   <TableSortHead {...headProps("worker")}>Worker</TableSortHead>
                   <TableSortHead {...headProps("version")}>Version</TableSortHead>
-                  <TableSortHead {...headProps("inUse")}>In use</TableSortHead>
+                  <TableSortHead {...headProps("inUse")} align="center">
+                    In use
+                  </TableSortHead>
                   <TableSortHead {...headProps("rate1m")} align="right">
                     req/s 1m
                   </TableSortHead>
@@ -167,14 +169,21 @@ export function DeviceRotomWorkers({
                         <TableCell>
                           {/* The same tick and cross the flags on the card beside
                               this use, so one glance down the column counts the
-                              allocated workers. The word stays for a screen
-                              reader, which cannot see either mark. */}
-                          {worker.is_in_use ? (
-                            <CircleCheck className="h-4 w-4 text-success" aria-hidden="true" />
-                          ) : (
-                            <CircleX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                          )}
-                          <span className="sr-only">{worker.is_in_use ? "yes" : "no"}</span>
+                              allocated workers. Centred under a centred header,
+                              since the mark is one glyph and has no edge to line
+                              up against. The word stays for a screen reader,
+                              which cannot see either mark. */}
+                          <span className="flex justify-center">
+                            {worker.is_in_use ? (
+                              <CircleCheck className="h-4 w-4 text-success" aria-hidden="true" />
+                            ) : (
+                              <CircleX
+                                className="h-4 w-4 text-muted-foreground"
+                                aria-hidden="true"
+                              />
+                            )}
+                            <span className="sr-only">{worker.is_in_use ? "yes" : "no"}</span>
+                          </span>
                         </TableCell>
                         {/* tabular-nums here and not on the tiles: these are
                             columns that have to line up. */}

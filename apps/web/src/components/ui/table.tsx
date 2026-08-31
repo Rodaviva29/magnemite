@@ -105,7 +105,7 @@ function TableSortHead({
   active: boolean;
   direction: SortDirection;
   onSort: () => void;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   className?: string;
 }) {
   const Icon = !active ? ChevronsUpDown : direction === "asc" ? ArrowUp : ArrowDown;
@@ -121,16 +121,47 @@ function TableSortHead({
         className={cn(
           "group flex h-9 w-full items-center gap-1.5 px-3 transition-colors hover:text-foreground",
           align === "right" && "justify-end",
+          align === "center" && "relative justify-center",
           active && "text-foreground",
         )}
       >
-        {children}
-        <Icon
-          className={cn(
-            "h-3 w-3 shrink-0 transition-opacity",
-            active ? "opacity-100" : "opacity-0 group-hover:opacity-60",
-          )}
-        />
+        {/* The arrow reserves its width even while invisible, so that the header
+            does not jump when its column becomes the sorted one. That reservation
+            is what pushed every aligned label off its own column, so it moves to
+            wherever nothing is being aligned against: before the label on a
+            right-aligned column, and out of the flow entirely on a centred one,
+            where either side would be wrong. */}
+        {align === "center" ? (
+          <>
+            {children}
+            <Icon
+              className={cn(
+                "absolute right-3 h-3 w-3 shrink-0 transition-opacity",
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-60",
+              )}
+            />
+          </>
+        ) : align === "right" ? (
+          <>
+            <Icon
+              className={cn(
+                "h-3 w-3 shrink-0 transition-opacity",
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-60",
+              )}
+            />
+            {children}
+          </>
+        ) : (
+          <>
+            {children}
+            <Icon
+              className={cn(
+                "h-3 w-3 shrink-0 transition-opacity",
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-60",
+              )}
+            />
+          </>
+        )}
       </button>
     </TableHead>
   );
