@@ -14,13 +14,20 @@ import (
 
 // Log collection, driven by the hub.
 //
-// A bundle is collected, uploaded over HTTP and forgotten. A stream runs
-// logcat for as long as the hub keeps asking, and at most one runs at a time:
-// two dashboards watching the same box share the hub's stream, so the box
-// never runs a second logcat to print the same lines twice.
+// A bundle is collected, uploaded over HTTP and forgotten. A stream follows one
+// source for as long as the hub keeps asking. Two dashboards watching the same
+// source share the hub's stream, so the box never follows the same log twice;
+// two watching different sources get one follow each, because a box that ran
+// only one would answer the second by silently abandoning the first, and the
+// hub — which believes it has both — would have no way to notice.
 
 // How long the whole collect-and-upload is given before it is abandoned.
 const bundleTimeout = 5 * time.Minute
+
+// How many sources the box will follow at once. The hub asks for one per
+// source anyone is watching, which in practice is one or two; the cap is only
+// there so a mistake upstream cannot turn into a box running tails forever.
+const maxLogStreams = 4
 
 func (a *Agent) collectLogs(msg proto.CollectLogs) {
 	ctx, cancel := context.WithTimeout(context.Background(), bundleTimeout)
@@ -65,15 +72,29 @@ func (a *Agent) reportBundleFailure(bundleID, reason string) {
 
 func (a *Agent) startLogStream(msg proto.LogStreamStart) {
 	a.logMu.Lock()
-	defer a.logMu.Unlock()
 
 	// The hub re-sends the same stream id to extend a watch that is still
-	// open. Restarting the follow for that would lose whatever it was mid-line
-	// on, and re-print the tail the panel already has.
-	if a.logStreamID == msg.StreamID && a.logStop != nil {
+	// open, and again whenever a panel joins one — it cannot see what the box
+	// is actually following, so it says so rather than assuming. Restarting a
+	// follow that is already running would lose whatever it was mid-line on,
+	// and re-print the tail the panel already has.
+	if _, running := a.logStreams[msg.StreamID]; running {
+		a.logMu.Unlock()
 		return
 	}
-	a.stopLogStreamLocked()
+
+	// A box in someone's living room does not run an unbounded number of
+	// follows because something upstream lost count.
+	if len(a.logStreams) >= maxLogStreams {
+		a.logMu.Unlock()
+		log.Printf("logs: refusing stream %s: %d already running", msg.StreamID, maxLogStreams)
+		_ = a.send(proto.LogLines{
+			Type:     "log_lines",
+			StreamID: msg.StreamID,
+			Lines:    []string{fmt.Sprintf("— this box is already following %d logs", maxLogStreams)},
+		})
+		return
+	}
 
 	seconds := msg.DurationSeconds
 	if seconds <= 0 {
@@ -83,8 +104,12 @@ func (a *Agent) startLogStream(msg proto.LogStreamStart) {
 	// The deadline is the agent's own: a browser that vanished without saying
 	// so must not leave logcat running on someone's TV box.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
-	a.logStreamID = msg.StreamID
-	a.logStop = cancel
+	follow := &logFollow{cancel: cancel}
+	if a.logStreams == nil {
+		a.logStreams = make(map[string]*logFollow)
+	}
+	a.logStreams[msg.StreamID] = follow
+	a.logMu.Unlock()
 
 	streamID := msg.StreamID
 	path := msg.Path
@@ -109,10 +134,11 @@ func (a *Agent) startLogStream(msg proto.LogStreamStart) {
 			send([]string{fmt.Sprintf("— cannot follow %s: %v", source(path), err)}, 0)
 		}
 
+		// Only its own entry: a reconnect re-arms the same stream id, and the
+		// follow that is winding down must not remove the one that replaced it.
 		a.logMu.Lock()
-		if a.logStreamID == streamID {
-			a.logStreamID = ""
-			a.logStop = nil
+		if a.logStreams[streamID] == follow {
+			delete(a.logStreams, streamID)
 		}
 		a.logMu.Unlock()
 	}()
@@ -125,21 +151,25 @@ func source(path string) string {
 	return path
 }
 
+// stopLogStream stops one follow, or every one of them when streamID is empty
+// — which is what a lost socket means: nobody is reading any of this now.
 func (a *Agent) stopLogStream(streamID string) {
 	a.logMu.Lock()
 	defer a.logMu.Unlock()
-	// A stop for a stream that already ended is normal, not an error.
-	if streamID != "" && a.logStreamID != streamID {
+
+	if streamID == "" {
+		for id, follow := range a.logStreams {
+			follow.cancel()
+			delete(a.logStreams, id)
+		}
 		return
 	}
-	a.stopLogStreamLocked()
-}
 
-// stopLogStreamLocked requires logMu.
-func (a *Agent) stopLogStreamLocked() {
-	if a.logStop != nil {
-		a.logStop()
-		a.logStop = nil
+	// A stop for a stream that already ended is normal, not an error.
+	follow, running := a.logStreams[streamID]
+	if !running {
+		return
 	}
-	a.logStreamID = ""
+	follow.cancel()
+	delete(a.logStreams, streamID)
 }

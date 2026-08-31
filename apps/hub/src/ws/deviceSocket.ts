@@ -6,10 +6,10 @@ import { hashToken, prisma } from "@magnemite/db";
 import { getHubSettings } from "../services/hubSettings.js";
 import { bus } from "../bus.js";
 import { log } from "../log.js";
-import { getConnection, register, unregister } from "../registry.js";
+import { getConnection, isOnline, register, unregister } from "../registry.js";
 import { maybeUpdateAgent, recordAgentUpdateFailure } from "../services/agentRelease.js";
 import { resolveExec } from "../services/deviceCommands.js";
-import { dropStreams, failBundle, publishLogLines } from "../services/deviceLogs.js";
+import { dropStreams, failBundle, publishLogLines, rearmStreams } from "../services/deviceLogs.js";
 import { applyMetrics, markOffline, markOnline, trackedPackages } from "../services/devices.js";
 import { ACTIVE_STATES, applyProgress, completeJob, logJobEvent } from "../services/jobs.js";
 import { specForDevice } from "../services/monitor.js";
@@ -170,6 +170,9 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
   // Setup is done: anything that arrived meanwhile now runs, in order.
   releaseSetup();
 
+  // A panel left open while the box was away is still waiting for lines.
+  rearmStreams(deviceId);
+
   ws.on("pong", () => {
     const s = state.get(ws);
     if (s) s.alive = true;
@@ -177,8 +180,10 @@ async function onConnection(ws: WebSocket, req: IncomingMessage, deviceId: strin
 
   ws.on("close", (code, reason) => {
     unregister(deviceId, ws);
-    // Whatever logcat was running went with the socket.
-    dropStreams(deviceId);
+    // Whatever logcat was running went with the socket — unless this is a late
+    // close from a socket that has already been replaced, in which case the
+    // live one's follows are none of its business.
+    if (!isOnline(deviceId)) dropStreams(deviceId);
     void markOffline(deviceId);
     log.info({ deviceId, code, reason: reason.toString() }, "device disconnected");
   });

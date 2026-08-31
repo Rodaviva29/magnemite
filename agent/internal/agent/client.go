@@ -67,10 +67,19 @@ type Agent struct {
 	jobID   string
 	jobStop context.CancelFunc
 
-	// At most one live logcat, however many dashboards are watching.
-	logMu       sync.Mutex
-	logStreamID string
-	logStop     context.CancelFunc
+	// One follow per source, however many dashboards are watching it: the hub
+	// shares a stream between everyone on the same source, and asks for a
+	// second one only when someone is watching something else. Keyed by the
+	// hub's stream id, valued by the follow's cancel.
+	logMu      sync.Mutex
+	logStreams map[string]*logFollow
+}
+
+// logFollow is one running follow. Held by pointer so the goroutine that ends
+// can tell its own entry from a later one started under the same stream id —
+// which is what a reconnect does, re-arming the streams that are still watched.
+type logFollow struct {
+	cancel context.CancelFunc
 }
 
 func New(cfg *config.Config, system sys.System, version, configPath string) *Agent {
