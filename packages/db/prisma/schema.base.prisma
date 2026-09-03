@@ -942,16 +942,20 @@ model MonitorRule {
   windowStart String?
   windowEnd   String?
 
-  notifyLevel MonitorLevel @default(WARN)
+  notifyLevel    MonitorLevel @default(WARN)
   /// Whether this rule announces itself at all. A signal that fires often
   /// enough to be noise is still worth acting on quietly.
-  notify      Boolean      @default(true)
+  notify         Boolean      @default(true)
+  /// Whether the all-clear is announced too, once a fault this rule alerted
+  /// about has cleared. Off by default: it doubles the traffic a flapping box
+  /// makes, and only some faults are worth being told have ended.
+  notifyRecovery Boolean      @default(false)
 
-  position  Int           @default(0)
+  position  Int            @default(0)
   steps     MonitorStep[]
   states    MonitorState[]
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   @@index([enabled, signal])
   @@index([groupId])
@@ -1018,6 +1022,11 @@ model MonitorEvent {
   detail   String?        @db.Text
   /// Whether this went to Discord, so a silent hour is explicable.
   notified Boolean        @default(false)
+  /// The all-clear rather than a fault. Kept as a column rather than read off
+  /// the level or the message because the alert dedupe window has to ignore
+  /// these in both directions: a recovery must not be swallowed by the fault
+  /// it ends, and must not swallow the next fault either.
+  recovery Boolean        @default(false)
 
   at DateTime @default(now())
 

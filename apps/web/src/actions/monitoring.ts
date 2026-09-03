@@ -272,6 +272,7 @@ type ParsedRule = {
   windowEnd: string | null;
   notifyLevel: MonitorLevel;
   notify: boolean;
+  notifyRecovery: boolean;
   enabled: boolean;
   steps: { atFailure: number; action: MonitorAction; command: string | null }[];
 };
@@ -328,6 +329,10 @@ function parseRule(formData: FormData): ParsedRule | string {
     windowEnd,
     notifyLevel: notifyLevel as MonitorLevel,
     notify: formData.get("notify") === "on",
+    // Only meaningful for a rule that announces at all, and the dialog hides
+    // the switch when it does not — a hidden checkbox posts nothing, so this
+    // reads false on its own rather than needing a second check.
+    notifyRecovery: formData.get("notifyRecovery") === "on",
     enabled: formData.get("enabled") === "on",
     steps,
   };

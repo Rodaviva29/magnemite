@@ -203,6 +203,15 @@ Individual rules can be silenced without being switched off. "Pogo not in
 focus" ships that way: a box briefly on the launcher is common enough that
 announcing every one teaches people to ignore the channel.
 
+A rule that announces can also announce the **all-clear** — the second switch
+next to it in the rule dialog, off by default. On, the fault is followed by one
+more message when the signal goes good again, which is how "Box unreachable"
+becomes "Box unreachable recovered" in the channel rather than only in the
+feed. It goes out regardless of the minimum severity and ignores the repeat
+window: a recovery is INFO by nature, and the window has just been filled by
+the fault it ends. Only an episode that actually reached the rule's threshold
+gets one — an all-clear for a fault nobody was told about is noise.
+
 Press **Send test alert** before trusting any of it. It ignores the severity
 filter and the repeat window on purpose. A webhook that stops working never
 stops the remediation — the box is still restarted, and the Monitoring page

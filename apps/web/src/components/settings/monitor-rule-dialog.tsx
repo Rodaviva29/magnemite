@@ -51,6 +51,7 @@ export type MonitorRuleRow = {
   windowEnd: string | null;
   notifyLevel: string;
   notify: boolean;
+  notifyRecovery: boolean;
   probe: {
     kind: string;
     target: string;
@@ -129,6 +130,9 @@ function RuleForm({
   );
   const [signal, setSignal] = useState(rule?.signal ?? "SERVICE_DOWN");
   const [probeKind, setProbeKind] = useState(rule?.probe?.kind ?? "none");
+  // Lifted out of its own Toggle only because the all-clear switch below it
+  // has nothing to mean while this is off.
+  const [notify, setNotify] = useState(rule?.notify ?? true);
   const [steps, setSteps] = useState<MonitorStepRow[]>(
     rule?.steps.length
       ? [...rule.steps].sort((a, b) => a.atFailure - b.atFailure)
@@ -337,7 +341,22 @@ function RuleForm({
               label="Announce it"
               hint="Off, the rule still acts, says nothing in Discord."
               defaultChecked={rule?.notify ?? true}
+              onChange={setNotify}
             />
+
+            {/* Nothing to say an all-clear about on a rule that is silent
+                anyway, and a switch that does nothing is worse than an absent
+                one. Unmounted rather than disabled, so the form posts nothing
+                for it and the value follows what is on screen. */}
+            {notify ? (
+              <Toggle
+                id={id("notifyRecovery")}
+                name="notifyRecovery"
+                label="Announce the all-clear"
+                hint="A second message when the fault clears. Off, only the fault is announced."
+                defaultChecked={rule?.notifyRecovery ?? false}
+              />
+            ) : null}
           </div>
         </Section>
       </div>
@@ -713,12 +732,14 @@ function Toggle({
   label,
   hint,
   defaultChecked,
+  onChange,
 }: {
   id: string;
   name: string;
   label: string;
   hint: string;
   defaultChecked: boolean;
+  onChange?: (on: boolean) => void;
 }) {
   // Controlled only so the box can say which way it is set. Radix still writes
   // the hidden `name` input either way, so the form reads the same.
@@ -734,7 +755,15 @@ function Toggle({
       <Label htmlFor={id}>{label}</Label>
       <div className="flex h-9 items-center justify-between gap-3 rounded-lg border border-input bg-card px-3">
         <span className="text-sm text-muted-foreground">{on ? "On" : "Off"}</span>
-        <Switch id={id} name={name} checked={on} onCheckedChange={setOn} />
+        <Switch
+          id={id}
+          name={name}
+          checked={on}
+          onCheckedChange={(next) => {
+            setOn(next);
+            onChange?.(next);
+          }}
+        />
       </div>
       <p className="text-xs text-muted-foreground">{hint}</p>
     </div>

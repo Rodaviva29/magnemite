@@ -39,6 +39,14 @@ export type AlertInput = {
   action: string | null;
   actionOk: boolean | null;
   detail: string | null;
+  /**
+   * The all-clear rather than a fault, which changes two things: it goes out
+   * regardless of the minimum level — a recovery is INFO by nature, and an
+   * operator who asked for one on the rule did not ask for it to be weighed
+   * against a floor of WARN — and it ignores the dedupe window, which was
+   * very likely just filled by the fault this ends.
+   */
+  recovery: boolean;
 };
 
 function parseLevel(value: string): MonitorLevel {
@@ -61,7 +69,9 @@ async function announcedRecently(
 
   const since = new Date(Date.now() - minutes * 60_000);
   const previous = await prisma.monitorEvent.findFirst({
-    where: { deviceId, signal, notified: true, at: { gte: since } },
+    // Recoveries are excluded on purpose: an all-clear is not what a fault is
+    // being deduped against, and it must not silence the next fault either.
+    where: { deviceId, signal, notified: true, recovery: false, at: { gte: since } },
     select: { id: true },
   });
   return previous !== null;
@@ -78,11 +88,14 @@ async function announcedRecently(
 export async function notify(alert: AlertInput): Promise<boolean> {
   const settings = await getMonitorSettings();
   if (!settings.discordWebhookUrl) return false;
-  if (LEVEL_RANK[alert.level] < LEVEL_RANK[parseLevel(settings.discordMinLevel)]) return false;
 
-  if (await announcedRecently(alert.deviceId, alert.signal, settings.alertDedupeMinutes)) {
-    log.debug({ device: alert.deviceName, signal: alert.signal }, "alert deduped");
-    return false;
+  if (!alert.recovery) {
+    if (LEVEL_RANK[alert.level] < LEVEL_RANK[parseLevel(settings.discordMinLevel)]) return false;
+
+    if (await announcedRecently(alert.deviceId, alert.signal, settings.alertDedupeMinutes)) {
+      log.debug({ device: alert.deviceName, signal: alert.signal }, "alert deduped");
+      return false;
+    }
   }
 
   return post(settings.discordWebhookUrl, buildPayload(alert, settings.discordMentionRoleId));
@@ -200,6 +213,7 @@ export async function sendTestAlert(): Promise<{ ok: boolean; error: string | nu
         action: null,
         actionOk: null,
         detail: "This is what a real alert will look like.",
+        recovery: false,
       },
       "",
     ),

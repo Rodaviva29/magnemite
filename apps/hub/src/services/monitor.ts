@@ -543,13 +543,24 @@ async function recover(
     where: { deviceId_ruleId: { deviceId: device.id, ruleId: rule.id } },
     data: { failures: 0, firstFailedAt: null, lastStepFired: null },
   });
-  await record(device, rule, {
-    level: "INFO",
-    message: `${rule.name} recovered`,
-    action: null,
-    actionOk: null,
-    detail: null,
-  });
+  // The row is always written — the recovery is half of what the activity
+  // feed is for. Whether it also goes to Discord is opted into per rule, and
+  // then only for an episode that reached the threshold: an all-clear for a
+  // fault nobody was told about is noise on its own.
+  const announce = rule.notify && rule.notifyRecovery && state.failures >= rule.threshold;
+  await record(
+    device,
+    rule,
+    {
+      level: "INFO",
+      message: `${rule.name} recovered`,
+      action: null,
+      actionOk: null,
+      detail: null,
+      recovery: true,
+    },
+    announce,
+  );
 }
 
 async function escalate(
@@ -725,6 +736,8 @@ type EventInput = {
   action: MonitorAction | null;
   actionOk: boolean | null;
   detail: string | null;
+  /** The all-clear rather than a fault. Only `recover` writes one. */
+  recovery?: boolean;
 };
 
 /**
@@ -776,18 +789,32 @@ async function fire(
   await record(device, rule, event);
 }
 
-async function record(device: DeviceRow, rule: RuleRow, event: EventInput): Promise<void> {
-  const notified = await notify({
-    deviceId: device.id,
-    deviceName: device.name,
-    groupName: device.group?.name ?? null,
-    signal: rule.signal,
-    level: event.level,
-    message: event.message,
-    action: event.action,
-    actionOk: event.actionOk,
-    detail: event.detail,
-  }).catch(() => false);
+/**
+ * `announce` is what decides whether Discord hears about this at all. It
+ * defaults to the rule's own switch, which is the answer for every fault;
+ * `recover` passes its own because the all-clear is a separate opt-in.
+ */
+async function record(
+  device: DeviceRow,
+  rule: RuleRow,
+  event: EventInput,
+  announce = rule.notify,
+): Promise<void> {
+  const recovery = event.recovery ?? false;
+  const notified = announce
+    ? await notify({
+        deviceId: device.id,
+        deviceName: device.name,
+        groupName: device.group?.name ?? null,
+        signal: rule.signal,
+        level: event.level,
+        message: event.message,
+        action: event.action,
+        actionOk: event.actionOk,
+        detail: event.detail,
+        recovery,
+      }).catch(() => false)
+    : false;
 
   await prisma.monitorEvent.create({
     data: {
@@ -801,7 +828,8 @@ async function record(device: DeviceRow, rule: RuleRow, event: EventInput): Prom
       detail: event.detail,
       // Only true when the message actually landed, so a quiet hour is
       // explicable from the table rather than a mystery.
-      notified: rule.notify && notified,
+      notified,
+      recovery,
     },
   });
 
